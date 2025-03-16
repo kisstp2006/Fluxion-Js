@@ -22,8 +22,8 @@ Key benefits:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/[yourusername]/fulxionjs.git
-   cd fulxionjs
+   git clone https://github.com/kisstp2006/fulxionjs.git
+   cd FluxionJs
    ```
 
 2. Install dependencies:
