@@ -14,7 +14,7 @@ Key benefits:
 - **Simplicity**: Minimalistic architecture allows developers to focus on core functionalities without unnecessary components.
 - **Platform Independence**: Built with JavaScript, FulxionJs can run on any modern web browser without the need for additional plugins or setup.
 - **Integrated Audio System**: Prebuilt audio library supports browser-based sound effects and background music.
-- **Mathematical Library**: Includes matrices, 2D/3D vectors, axis-aligned bounding boxes, and trigonometric calculations for advanced gameplay mechanics.
+- **Mathematical Library**: Includes matrices, 2D/3D vectors, axis-aligned bounding boxes, and trigonometric calculations for advanced gameplay mechanics. (WIP)
 
 ---
 
