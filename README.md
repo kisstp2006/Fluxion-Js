@@ -125,6 +125,29 @@ window.onload = async () => {
 - **Lightweight**: Minimal code structure ensures fast performance and quick development cycles.
 
 ---
+# License
+
+## MIT License
+
+By using [Your Project Name], you agree to the following terms:
+
+1. **MIT License**: You are free to use, modify, and distribute this software under the MIT License. See `LICENSE-MIT` for details.
+
+2. **Modification Requirements**: If you make any changes to the code, please indicate your contribution by creating a pull request with clear instructions on how we can integrate your changes into the main repository.
+
+3. **No Warranty**: The project is provided "as-is" without any warranty of any kind, express or implied. Use at your own risk.
+
+## Apache License
+
+By using [Your Project Name], you agree to the following terms:
+
+1. **Apache License 2.0**: You are free to use, modify, and distribute this software under the terms of the Apache License 2.0. See `LICENSE-APACHE` for details.
+
+2. **Notice Requirements**: If you redistribute the project, you must include the following notices in your distribution:
+
+```
+This product includes software developed by TIGames/kisstp2006. All rights reserved.
+```
 
 ## Contributing
 
