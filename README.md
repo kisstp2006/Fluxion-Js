@@ -146,7 +146,6 @@ We review and merge contributions after discussing them in the issue tracker.
 
 For questions, feedback, or suggestions, feel free to reach out via:
 - https://github.com/kisstp2006/Fluxion-Js/issues
-- 
 ## Resources
 
 - **Documentation**: Coming soon!
