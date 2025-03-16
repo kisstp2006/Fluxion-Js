@@ -17,7 +17,7 @@ export default class Input {
         window.addEventListener('mousedown', this.handleMouseDown.bind(this));
         window.addEventListener('mouseup', this.handleMouseUp.bind(this));
         window.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    } 
+    }
 
     getKey(key) {
         return this.keys.has(key);
@@ -40,16 +40,18 @@ export default class Input {
     }
 
     handleKeyDown(e) {
-        if (!this.keys.has(e.key)) {
-            this.keys.add(e.key);
-            this.keyDownListeners.forEach(listener => listener(e.key));
+        const key = e.key; // Store the exact key string
+        if (!this.keys.has(key)) {
+            this.keys.add(key);
+            this.keyDownListeners.forEach(listener => listener(key));
         }
     }
 
     handleKeyUp(e) {
-        if (this.keys.has(e.key)) {
-            this.keys.delete(e.key);
-            this.keyUpListeners.forEach(listener => listener(e.key));
+        const key = e.key; // Store the exact key string
+        if (this.keys.has(key)) {
+            this.keys.delete(key);
+            this.keyUpListeners.forEach(listener => listener(key));
         }
     }
 
