@@ -129,7 +129,7 @@ window.onload = async () => {
 
 ## MIT License
 
-By using [Your Project Name], you agree to the following terms:
+By using Fluxion-Js, you agree to the following terms:
 
 1. **MIT License**: You are free to use, modify, and distribute this software under the MIT License. See `LICENSE-MIT` for details.
 
@@ -139,7 +139,7 @@ By using [Your Project Name], you agree to the following terms:
 
 ## Apache License
 
-By using [Your Project Name], you agree to the following terms:
+By using Fluxion-Js, you agree to the following terms:
 
 1. **Apache License 2.0**: You are free to use, modify, and distribute this software under the terms of the Apache License 2.0. See `LICENSE-APACHE` for details.
 
