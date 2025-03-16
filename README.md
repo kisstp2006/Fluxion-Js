@@ -142,7 +142,11 @@ Contributions are welcome! Here's how you can help:
 We review and merge contributions after discussing them in the issue tracker.
 
 ---
+## Contact Information
 
+For questions, feedback, or suggestions, feel free to reach out via:
+- [GitHub Issues](https://github.com/kisstp2006/fulxionjs/issues)
+- 
 ## Resources
 
 - **Documentation**: Coming soon!
