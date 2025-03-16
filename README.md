@@ -145,7 +145,7 @@ We review and merge contributions after discussing them in the issue tracker.
 ## Contact Information
 
 For questions, feedback, or suggestions, feel free to reach out via:
-- [GitHub Issues](https://github.com/kisstp2006/fulxionjs/issues)
+- https://github.com/kisstp2006/Fluxion-Js/issues
 - 
 ## Resources
 
