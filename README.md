@@ -1,4 +1,4 @@
-![Fluxion_icon](https://github.com/user-attachments/assets/ec7901eb-eed6-48ed-989d-1adc01f75382)  # FulxionJs
+![Fluxion_icon](https://github.com/user-attachments/assets/ec7901eb-eed6-48ed-989d-1adc01f75382 |width=10)  # FulxionJs
 
 
 A web-based game framework focusing on simplicity and performance while maintaining stability.
