@@ -1,5 +1,6 @@
-![Fluxion_icon](https://github.com/user-attachments/assets/ec7901eb-eed6-48ed-989d-1adc01f75382 )  # FulxionJs
 
+
+![Fluxion_bar](https://github.com/user-attachments/assets/32c05373-d596-4e6e-ab70-ce3072a74424)
 
 A web-based game framework focusing on simplicity and performance while maintaining stability.
 
