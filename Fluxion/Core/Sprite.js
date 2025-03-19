@@ -120,3 +120,4 @@ export default class Sprite {
         this.animation = { name, frames, loop };
     }
 }
+//Todo: UPDATE 1
