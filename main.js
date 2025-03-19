@@ -20,7 +20,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         enableRemoteModule: false,
-        devTools: true, // IMPORTANT: Disable dev tools in production
+        devTools: false, // IMPORTANT: Disable dev tools in production
         spellcheck: false,
         accessibleTitle: false,
         preload: path.join(__dirname, "preload.js"),
