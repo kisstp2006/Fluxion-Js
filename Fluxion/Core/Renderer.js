@@ -12,15 +12,30 @@ export default class Renderer {
     this.resizeCanvas();
     window.addEventListener("resize", () => this.resizeCanvas());
 
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    alert('WebGL context lost! Please wait...');
+    });
+
+  this.canvas.addEventListener('webglcontextrestored', () => {
+    this.initGL();
+    alert('WebGL context restored!');
+  });
+
     this.initGL();
   } 
 
   resizeCanvas() {
     const dpi = window.devicePixelRatio || 1;
-  
+
+    // Set the canvas pixel size
     this.canvas.width = window.innerWidth * dpi;
     this.canvas.height = window.innerHeight * dpi;
-  
+
+    // Set the canvas DOM size (CSS size)
+    this.canvas.style.width = window.innerWidth + 'px';
+    this.canvas.style.height = window.innerHeight + 'px';
+
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
   
@@ -75,6 +90,14 @@ export default class Renderer {
       }
   `);
   
+    if (!this.vertexShader || !this.fragmentShader) {
+    throw new Error("Shader compilation failed. Renderer initialization aborted.");
+  }
+
+  this.program = this.createProgram(this.vertexShader, this.fragmentShader);
+  if (!this.program) {
+    throw new Error("Program linking failed. Renderer initialization aborted.");
+  }
     
 
     this.program = this.createProgram(this.vertexShader, this.fragmentShader);
@@ -161,30 +184,14 @@ export default class Renderer {
     this.gl.uniform1f(this.cameraRotationLocation, camera.rotation);
   }
 
-  drawQuad(texture, x, y, width, height, color = [255, 255, 255, 255]) {
-    //console.log("drawQuad received color:", color);
-
-    // Ensure color is an array before calling .map()
+drawQuad(texture, x, y, width, height, color = [255, 255, 255, 255]) {
     if (!Array.isArray(color)) {
-        //console.warn("drawQuad received invalid color:", color, "Defaulting to white.");
         color = [255, 255, 255, 255];
-    }
-
-    const imageAspect = width / height;
-    const canvasAspect = this.canvas.width / this.canvas.height;
-
-    // If stretching is disabled, adjust the quad dimensions to preserve the aspect ratio
-    if (!this.stretchImage) {
-        if (canvasAspect > imageAspect) {
-            height = width / imageAspect;
-        } else {
-            width = height * imageAspect;
-        }
     }
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
 
-    // Define the quad vertices (position + texture coordinates)
+    // Világkoordinátákban dolgozunk!
     const quad = new Float32Array([
         x, y, 0, 1, // Top-left
         x + width, y, 1, 1, // Top-right
@@ -194,12 +201,10 @@ export default class Renderer {
 
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
 
-    // Normalize color values (255 -> 1)
     const normalizedColor = color.map(c => c / 255);
     this.gl.uniform4fv(this.colorLocation, normalizedColor);
 
     this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
 }
-
 
 }

@@ -10,7 +10,7 @@ const game = {
 
     init(renderer) {
         // Initialize the game
-        this.spriteList.push(new Sprite(renderer, FluxionLogo, -0.3, -0.5, 0.55, 1)); // Create a new Sprite instance and add it to the spriteList
+        this.spriteList.push(new Sprite(renderer, FluxionLogo, -0.3, -0.5, 1, 1)); // Create a new Sprite instance and add it to the spriteList
         // Parameters for Sprite: renderer, image paths, x, y, width, height
         console.log("Game started"); // Log a message to the console indicating the game has started
     },

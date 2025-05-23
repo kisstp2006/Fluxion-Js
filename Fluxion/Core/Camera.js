@@ -1,10 +1,20 @@
 export default class Camera {
-    constructor(x = 0, y = 0, zoom = 1, rotation = 0) {
+    constructor(x = 0, y = 0, zoom = 1, rotation = 0, width = 0, height = 0) {
         this.x = x;
         this.y = y;
         this.zoom = zoom;
         this.rotation = rotation;
-    } 
+        this.width = width;
+        this.height = height;
+    }
+    setSize(width, height) {
+        this.width = width;
+        this.height = height;
+    }
+
+    getSize() {
+        return { width: this.width, height: this.height };
+    }
 
     move(dx, dy) {
         this.x += dx;
@@ -33,6 +43,14 @@ export default class Camera {
     }
 
     getTransform() {
-        return { x: this.x, y: this.y, zoom: this.zoom, rotation: this.rotation };
+        return {
+            x: this.x,
+            y: this.y,
+            zoom: this.zoom,
+            rotation: this.rotation,
+            width: this.width,
+            height: this.height
+        };
     }
 }
+
