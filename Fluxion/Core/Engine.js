@@ -1,14 +1,17 @@
 import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
+import Window from "./Window.js";
 
 export default class Engine {
     constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
         // Initialize Renderer with aspect ratio settings and post-processing
         this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
         this.camera = new Camera();
+        this.window = new Window();
         
         this.game = game;
         this.game.camera = this.camera;
+        this.game.window = this.window;
         
         this.lastTime = 0;
 

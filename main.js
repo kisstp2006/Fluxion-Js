@@ -34,12 +34,43 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/Jolly3Chapter2Elevator/index.html");
+    mainWindow.loadFile("./Examples/AllNodesTest/index.html");
   });
 
+  // Window Management IPC Handlers
   ipcMain.on("set-title", (event, title) => {
-    const webContents = event.sender;
-    const win = BrowserWindow.fromWebContents(webContents);
-    win.setTitle(title);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.setTitle(title);
+  });
+
+  ipcMain.on("window-fullscreen", (event, flag) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.setFullScreen(flag);
+  });
+
+  ipcMain.on("window-minimize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.minimize();
+  });
+
+  ipcMain.on("window-maximize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+        if (win.isMaximized()) {
+            win.unmaximize();
+        } else {
+            win.maximize();
+        }
+    }
+  });
+
+  ipcMain.on("window-close", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.close();
+  });
+
+  ipcMain.on("window-resize", (event, width, height) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.setSize(width, height);
   });
 } 

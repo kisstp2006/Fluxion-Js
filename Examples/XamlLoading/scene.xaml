@@ -1,0 +1,27 @@
+<Scene name="Test Level">
+    <!-- Static Background Sprite -->
+    <Sprite imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+            x="-0.8"
+            y="-0.5"
+            width="0.5"
+            height="0.5"/>
+
+    <!-- Animated Sprite (Using the icon as a dummy sheet) -->
+    <!-- Assuming icon is roughly square, we split it into 2x2 grid -->
+    <!-- We'll just animate through them -->
+    <AnimatedSprite
+        imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+        x="0.2"
+            y="-0.5"
+        width="0.5"
+            height="0.5"
+        frameWidth="128"
+            frameHeight="128">
+
+        <Animation name="spin"
+                frames="0,1,2,3"
+                speed="0.2"
+                loop="true"
+                autoplay="true"/>
+    </AnimatedSprite>
+</Scene>

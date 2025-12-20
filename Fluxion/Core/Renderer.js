@@ -415,18 +415,18 @@ export default class Renderer {
     this.gl.uniform1f(this.aspectRatioLocation, this.currentAspectRatio);
   }
 
-  drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight) {
+  drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255]) {
     if (!this.isReady) return;
     
-    let color = [255, 255, 255, 255];
+    let finalColor = color;
     let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
 
     // Handle overloaded arguments
     // Case 1: drawQuad(tex, x, y, w, h, colorArray)
     if (Array.isArray(srcX)) {
-        color = srcX;
+        finalColor = srcX;
     } 
-    // Case 2: drawQuad(tex, x, y, w, h, srcX, srcY, srcW, srcH)
+    // Case 2: drawQuad(tex, x, y, w, h, srcX, srcY, srcW, srcH, [color])
     else if (typeof srcX === 'number') {
         const texW = texture.width || 1;
         const texH = texture.height || 1;
@@ -468,7 +468,7 @@ export default class Renderer {
 
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
 
-    const normalizedColor = color.map(c => c / 255);
+    const normalizedColor = finalColor.map(c => c / 255);
     this.gl.uniform4fv(this.colorLocation, normalizedColor);
 
     this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
