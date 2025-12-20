@@ -1,0 +1,38 @@
+<Scene name="Jolly3ElevatorScene">
+    <Camera name="MainCamera" x="3.55" y="0" zoom="1.1" />
+
+    <!-- Background Elements (Floors and Pipes) -->
+    <!-- Note: Order matters for rendering (painters algorithm). 
+         Original order: floor1, floor2, floor3, pipesBg, elevatorDoor, elevator, monitor, logo.
+    -->
+    
+    <Sprite name="Floor1" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor1.png" 
+            x="-0.888" y="-3" width="2.31" height="1.5" />
+            
+    <Sprite name="Floor2" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor2.png" 
+            x="-0.888" y="-6" width="2.31" height="1.5" />
+            
+    <Sprite name="Floor3" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor3.png" 
+            x="-0.888" y="-9" width="2.31" height="1.5" />
+            
+    <Sprite name="PipesBg" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/pipes1.png" 
+            x="-1.777" y="-2.6" width="4.44" height="2" />
+            
+    <!-- Foreground Elements -->
+    <Sprite name="ElevatorDoor" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/Door_0.png" 
+            x="-0.355" y="-0.95" width="1.617" height="1.9" />
+            
+    <Sprite name="Elevator" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/0.png" 
+            x="-1.777" y="-1" width="4.44" height="2" />
+            
+    <Sprite name="Monitor" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/monitor/Active 6_0-0_0.png" 
+            x="-0.96" y="0.22" width="0.888" height="0.75" />
+            
+    <Sprite name="FluxionLogo" imageSrc="../../Fluxion/Icon/Fluxion_bar.png" 
+            x="-1.6" y="-0.8" width="0.888" height="0.3" />
+
+    <!-- Audio -->
+    <Audio name="ElevatorSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" autoplay="true" />
+    <Audio name="ChiefSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/chief v2 final.mp3" loop="false" autoplay="true" />
+
+</Scene>

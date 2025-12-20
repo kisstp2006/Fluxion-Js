@@ -28,13 +28,13 @@ if (!gotTheLock) {
     });
 
     mainWindow.setMenuBarVisibility(false); // Hide the menu bar
-    mainWindow.setTitle("Fluxion"); // Title for the game window TODO: properly pass the setTitle function to the game framework
+    mainWindow.setTitle("Fluxion"); // Title for the game window
 
     mainWindow.on("closed", () => {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/AllNodesTest/index.html");
+    mainWindow.loadFile("./Examples/Jolly3Chapter2ElevatorXaml/index.html");
   });
 
   // Window Management IPC Handlers

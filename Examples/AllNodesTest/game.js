@@ -9,6 +9,12 @@ const game = {
 
     async init(renderer) {
         console.log("Loading AllNodesTest scene...");
+        
+        // Set the window title
+        if (this.window) {
+            this.window.setTitle("Fluxion - All Nodes Test");
+        }
+
         this.scene = await SceneLoader.load("./scene.xml", renderer);
         
         if (this.scene.camera) {
