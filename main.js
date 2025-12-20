@@ -27,7 +27,7 @@ if (!gotTheLock) {
       },
     });
 
-    mainWindow.setMenuBarVisibility(true);
+    mainWindow.setMenuBarVisibility(false); // Hide the menu bar
     mainWindow.setTitle("Fluxion"); // Title for the game window TODO: properly pass the setTitle function to the game framework
 
     mainWindow.on("closed", () => {

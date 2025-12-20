@@ -35,7 +35,15 @@ export default class Renderer {
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
     this.resizeCanvas();
-    window.addEventListener("resize", () => this.resizeCanvas());
+    
+    // Debounce resize events for better performance
+    this.resizeTimeout = null;
+    window.addEventListener("resize", () => {
+      if (this.resizeTimeout) {
+        cancelAnimationFrame(this.resizeTimeout);
+      }
+      this.resizeTimeout = requestAnimationFrame(() => this.resizeCanvas());
+    });
 
     this.canvas.addEventListener('webglcontextlost', (e) => {
     e.preventDefault();
@@ -61,27 +69,24 @@ export default class Renderer {
     if (this.maintainAspectRatio) {
       const windowAspectRatio = windowWidth / windowHeight;
       
-      let canvasWidth, canvasHeight;
       let viewportX = 0, viewportY = 0;
       let viewportWidth, viewportHeight;
 
       if (windowAspectRatio > this.targetAspectRatio) {
         // Window is wider than target - add black bars on sides
-        canvasHeight = windowHeight;
-        canvasWidth = canvasHeight * this.targetAspectRatio;
+        const canvasHeight = windowHeight;
+        const canvasWidth = canvasHeight * this.targetAspectRatio;
         
         viewportWidth = canvasWidth * dpi;
         viewportHeight = canvasHeight * dpi;
         viewportX = ((windowWidth - canvasWidth) / 2) * dpi;
-        viewportY = 0;
       } else {
         // Window is taller than target - add black bars on top/bottom
-        canvasWidth = windowWidth;
-        canvasHeight = canvasWidth / this.targetAspectRatio;
+        const canvasWidth = windowWidth;
+        const canvasHeight = canvasWidth / this.targetAspectRatio;
         
         viewportWidth = canvasWidth * dpi;
         viewportHeight = canvasHeight * dpi;
-        viewportX = 0;
         viewportY = ((windowHeight - canvasHeight) / 2) * dpi;
       }
 
@@ -95,12 +100,6 @@ export default class Renderer {
 
       // Set viewport to maintain aspect ratio with letterboxing
       this.gl.viewport(viewportX, viewportY, viewportWidth, viewportHeight);
-      
-      // Store viewport info for potential use
-      this.viewportX = viewportX;
-      this.viewportY = viewportY;
-      this.viewportWidth = viewportWidth;
-      this.viewportHeight = viewportHeight;
     } else {
       // Original stretching behavior
       this.canvas.width = windowWidth * dpi;
