@@ -31,6 +31,14 @@
     <Sprite name="FluxionLogo" imageSrc="../../Fluxion/Icon/Fluxion_bar.png" 
             x="-1.6" y="-0.8" width="0.888" height="0.3" />
 
+        <!-- Screen-edge scroll zones (invisible sprites) -->
+        <Sprite name="ScrollLeftZone" x="0" y="0" width="0.2" height="0.2">
+                <ClickableArea name="ScrollLeftHitbox" />
+        </Sprite>
+        <Sprite name="ScrollRightZone" x="0" y="0" width="0.2" height="0.2">
+                <ClickableArea name="ScrollRightHitbox" />
+        </Sprite>
+
     <!-- Audio -->
     <Audio name="ElevatorSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" autoplay="true" />
     <Audio name="ChiefSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/chief v2 final.mp3" loop="false" autoplay="true" />

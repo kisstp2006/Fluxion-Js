@@ -474,4 +474,45 @@ export default class Renderer {
     this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
 }
 
+  screenToWorld(screenX, screenY, camera) {
+      // 1. Convert screen coordinates to Viewport coordinates
+      // The viewport might have an offset (viewport.x, viewport.y)
+      const canvasX = screenX; // Assuming screenX is relative to the canvas/window client area
+      const canvasY = screenY;
+
+      // 2. Convert to Normalized Device Coordinates (NDC) [-1, 1]
+      // Note: In WebGL, Y is up, but in screen coords, Y is down.
+      const ndcX = ((canvasX - this.viewport.x) / this.viewport.width) * 2 - 1;
+      const ndcY = -(((canvasY - this.viewport.y) / this.viewport.height) * 2 - 1);
+
+      // 3. Reverse the Vertex Shader transformations
+      // Shader: 
+      // vec2 transformedPosition = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
+      // transformedPosition.x /= u_aspectRatio;
+      
+      // Reverse Aspect Ratio
+      let worldX = ndcX * this.currentAspectRatio;
+      let worldY = ndcY;
+
+      // Reverse Zoom
+      worldX /= camera.zoom;
+      worldY /= camera.zoom;
+
+      // Reverse Rotation
+      const cosR = Math.cos(camera.rotation);
+      const sinR = Math.sin(camera.rotation);
+      
+      // Inverse rotation matrix (transpose of rotation matrix)
+      // [ cos  sin ]
+      // [ -sin cos ]
+      const rotatedX = worldX * cosR - worldY * (-sinR);
+      const rotatedY = worldX * (-sinR) + worldY * cosR;
+
+      // Reverse Translation
+      const finalX = rotatedX + camera.x;
+      const finalY = rotatedY + camera.y;
+
+      return { x: finalX, y: finalY };
+  }
+
 }

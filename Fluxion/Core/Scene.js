@@ -21,9 +21,19 @@ export default class Scene {
     getObjectByName(name) {
         if (this.camera && this.camera.name === name) return this.camera;
         
-        for (const obj of this.objects) {
-            if (obj.name === name) return obj;
-        }
+        const findRecursive = (objects) => {
+            for (const obj of objects) {
+                if (obj.name === name) return obj;
+                if (obj.children && obj.children.length > 0) {
+                    const found = findRecursive(obj.children);
+                    if (found) return found;
+                }
+            }
+            return null;
+        };
+
+        const foundObj = findRecursive(this.objects);
+        if (foundObj) return foundObj;
         
         for (const aud of this.audio) {
             if (aud.name === name) return aud;
@@ -42,7 +52,7 @@ export default class Scene {
     update(dt) {
         for (const obj of this.objects) {
             if (obj.update) {
-                obj.update(dt);
+                obj.update(dt, this.camera);
             }
         }
     }

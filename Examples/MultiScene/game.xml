@@ -1,0 +1,5 @@
+<Scene name="GameScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+    <Sprite name="Player" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="-2" y="0" width="1" height="1" />
+    <Sprite name="Enemy" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="2" y="0" width="1" height="1" />
+</Scene>

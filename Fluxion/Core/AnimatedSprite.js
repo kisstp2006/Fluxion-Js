@@ -68,7 +68,8 @@ export default class AnimatedSprite extends Sprite {
         }
     }
 
-    update(dt) {
+    update(dt, camera) {
+        super.update(dt, camera);
         if (!this.isPlaying || !this.currentAnimation) return;
 
         this.timer += dt;
@@ -159,5 +160,12 @@ export default class AnimatedSprite extends Sprite {
             srcX, srcY, srcW, srcH, 
             this.color
         );
+
+        // Draw children
+        for (const child of this.children) {
+            if (child.draw) {
+                child.draw(this.renderer);
+            }
+        }
     }
 }

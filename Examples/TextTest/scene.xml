@@ -1,0 +1,13 @@
+<Scene name="TextScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+    
+    <Text name="Title" text="Hello Fluxion!" x="-0.95" y="0.72" fontSize="52" fontFamily="Arial" color="#22ff22" />
+    
+    <Text name="Subtitle" text="This is a text node." x="-0.95" y="0.42" fontSize="24" fontFamily="Arial" color="#d0d0d0" />
+    
+    <Sprite name="Button" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="-0.55" y="-0.65" width="0.8" height="0.8">
+        <ClickableArea name="ButtonHitbox" />
+    </Sprite>
+    
+    <Text name="Counter" text="Clicks: 0" x="0.05" y="-0.25" fontSize="40" fontFamily="Arial" color="#ffd84d" />
+</Scene>

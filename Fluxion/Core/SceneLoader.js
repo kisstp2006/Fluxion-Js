@@ -3,6 +3,8 @@ import Sprite from './Sprite.js';
 import AnimatedSprite from './AnimatedSprite.js';
 import Audio from './Audio.js';
 import Camera from './Camera.js';
+import ClickableArea from './ClickableArea.js';
+import Text from './Text.js';
 
 export default class SceneLoader {
     static async load(url, renderer) {
@@ -45,11 +47,19 @@ export default class SceneLoader {
 
     static async parseObject(node, renderer) {
         const tagName = node.tagName;
+        let obj = null;
         
         // Helper to get attributes
         const getFloat = (name, def = 0) => {
             const val = node.getAttribute(name);
             return val !== null ? parseFloat(val) : def;
+        };
+        const getFloatAny = (names, def = 0) => {
+            for (const name of names) {
+                const val = node.getAttribute(name);
+                if (val !== null) return parseFloat(val);
+            }
+            return def;
         };
         const getString = (name, def = "") => node.getAttribute(name) || def;
         const getBool = (name, def = false) => node.getAttribute(name) === "true";
@@ -63,10 +73,10 @@ export default class SceneLoader {
             
             const sprite = new Sprite(renderer, src, x, y, w, h);
             sprite.name = getString("name");
-            return sprite;
+            obj = sprite;
         }
         
-        if (tagName === "AnimatedSprite") {
+        else if (tagName === "AnimatedSprite") {
             const src = getString("imageSrc");
             const x = getFloat("x");
             const y = getFloat("y");
@@ -98,10 +108,30 @@ export default class SceneLoader {
                 }
             }
             
-            return sprite;
+            obj = sprite;
         }
 
-        if (tagName === "Audio") {
+        else if (tagName === "ClickableArea") {
+            const area = new ClickableArea(renderer);
+            area.name = getString("name", "ClickableArea");
+            obj = area;
+        }
+
+        else if (tagName === "Text") {
+            const textContent = getString("text", "New Text");
+            const x = getFloat("x", 0);
+            const y = getFloat("y", 0);
+            // Accept both XML-style `fontSize` and common XAML-style `FontSize`
+            const fontSize = getFloatAny(["fontSize", "FontSize"], 16);
+            const fontFamily = getString("fontFamily", "Inter");
+            const color = getString("color", "white");
+
+            const textObj = new Text(renderer, textContent, x, y, fontSize, fontFamily, color);
+            textObj.name = getString("name", "Text");
+            obj = textObj;
+        }
+
+        else if (tagName === "Audio") {
             const src = getString("src");
             const loop = getBool("loop", false);
             const volume = getFloat("volume", 1.0);
@@ -124,10 +154,10 @@ export default class SceneLoader {
                 audio.play();
             }
 
-            return audio;
+            obj = audio;
         }
 
-        if (tagName === "Camera") {
+        else if (tagName === "Camera") {
             const x = getFloat("x", 0);
             const y = getFloat("y", 0);
             const zoom = getFloat("zoom", 1);
@@ -137,9 +167,20 @@ export default class SceneLoader {
             // Width/Height are usually set by the engine/renderer size, so we might leave them 0 or default.
             const camera = new Camera(x, y, zoom, rotation);
             camera.name = getString("name");
-            return camera;
+            obj = camera;
         }
 
-        return null;
+        // Handle children
+        if (obj && obj.addChild) {
+             for (const childNode of node.children) {
+                 if (childNode.tagName === "Animation") continue;
+                 const childObj = await this.parseObject(childNode, renderer);
+                 if (childObj) {
+                     obj.addChild(childObj);
+                 }
+             }
+        }
+
+        return obj;
     }
 }

@@ -1,5 +1,12 @@
 export default class Input {
+    static instance = null;
+
     constructor() {
+        if (Input.instance) {
+            return Input.instance;
+        }
+        Input.instance = this;
+
         this.keys = new Set();
         this.previousKeys = new Set();
         this.keyDownListeners = [];

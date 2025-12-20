@@ -23,8 +23,30 @@ export default class Sprite {
         this.blue = 255;
         this.color = [this.red, this.green, this.blue, this.transparency];
         this.visible = true;
+        this.children = [];
         
         this.loadTexture(imageSrc);
+    }
+
+    addChild(child) {
+        child.parent = this;
+        this.children.push(child);
+    }
+
+    removeChild(child) {
+        const index = this.children.indexOf(child);
+        if (index > -1) {
+            this.children.splice(index, 1);
+            child.parent = null;
+        }
+    }
+
+    update(dt, camera) {
+        for (const child of this.children) {
+            if (child.update) {
+                child.update(dt, camera);
+            }
+        }
     }
 
     setColor(red, green, blue) {
@@ -48,6 +70,11 @@ export default class Sprite {
     }
 
     loadTexture(imageSrc) {
+        // Allow invisible/logic-only sprites by omitting imageSrc.
+        // Also avoids accidental fetches of the current page when img.src is "".
+        if (imageSrc === null || imageSrc === undefined) return;
+        if (typeof imageSrc === 'string' && imageSrc.trim() === '') return;
+
         if (this.useSpriteSheet) {
             const img = new Image();
             img.src = imageSrc;
@@ -66,14 +93,6 @@ export default class Sprite {
     draw() {
         if (!this.visible || !this.texture) return;
 
-        const color = [
-            this.red / 255,
-            this.green / 255,
-            this.blue / 255,
-            this.transparency / 255 // Normalize alpha from 0-255 to 0-1
-        ];
-
-
         const currentTime = Date.now();
         
         if (this.useSpriteSheet && this.texture) {
@@ -83,17 +102,24 @@ export default class Sprite {
                     this.currentFrame = (this.currentFrame + 1) % this.animation.frames.length;
                 }
                 const frame = this.animation.frames[this.currentFrame];
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height, this.color);
             } else {
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color);
             }
-        } else if (!this.useSpriteSheet && this.images.length > 0) {
-            if (this.isAnimating && currentTime - this.lastFrameTime > this.animationSpeed) {
+        } else if (!this.useSpriteSheet) {
+            if (this.images.length > 0 && this.isAnimating && currentTime - this.lastFrameTime > this.animationSpeed) {
                 this.lastFrameTime = currentTime;
                 this.currentFrame = (this.currentFrame + 1) % this.images.length;
             }
-            this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, color);
+            this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color);
 
+        }
+
+        // Draw children
+        for (const child of this.children) {
+            if (child.draw) {
+                child.draw(this.renderer); // Pass renderer just in case
+            }
         }
     }
 

@@ -22,6 +22,11 @@ const game = {
     elevatorProgress: 0.0,
     shakeIntensity: 0.001,
     aspectRatio: 16 / 9,
+    scrollLeftActive: false,
+    scrollRightActive: false,
+    scrollSpeed: 1.0,
+    cameraMinX: 0,
+    cameraMaxX: 0,
 
     async init(renderer) {
         console.log("Loading Jolly 3 Elevator Scene (XAML)...");
@@ -31,13 +36,32 @@ const game = {
         }
 
         this.scene = await SceneLoader.load("./scene.xml", renderer);
-        
-        // Sync engine camera with scene camera
+
+        // Sync engine camera with scene camera and make them the same object
         if (this.scene.camera) {
             this.camera.x = this.scene.camera.x;
             this.camera.y = this.scene.camera.y;
             this.camera.zoom = this.scene.camera.zoom;
             this.camera.rotation = this.scene.camera.rotation;
+            this.camera.name = this.scene.camera.name;
+        }
+        this.scene.setCamera(this.camera);
+
+        // Camera pan bounds (start position is the right-most limit)
+        this.cameraMinX = 0;
+        this.cameraMaxX = this.camera.x;
+
+        // Hook up scroll hitboxes
+        const leftHitbox = this.scene.getObjectByName("ScrollLeftHitbox");
+        const rightHitbox = this.scene.getObjectByName("ScrollRightHitbox");
+
+        if (leftHitbox) {
+            leftHitbox.onEnter = () => { this.scrollLeftActive = true; };
+            leftHitbox.onExit = () => { this.scrollLeftActive = false; };
+        }
+        if (rightHitbox) {
+            rightHitbox.onEnter = () => { this.scrollRightActive = true; };
+            rightHitbox.onExit = () => { this.scrollRightActive = false; };
         }
 
         console.log("Scene loaded.");
@@ -52,22 +76,41 @@ const game = {
         const floor3 = this.scene.getObjectByName("Floor3");
         const pipes = this.scene.getObjectByName("PipesBg");
 
-        // Camera Movement Logic
-        // Move camera based on mouse position at edges of screen
-        if (this.camera.x > 0) {
-            if (input.getMousePosition().x < 300) {
-                const moveAmount = 1.00 * this.aspectRatio * deltaTime;
-                this.camera.x -= moveAmount;
-                if (logo) logo.x -= moveAmount; // Keep logo fixed relative to camera (UI effect)
-            }
+        // Position scroll zones at the screen edges (FNAF1-style)
+        const leftZone = this.scene.getObjectByName("ScrollLeftZone");
+        const rightZone = this.scene.getObjectByName("ScrollRightZone");
+        if (leftZone && rightZone) {
+            const halfViewWidth = this.aspectRatio / this.camera.zoom;
+            const halfViewHeight = 1 / this.camera.zoom;
+
+            const viewWidth = halfViewWidth * 2;
+            const viewHeight = halfViewHeight * 2;
+            const zoneWidth = viewWidth * 0.12;
+
+            const viewLeft = this.camera.x - halfViewWidth;
+            const viewBottom = this.camera.y - halfViewHeight;
+
+            leftZone.x = viewLeft;
+            leftZone.y = viewBottom;
+            leftZone.width = zoneWidth;
+            leftZone.height = viewHeight;
+
+            rightZone.x = viewLeft + viewWidth - zoneWidth;
+            rightZone.y = viewBottom;
+            rightZone.width = zoneWidth;
+            rightZone.height = viewHeight;
         }
-        
-        if (this.camera.x < 0.5 * this.aspectRatio) {
-            if (input.getMousePosition().x > 900) {
-                const moveAmount = 1.00 * this.aspectRatio * deltaTime;
-                this.camera.x += moveAmount;
-                if (logo) logo.x += moveAmount;
-            }
+
+        // Camera Movement Logic (driven by ClickableArea hover)
+        let dx = 0;
+        if (this.scrollLeftActive) dx -= this.scrollSpeed * this.aspectRatio * deltaTime;
+        if (this.scrollRightActive) dx += this.scrollSpeed * this.aspectRatio * deltaTime;
+
+        if (dx !== 0) {
+            const nextX = Math.min(this.cameraMaxX, Math.max(this.cameraMinX, this.camera.x + dx));
+            const appliedDx = nextX - this.camera.x;
+            this.camera.x = nextX;
+            if (logo) logo.x += appliedDx; // Keep logo fixed relative to camera (UI effect)
         }
 
         // Zoom controls

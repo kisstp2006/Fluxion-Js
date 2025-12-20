@@ -15,16 +15,32 @@ export default class Engine {
         
         this.lastTime = 0;
 
-        // Wait for renderer to be ready before starting
-        this.renderer.readyPromise.then(() => {
-            // Initialize the game
-            if (this.game.init) {
-                this.game.init(this.renderer);
-            }
-            
-            requestAnimationFrame(this.loop.bind(this));
+        // Load default font
+        this.loadDefaultFont().then(() => {
+            // Wait for renderer to be ready before starting
+            this.renderer.readyPromise.then(() => {
+                // Initialize the game
+                if (this.game.init) {
+                    this.game.init(this.renderer);
+                }
+                
+                requestAnimationFrame(this.loop.bind(this));
+            });
         });
     } 
+
+    async loadDefaultFont() {
+        try {
+            // Resolve font path relative to this module
+            const fontUrl = new URL('../Font/Inter-VariableFont_opsz,wght.ttf', import.meta.url).href;
+            const font = new FontFace('Inter', `url(${fontUrl})`);
+            await font.load();
+            document.fonts.add(font);
+            console.log("Default font 'Inter' loaded successfully.");
+        } catch (error) {
+            console.error("Failed to load default font:", error);
+        }
+    }
 
     loop(timestamp = 0) {
         const deltaTime = (timestamp - this.lastTime) / 1000;
