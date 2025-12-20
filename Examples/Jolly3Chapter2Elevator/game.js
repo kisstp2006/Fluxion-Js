@@ -117,7 +117,6 @@ const game = {
 
     draw(renderer) {
         // Draw the game elements
-        renderer.clear(); // Clear the renderer
         this.spriteList.forEach(sprite => sprite.draw()); // Draw each sprite in the spriteList
     }
 };

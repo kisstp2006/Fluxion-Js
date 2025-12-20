@@ -33,7 +33,7 @@ export default class Engine {
         }
         
         // Clear the renderer and apply camera transformations
-        this.renderer.clear();
+        this.renderer.beginFrame();
         this.renderer.applyTransform(this.camera);
         
         // Draw the game elements
@@ -42,7 +42,7 @@ export default class Engine {
         }
         
         // Finish the frame (apply post-processing if enabled)
-        this.renderer.finishFrame();
+        this.renderer.endFrame();
         
         // Request the next frame
         requestAnimationFrame(this.loop.bind(this));

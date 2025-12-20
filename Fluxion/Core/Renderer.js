@@ -39,10 +39,8 @@ export default class Renderer {
     this.viewport = { x: 0, y: 0, width: 1, height: 1 };
     this.currentAspectRatio = this.targetAspectRatio;
 
-    this.sceneFramebuffer = null;
-    this.sceneTexture = null;
-    this.sceneWidth = 1;
-    this.sceneHeight = 1;
+    this.mainScreenFramebuffer = null;
+    this.mainScreenTexture = null;
     
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
@@ -57,12 +55,9 @@ export default class Renderer {
       this.resizeTimeout = requestAnimationFrame(() => {
         this.resizeCanvas();
 
-        // Keep post-processing buffers in sync with the letterboxed viewport size
-        if (this.enablePostProcessing) {
-          this.ensureSceneTargets();
-          if (this.postProcessing) {
-            this.postProcessing.resize(this.sceneWidth, this.sceneHeight);
-          }
+        // Keep post-processing buffers in sync with the canvas size
+        if (this.enablePostProcessing && this.postProcessing) {
+            this.postProcessing.resize(this.canvas.width, this.canvas.height);
         }
       });
     });
@@ -144,51 +139,60 @@ export default class Renderer {
 
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     }
+    
+    this.ensureMainScreenTargets();
   }
 
-  ensureSceneTargets() {
-    if (!this.enablePostProcessing) return;
+  ensureMainScreenTargets() {
+    const desiredWidth = this.canvas.width;
+    const desiredHeight = this.canvas.height;
 
-    const desiredWidth = Math.max(1, this.viewport.width | 0);
-    const desiredHeight = Math.max(1, this.viewport.height | 0);
-
-    if (!this.sceneFramebuffer) {
-      this.sceneFramebuffer = this.gl.createFramebuffer();
+    if (!this.mainScreenFramebuffer) {
+      this.mainScreenFramebuffer = this.gl.createFramebuffer();
     }
-    if (!this.sceneTexture) {
-      this.sceneTexture = this.gl.createTexture();
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.sceneTexture);
+    if (!this.mainScreenTexture) {
+      this.mainScreenTexture = this.gl.createTexture();
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.mainScreenTexture);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
     }
 
-    if (desiredWidth !== this.sceneWidth || desiredHeight !== this.sceneHeight) {
-      this.sceneWidth = desiredWidth;
-      this.sceneHeight = desiredHeight;
+    // Check if we need to resize the texture
+    // We can store the current size on the texture object or in the class
+    if (this.mainScreenTexture.width !== desiredWidth || this.mainScreenTexture.height !== desiredHeight) {
+      this.mainScreenTexture.width = desiredWidth;
+      this.mainScreenTexture.height = desiredHeight;
 
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.sceneTexture);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.mainScreenTexture);
       this.gl.texImage2D(
         this.gl.TEXTURE_2D,
         0,
         this.gl.RGBA,
-        this.sceneWidth,
-        this.sceneHeight,
+        desiredWidth,
+        desiredHeight,
         0,
         this.gl.RGBA,
         this.gl.UNSIGNED_BYTE,
         null
       );
 
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.sceneFramebuffer);
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
       this.gl.framebufferTexture2D(
         this.gl.FRAMEBUFFER,
         this.gl.COLOR_ATTACHMENT0,
         this.gl.TEXTURE_2D,
-        this.sceneTexture,
+        this.mainScreenTexture,
         0
       );
+      
+      // Check framebuffer status
+      const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
+      if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
+          console.error('Framebuffer is not complete: ' + status);
+      }
+
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
     }
   }
@@ -258,10 +262,13 @@ export default class Renderer {
     if (this.enablePostProcessing) {
       this.postProcessing = new PostProcessing(this.gl);
 
-      // Allocate scene targets to letterboxed viewport size, and init post-processing at that size
-      this.ensureSceneTargets();
-      await this.postProcessing.init(this.sceneWidth, this.sceneHeight);
+      // Allocate scene targets to full canvas size, and init post-processing at that size
+      this.ensureMainScreenTargets();
+      await this.postProcessing.init(this.canvas.width, this.canvas.height);
       console.log('Post-processing initialized');
+    } else {
+        // Even if PP is disabled, we need the main screen targets
+        this.ensureMainScreenTargets();
     }
   }
 
@@ -291,6 +298,9 @@ export default class Renderer {
 
   createTexture(image) {
     const texture = this.gl.createTexture();
+    texture.width = image.width;
+    texture.height = image.height;
+
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
     this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
 
@@ -312,40 +322,84 @@ export default class Renderer {
     return texture;
   }
 
-  clear() {
+  beginFrame() {
     if (!this.isReady) return;
     
-    // If post-processing is enabled, render to framebuffer
-    if (this.enablePostProcessing && this.sceneFramebuffer) {
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.sceneFramebuffer);
-      // Render scene into the offscreen texture at its native size
-      this.gl.viewport(0, 0, this.sceneWidth, this.sceneHeight);
-    } else {
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-      this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
-    }
-    
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-  }
-  
-  finishFrame() {
-    if (!this.isReady) return;
-    
-    // If post-processing is enabled, apply effects and render to screen
-    if (this.enablePostProcessing && this.postProcessing && this.sceneTexture) {
-      // Unbind framebuffer to render to screen
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    // Always render to the main screen framebuffer first
+    if (this.mainScreenFramebuffer) {
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
       
-      // Clear full screen (keeps black bars clean)
+      // Clear the entire framebuffer (including black bars area)
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-
-      // Draw post-processed scene into the letterboxed viewport
+      
+      // Set viewport to the letterboxed area for the game to draw into
       this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
-
-      // Apply post-processing effects
-      this.postProcessing.apply(this.sceneTexture);
     }
+  }
+  
+  endFrame() {
+    if (!this.isReady) return;
+    
+    if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {
+      // Pass the main screen texture to the post-processing system
+      // The output goes to the default framebuffer (null)
+      this.postProcessing.render(this.mainScreenTexture, null);
+    } else if (this.mainScreenTexture) {
+      // If post-processing is disabled, just draw the main screen texture to the canvas
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+      
+      // Use a simple pass-through draw
+      // We can use the post-processing system's quad or a simple internal draw
+      // Since we might not have PostProcessing initialized, we should have a fallback or use a simple shader
+      // But wait, if enablePostProcessing is false, this.postProcessing is null.
+      // We need a way to draw a full screen quad here.
+      
+      // We can reuse drawQuad but we need to set up the shader for it.
+      // drawQuad uses the default shader which expects a camera transform.
+      // We need a simple screen-space draw.
+      
+      // Let's use a simple blit method.
+      this.blitTexture(this.mainScreenTexture);
+    }
+  }
+
+  blitTexture(texture) {
+      // Simple full-screen quad draw using the current program (which is likely the sprite shader)
+      // We need to reset uniforms to identity/screen space
+      this.gl.useProgram(this.program);
+      
+      // Reset camera uniforms to identity
+      this.gl.uniform2f(this.cameraPositionLocation, 0, 0);
+      this.gl.uniform1f(this.cameraZoomLocation, 1.0);
+      this.gl.uniform1f(this.cameraRotationLocation, 0.0);
+      this.gl.uniform1f(this.aspectRatioLocation, 1.0); // 1.0 because we are drawing in NDC -1 to 1
+      
+      // Draw a quad from -1 to 1
+      // But wait, drawQuad takes x, y, width, height.
+      // If we pass x=-1, y=-1, width=2, height=2, it should work if the vertex shader handles it.
+      // Let's check the vertex shader.
+      
+      // Actually, let's just implement a simple blit here using the existing buffers
+      // The existing buffer is for sprites.
+      
+      // Let's assume drawQuad works in world coordinates.
+      // If we want to draw to screen space, we need to bypass the camera transform or set it to identity.
+      // I set it to identity above.
+      
+      // Ensure texture unit 0 is used
+      this.gl.uniform1i(this.textureLocation, 0);
+      this.gl.activeTexture(this.gl.TEXTURE0);
+
+      // We need to flip Y because drawQuad assumes a coordinate system where Y is down (for sprites),
+      // but in NDC Y is up.
+      // Also drawQuad maps the first pair of vertices to Tex(0,1) which is Top-Left in UV space (if 0,0 is BL).
+      // By passing y=1 and height=-2:
+      // TL becomes (-1, 1) -> Top-Left on screen.
+      // BL becomes (-1, -1) -> Bottom-Left on screen.
+      this.drawQuad(texture, -1, 1, 2, -2);
   }
 
   applyTransform(camera) {
@@ -361,20 +415,55 @@ export default class Renderer {
     this.gl.uniform1f(this.aspectRatioLocation, this.currentAspectRatio);
   }
 
-drawQuad(texture, x, y, width, height, color = [255, 255, 255, 255]) {
+  drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight) {
     if (!this.isReady) return;
-    if (!Array.isArray(color)) {
-        color = [255, 255, 255, 255];
+    
+    let color = [255, 255, 255, 255];
+    let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+
+    // Handle overloaded arguments
+    // Case 1: drawQuad(tex, x, y, w, h, colorArray)
+    if (Array.isArray(srcX)) {
+        color = srcX;
+    } 
+    // Case 2: drawQuad(tex, x, y, w, h, srcX, srcY, srcW, srcH)
+    else if (typeof srcX === 'number') {
+        const texW = texture.width || 1;
+        const texH = texture.height || 1;
+        
+        // If srcWidth/Height are 0 (or missing), use full texture dimensions
+        const sX = srcX || 0;
+        const sY = srcY || 0;
+        const sW = srcWidth || texW;
+        const sH = srcHeight || texH;
+
+        // Calculate UVs (assuming standard top-left origin for image data)
+        // WebGL texture coordinates: (0,0) is bottom-left
+        u0 = sX / texW;
+        u1 = (sX + sW) / texW;
+        
+        // Flip Y for UVs because image data is top-down but texture space is bottom-up
+        v1 = 1.0 - (sY / texH);          // Top
+        v0 = 1.0 - ((sY + sH) / texH);   // Bottom
     }
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
 
+    // Ensure vertex attributes are pointing to the correct buffer
+    // This is necessary because PostProcessing might have changed the bindings
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
+    this.gl.enableVertexAttribArray(this.positionLocation);
+    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
+    this.gl.enableVertexAttribArray(this.texcoordLocation);
+    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+
     // Világkoordinátákban dolgozunk!
+    // Vertex structure: x, y, u, v
     const quad = new Float32Array([
-        x, y, 0, 1, // Top-left
-        x + width, y, 1, 1, // Top-right
-        x, y + height, 0, 0, // Bottom-left
-        x + width, y + height, 1, 0, // Bottom-right
+        x, y, u0, v1,           // Top-left
+        x + width, y, u1, v1,   // Top-right
+        x, y + height, u0, v0,  // Bottom-left
+        x + width, y + height, u1, v0, // Bottom-right
     ]);
 
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);

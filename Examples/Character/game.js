@@ -53,7 +53,6 @@ const game = {
 
     draw(renderer) {
         // Draw the game elements
-        renderer.clear(); // Clear the renderer's canvas
         this.spriteList.forEach(sprite => sprite.draw()); // Iterate over the spriteList and draw each sprite
     }
 };
