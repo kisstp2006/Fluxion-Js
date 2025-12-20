@@ -1,5 +1,5 @@
 export default class Renderer {
-  constructor(canvasId, stretchImage = true) {
+  constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true) {
     this.canvas = document.getElementById(canvasId);
     this.gl = this.canvas.getContext("webgl");
 
@@ -8,7 +8,32 @@ export default class Renderer {
       return;
     }
 
-    this.stretchImage = stretchImage; // Store the stretchImage flag
+    // Validate and sanitize input parameters
+    // Ensure targetWidth is a valid positive number
+    if (typeof targetWidth !== 'number' || !isFinite(targetWidth) || targetWidth <= 0) {
+      console.warn(`Invalid targetWidth: ${targetWidth}. Defaulting to 1920.`);
+      targetWidth = 1920;
+    }
+
+    // Ensure targetHeight is a valid positive number
+    if (typeof targetHeight !== 'number' || !isFinite(targetHeight) || targetHeight <= 0) {
+      console.warn(`Invalid targetHeight: ${targetHeight}. Defaulting to 1080.`);
+      targetHeight = 1080;
+    }
+
+    // Ensure maintainAspectRatio is a boolean
+    if (typeof maintainAspectRatio !== 'boolean') {
+      console.warn(`Invalid maintainAspectRatio: ${maintainAspectRatio}. Defaulting to true.`);
+      maintainAspectRatio = true;
+    }
+
+    this.targetWidth = targetWidth;
+    this.targetHeight = targetHeight;
+    this.targetAspectRatio = targetWidth / targetHeight;
+    this.maintainAspectRatio = maintainAspectRatio;
+    
+    this.isReady = false; // Track initialization state
+    this.readyPromise = null; // Store the initialization promise
     this.resizeCanvas();
     window.addEventListener("resize", () => this.resizeCanvas());
 
@@ -22,73 +47,96 @@ export default class Renderer {
     alert('WebGL context restored!');
   });
 
-    this.initGL();
+    // Initialize shaders asynchronously and store the promise
+    this.readyPromise = this.initGL().then(() => {
+      this.isReady = true;
+    });
   } 
 
   resizeCanvas() {
     const dpi = window.devicePixelRatio || 1;
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
 
-    // Set the canvas pixel size
-    this.canvas.width = window.innerWidth * dpi;
-    this.canvas.height = window.innerHeight * dpi;
+    if (this.maintainAspectRatio) {
+      const windowAspectRatio = windowWidth / windowHeight;
+      
+      let canvasWidth, canvasHeight;
+      let viewportX = 0, viewportY = 0;
+      let viewportWidth, viewportHeight;
 
-    // Set the canvas DOM size (CSS size)
-    this.canvas.style.width = window.innerWidth + 'px';
-    this.canvas.style.height = window.innerHeight + 'px';
+      if (windowAspectRatio > this.targetAspectRatio) {
+        // Window is wider than target - add black bars on sides
+        canvasHeight = windowHeight;
+        canvasWidth = canvasHeight * this.targetAspectRatio;
+        
+        viewportWidth = canvasWidth * dpi;
+        viewportHeight = canvasHeight * dpi;
+        viewportX = ((windowWidth - canvasWidth) / 2) * dpi;
+        viewportY = 0;
+      } else {
+        // Window is taller than target - add black bars on top/bottom
+        canvasWidth = windowWidth;
+        canvasHeight = canvasWidth / this.targetAspectRatio;
+        
+        viewportWidth = canvasWidth * dpi;
+        viewportHeight = canvasHeight * dpi;
+        viewportX = 0;
+        viewportY = ((windowHeight - canvasHeight) / 2) * dpi;
+      }
 
-    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      // Set canvas pixel size to full window
+      this.canvas.width = windowWidth * dpi;
+      this.canvas.height = windowHeight * dpi;
+
+      // Set canvas DOM size
+      this.canvas.style.width = windowWidth + 'px';
+      this.canvas.style.height = windowHeight + 'px';
+
+      // Set viewport to maintain aspect ratio with letterboxing
+      this.gl.viewport(viewportX, viewportY, viewportWidth, viewportHeight);
+      
+      // Store viewport info for potential use
+      this.viewportX = viewportX;
+      this.viewportY = viewportY;
+      this.viewportWidth = viewportWidth;
+      this.viewportHeight = viewportHeight;
+    } else {
+      // Original stretching behavior
+      this.canvas.width = windowWidth * dpi;
+      this.canvas.height = windowHeight * dpi;
+      this.canvas.style.width = windowWidth + 'px';
+      this.canvas.style.height = windowHeight + 'px';
+      this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    }
+  }
+
+  async loadShaderFile(url) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to load shader: ${url}`);
+      }
+      return await response.text();
+    } catch (error) {
+      console.error('Error loading shader file:', error);
+      throw error;
+    }
   }
   
 
-  initGL() {
+  async initGL() {
     this.gl.clearColor(0, 0, 0, 1);
     this.gl.enable(this.gl.BLEND);
     this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
 
+    // Load shaders from files - use absolute path from root
+    const vertexShaderSource = await this.loadShaderFile('../../Fluxion/Shaders/vertex.glsl');
+    const fragmentShaderSource = await this.loadShaderFile('../../Fluxion/Shaders/fragment.glsl');
+
     // Create shaders
-    this.vertexShader = this.createShader(this.gl.VERTEX_SHADER, `
-      attribute vec2 a_position;
-      attribute vec2 a_texcoord;
-      uniform vec2 u_cameraPosition;
-      uniform float u_cameraZoom;
-      uniform float u_cameraRotation;
-      varying vec2 v_texcoord;
-
-      void main() {
-        float cosR = cos(u_cameraRotation);
-        float sinR = sin(u_cameraRotation);
-
-        // Rotation matrix
-        mat2 rotationMatrix = mat2(
-          cosR, -sinR,
-          sinR, cosR
-        );
-
-        // Apply transformations: translate -> rotate -> scale
-        vec2 transformedPosition = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
-
-        gl_Position = vec4(transformedPosition, 0, 1);
-        v_texcoord = a_texcoord;
-      }
-    `);
-
-    this.fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, `
-      precision mediump float;
-      varying vec2 v_texcoord;
-      uniform sampler2D u_texture;
-      uniform vec4 u_color;
-  
-      void main() {
-          vec4 texColor = texture2D(u_texture, v_texcoord);
-          if (texColor.a < 0.01) discard;
-  
-          // Apply sprite color and transparency
-          texColor.rgb *= u_color.rgb;
-          texColor.a *= u_color.a;
-  
-          gl_FragColor = texColor;
-      }
-  `);
+    this.vertexShader = this.createShader(this.gl.VERTEX_SHADER, vertexShaderSource);
+    this.fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, fragmentShaderSource);
   
     if (!this.vertexShader || !this.fragmentShader) {
     throw new Error("Shader compilation failed. Renderer initialization aborted.");
@@ -110,6 +158,7 @@ export default class Renderer {
     this.cameraPositionLocation = this.gl.getUniformLocation(this.program, "u_cameraPosition");
     this.cameraZoomLocation = this.gl.getUniformLocation(this.program, "u_cameraZoom");
     this.cameraRotationLocation = this.gl.getUniformLocation(this.program, "u_cameraRotation");
+    this.aspectRatioLocation = this.gl.getUniformLocation(this.program, "u_aspectRatio");
     this.colorLocation = this.gl.getUniformLocation(this.program, "u_color");
 
 
@@ -172,19 +221,23 @@ export default class Renderer {
   }
 
   clear() {
+    if (!this.isReady) return;
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
   }
 
   applyTransform(camera) {
+    if (!this.isReady) return;
     this.gl.useProgram(this.program);
 
     // Set individual uniforms for position, zoom, and rotation
     this.gl.uniform2f(this.cameraPositionLocation, camera.x, camera.y);
     this.gl.uniform1f(this.cameraZoomLocation, camera.zoom);
     this.gl.uniform1f(this.cameraRotationLocation, camera.rotation);
+    this.gl.uniform1f(this.aspectRatioLocation, this.targetAspectRatio);
   }
 
 drawQuad(texture, x, y, width, height, color = [255, 255, 255, 255]) {
+    if (!this.isReady) return;
     if (!Array.isArray(color)) {
         color = [255, 255, 255, 255];
     }

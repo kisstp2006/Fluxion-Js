@@ -130,5 +130,5 @@ window.onload = async () => {
     await loadChiefSounds(); // Load and play the chief sound
 
     // Start the game after sounds are loaded and AudioContext is resumed
-    new Engine("gameCanvas", game, false); // Create and start the Engine instance
+    new Engine("gameCanvas", game, 1920, 1080, true); // Create Engine with aspect ratio preservation
 };

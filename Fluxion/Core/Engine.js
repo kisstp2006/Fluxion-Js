@@ -2,9 +2,9 @@ import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 
 export default class Engine {
-    constructor(canvasId, game, enablePostProcessing = false) {
-        // Initialize Renderer with post-processing support
-        this.renderer = new Renderer(canvasId, enablePostProcessing);
+    constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true) {
+        // Initialize Renderer with aspect ratio settings
+        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio);
         this.camera = new Camera();
         
         this.game = game;
@@ -12,12 +12,15 @@ export default class Engine {
         
         this.lastTime = 0;
 
-        // Initialize the game
-        if (this.game.init) {
-            this.game.init(this.renderer);
-        }
-        
-        requestAnimationFrame(this.loop.bind(this));
+        // Wait for renderer to be ready before starting
+        this.renderer.readyPromise.then(() => {
+            // Initialize the game
+            if (this.game.init) {
+                this.game.init(this.renderer);
+            }
+            
+            requestAnimationFrame(this.loop.bind(this));
+        });
     } 
 
     loop(timestamp = 0) {

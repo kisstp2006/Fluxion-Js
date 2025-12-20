@@ -60,6 +60,6 @@ const game = {
 
 window.onload = async () => {
     // Event listener for when the window finishes loading
-    // Start the game
-    new Engine("gameCanvas", game); // Create a new Engine instance with the specified canvas ID and game object
+    // Start the game with aspect ratio preservation (1920x1080, 16:9)
+    new Engine("gameCanvas", game, 1920, 1080, true); // Create a new Engine instance with aspect ratio preservation
 };
