@@ -34,7 +34,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/Jolly3Chapter2Elevator/index.html");
+    mainWindow.loadFile("./Examples/PostProcessing/index.html");
   });
 
   ipcMain.on("set-title", (event, title) => {

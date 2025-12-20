@@ -3,112 +3,70 @@ import Sprite from "../../Fluxion/Core/Sprite.js";
 import Input from "../../Fluxion/Core/Input.js";
 
 const input = new Input();
-const FluxionLogo = ["../../Fluxion/Icon/Fluxion_icon.png"];
+const LOGO = "../../Fluxion/Icon/Fluxion_icon.png";
+
+function setActiveEffectsText(text) {
+    const el = document.getElementById("activeEffects");
+    if (el) el.textContent = text;
+}
 
 const game = {
-    spriteList: [],
     engine: null,
+    sprites: [],
+    t: 0,
 
     init(renderer) {
-        // Initialize the game
-        this.spriteList.push(new Sprite(renderer, FluxionLogo, -0.3, -0.5, 1, 1));
-        console.log("Post-processing demo started");
-        console.log("Press keys to toggle effects:");
-        console.log("1 - Grayscale");
-        console.log("2 - Blur");
-        console.log("3 - CRT Effect");
-        console.log("4 - Contrast");
-        console.log("0 - Clear all effects");
+        // Background + moving logo so post effects are obvious.
+        this.sprites.push(new Sprite(renderer, LOGO, -1.0, -1.0, 2.0, 2.0));
+        this.sprites.push(new Sprite(renderer, LOGO, -0.4, -0.4, 0.8, 0.8));
+        setActiveEffectsText("(none)");
     },
 
-    update(deltaTime) {
-        // Move the sprite based on keyboard input
-        if (input.getKey("w")) {
-            this.spriteList[0].y += 1 * deltaTime;
-        }
-        if (input.getKey("a")) {
-            this.spriteList[0].x -= 1 * deltaTime;
-        }
-        if (input.getKey("s")) {
-            this.spriteList[0].y -= 1 * deltaTime;
-        }
-        if (input.getKey("d")) {
-            this.spriteList[0].x += 1 * deltaTime;
+    update(dt) {
+        this.t += dt;
+
+        // Move the foreground logo in a smooth loop.
+        const s = this.sprites[1];
+        if (s) {
+            s.x = Math.cos(this.t * 0.9) * 0.35 - 0.4;
+            s.y = Math.sin(this.t * 1.1) * 0.35 - 0.4;
         }
 
-        // Camera zoom control
-        if (this.camera.zoom > 1) {
-            this.camera.zoom -= 10 * deltaTime;
-        }
+        const pp = this.engine?.renderer?.postProcessing;
+        if (pp && pp.isReady) {
+            const toggle = (key, effectName) => {
+                if (!input.getKeyDown(key)) return;
+                if (pp.activeEffects.includes(effectName)) pp.disableEffect(effectName);
+                else pp.enableEffect(effectName);
+            };
 
-        if (input.getMouseButton(0)) {
-            this.camera.zoom = 1.5;
-        }
+            toggle("1", "grayscale");
+            toggle("2", "blur");
+            toggle("3", "crt");
+            toggle("4", "contrast");
 
-        // Toggle post-processing effects
-        if (this.engine && this.engine.renderer.postProcessing) {
-            const pp = this.engine.renderer.postProcessing;
-            
-            if (input.getKeyDown("1")) {
-                if (pp.activeEffects.includes("grayscale")) {
-                    pp.disableEffect("grayscale");
-                    console.log("Grayscale OFF");
-                } else {
-                    pp.enableEffect("grayscale");
-                    console.log("Grayscale ON");
-                }
-            }
-            
-            if (input.getKeyDown("2")) {
-                if (pp.activeEffects.includes("blur")) {
-                    pp.disableEffect("blur");
-                    console.log("Blur OFF");
-                } else {
-                    pp.enableEffect("blur");
-                    console.log("Blur ON");
-                }
-            }
-            
-            if (input.getKeyDown("3")) {
-                if (pp.activeEffects.includes("crt")) {
-                    pp.disableEffect("crt");
-                    console.log("CRT Effect OFF");
-                } else {
-                    pp.enableEffect("crt");
-                    console.log("CRT Effect ON");
-                }
-            }
-            
-            if (input.getKeyDown("4")) {
-                if (pp.activeEffects.includes("contrast")) {
-                    pp.disableEffect("contrast");
-                    console.log("Contrast OFF");
-                } else {
-                    pp.enableEffect("contrast");
-                    console.log("Contrast ON");
-                }
-            }
-            
             if (input.getKeyDown("0")) {
                 pp.clearEffects();
-                console.log("All effects cleared");
             }
 
-            // Update time uniform for CRT effect
+            // Update time uniform for CRT effect (only needed when enabled)
             if (pp.activeEffects.includes("crt")) {
-                pp.setUniform("crt", "time", Date.now() / 1000);
+                pp.setUniform("crt", "time", performance.now() / 1000);
             }
+
+            setActiveEffectsText(pp.activeEffects.length ? pp.activeEffects.join(", ") : "(none)");
         }
+
+        // Update previous input state AFTER we query getKeyDown.
+        input.update();
     },
 
     draw(renderer) {
-        renderer.clear();
-        this.spriteList.forEach(sprite => sprite.draw());
-    }
+        // Engine already clears + applies camera transform.
+        for (const sprite of this.sprites) sprite.draw();
+    },
 };
 
-window.onload = async () => {
-    // Start the game WITHOUT post-processing for now (last param = false)
-    // Post-processing needs framebuffer rendering which requires more work
-    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, false);
-};
+window.addEventListener("load", () => {
+    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, true);
+});

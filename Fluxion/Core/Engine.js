@@ -41,6 +41,9 @@ export default class Engine {
             this.game.draw(this.renderer);
         }
         
+        // Finish the frame (apply post-processing if enabled)
+        this.renderer.finishFrame();
+        
         // Request the next frame
         requestAnimationFrame(this.loop.bind(this));
     }

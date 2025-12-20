@@ -7,8 +7,13 @@ export default class PostProcessing {
     this.textures = [];
     this.quadBuffer = null;
     this.isReady = false;
+    this.width = 1;
+    this.height = 1;
+
+    // Global post-processing context (auto uniforms)
+    this._frame = 0;
+    this._lastTimeSec = 0;
     
-    this.initFramebuffers();
     this.initQuad();
   }
 
@@ -25,7 +30,7 @@ export default class PostProcessing {
     }
   }
 
-  async loadEffect(name, fragmentShaderPath, uniforms = {}) {
+  async loadEffect(name, fragmentShaderPath, uniforms = {}, options = {}) {
     try {
       const vertexSource = await this.loadShader('../../Fluxion/Shaders/PostProcessing/vertex.glsl');
       const fragmentSource = await this.loadShader(fragmentShaderPath);
@@ -37,14 +42,33 @@ export default class PostProcessing {
         return;
       }
 
+      const uniformLocations = {};
+      for (const uniformName of Object.keys(uniforms)) {
+        uniformLocations[uniformName] = this.gl.getUniformLocation(program, `u_${uniformName}`);
+      }
+
+      // Common auto-injected uniforms (optional in shader)
+      const contextLocations = {
+        time: this.gl.getUniformLocation(program, 'u_time'),
+        delta: this.gl.getUniformLocation(program, 'u_delta'),
+        resolution: this.gl.getUniformLocation(program, 'u_resolution'),
+        aspect: this.gl.getUniformLocation(program, 'u_aspect'),
+        frame: this.gl.getUniformLocation(program, 'u_frame'),
+      };
+
+      const priority = Number.isFinite(options?.priority) ? options.priority : 0;
+
       this.effects.set(name, {
         program: program,
         uniforms: uniforms,
+        priority,
         locations: {
           position: this.gl.getAttribLocation(program, 'a_position'),
           texCoord: this.gl.getAttribLocation(program, 'a_texCoord'),
-          image: this.gl.getUniformLocation(program, 'u_image')
-        }
+          image: this.gl.getUniformLocation(program, 'u_image'),
+        },
+        uniformLocations,
+        contextLocations,
       });
       
       console.log(`Loaded effect: ${name}`);
@@ -53,21 +77,24 @@ export default class PostProcessing {
     }
   }
 
-  async init() {
+  async init(width = 1, height = 1) {
     // Load all available effects
     await Promise.all([
-      this.loadEffect('passthrough', '../../Fluxion/Shaders/PostProcessing/passthrough.glsl'),
+      this.loadEffect('passthrough', '../../Fluxion/Shaders/PostProcessing/passthrough.glsl', {}, { priority: 0 }),
       this.loadEffect('blur', '../../Fluxion/Shaders/PostProcessing/blur.glsl', {
         resolution: { type: '2f', value: [1920, 1080] }
-      }),
-      this.loadEffect('grayscale', '../../Fluxion/Shaders/PostProcessing/grayscale.glsl'),
+      }, { priority: 10 }),
+      this.loadEffect('grayscale', '../../Fluxion/Shaders/PostProcessing/grayscale.glsl', {}, { priority: 20 }),
       this.loadEffect('crt', '../../Fluxion/Shaders/PostProcessing/crt.glsl', {
         time: { type: '1f', value: 0 }
-      }),
+      }, { priority: 90 }),
       this.loadEffect('contrast', '../../Fluxion/Shaders/PostProcessing/contrast.glsl', {
         intensity: { type: '1f', value: 1.5 }
-      })
+      }, { priority: 100 })
     ]);
+
+    this.initFramebuffers(width, height);
+    this.resize(width, height);
     
     this.isReady = true;
   }
@@ -104,46 +131,66 @@ export default class PostProcessing {
     return program;
   }
 
-  initFramebuffers() {
+  initFramebuffers(width, height) {
     // Create 2 framebuffers for ping-pong rendering
+    this.width = Math.max(1, width | 0);
+    this.height = Math.max(1, height | 0);
+
+    // Dispose existing
+    for (const fb of this.framebuffers) this.gl.deleteFramebuffer(fb);
+    for (const tex of this.textures) this.gl.deleteTexture(tex);
+    this.framebuffers = [];
+    this.textures = [];
+
     for (let i = 0; i < 2; i++) {
       const framebuffer = this.gl.createFramebuffer();
       const texture = this.gl.createTexture();
-      
+
       this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
       this.gl.texImage2D(
-        this.gl.TEXTURE_2D, 0, this.gl.RGBA,
-        this.gl.canvas.width, this.gl.canvas.height, 0,
-        this.gl.RGBA, this.gl.UNSIGNED_BYTE, null
+        this.gl.TEXTURE_2D,
+        0,
+        this.gl.RGBA,
+        this.width,
+        this.height,
+        0,
+        this.gl.RGBA,
+        this.gl.UNSIGNED_BYTE,
+        null
       );
-      
+
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
-      
+
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, framebuffer);
       this.gl.framebufferTexture2D(
-        this.gl.FRAMEBUFFER, this.gl.COLOR_ATTACHMENT0,
-        this.gl.TEXTURE_2D, texture, 0
+        this.gl.FRAMEBUFFER,
+        this.gl.COLOR_ATTACHMENT0,
+        this.gl.TEXTURE_2D,
+        texture,
+        0
       );
-      
+
       this.framebuffers.push(framebuffer);
       this.textures.push(texture);
     }
-    
+
     this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
   }
 
   initQuad() {
     this.quadBuffer = this.gl.createBuffer();
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
     
+    // Full-screen quad with correct texture coordinates (not flipped)
     const vertices = new Float32Array([
-      -1, -1,  0, 0,
-       1, -1,  1, 0,
-      -1,  1,  0, 1,
-       1,  1,  1, 1
+      -1, -1,  0, 0,  // Bottom-left
+       1, -1,  1, 0,  // Bottom-right
+      -1,  1,  0, 1,  // Top-left
+       1,  1,  1, 1   // Top-right
     ]);
     
     this.gl.bufferData(this.gl.ARRAY_BUFFER, vertices, this.gl.STATIC_DRAW);
@@ -166,6 +213,25 @@ export default class PostProcessing {
     this.activeEffects = [];
   }
 
+  setEffectPriority(effectName, priority) {
+    const effect = this.effects.get(effectName);
+    if (!effect) return;
+    effect.priority = Number.isFinite(priority) ? priority : effect.priority;
+  }
+
+  getContext() {
+    // Computed at apply()-time, but exposing this is handy for debugging.
+    const nowSec = performance.now() / 1000;
+    const delta = this._lastTimeSec > 0 ? (nowSec - this._lastTimeSec) : 0;
+    return {
+      time: nowSec,
+      delta,
+      resolution: [this.width, this.height],
+      aspect: this.width / this.height,
+      frame: this._frame,
+    };
+  }
+
   setUniform(effectName, uniformName, value) {
     const effect = this.effects.get(effectName);
     if (effect && effect.uniforms[uniformName]) {
@@ -174,28 +240,147 @@ export default class PostProcessing {
   }
 
   apply(sourceTexture) {
-    if (!this.isReady || this.activeEffects.length === 0) {
+    if (!this.isReady) {
       return sourceTexture;
     }
+
+    // The caller (Renderer) may have set a letterboxed viewport (non-zero x/y).
+    // When we render into offscreen ping-pong framebuffers we must use (0,0,w,h),
+    // then restore the original viewport for the final screen draw.
+    const originalViewport = this.gl.getParameter(this.gl.VIEWPORT);
+
+    // Post passes must *overwrite* pixels. The engine enables blending for sprite rendering,
+    // but blending during full-screen post passes causes ghosting/trails (alpha leaves old pixels).
+    const wasBlendEnabled = this.gl.isEnabled(this.gl.BLEND);
+    const wasDepthTestEnabled = this.gl.isEnabled(this.gl.DEPTH_TEST);
+    const wasScissorEnabled = this.gl.isEnabled(this.gl.SCISSOR_TEST);
+    if (wasBlendEnabled) this.gl.disable(this.gl.BLEND);
+    if (wasDepthTestEnabled) this.gl.disable(this.gl.DEPTH_TEST);
+    if (wasScissorEnabled) this.gl.disable(this.gl.SCISSOR_TEST);
+
+    const restoreViewport = () => {
+      this.gl.viewport(originalViewport[0], originalViewport[1], originalViewport[2], originalViewport[3]);
+    };
+    const setOffscreenViewport = () => {
+      this.gl.viewport(0, 0, this.width, this.height);
+    };
+
+    // If no effects are active, use passthrough to render scene to screen
+    if (this.activeEffects.length === 0) {
+      const passthroughEffect = this.effects.get('passthrough');
+      if (!passthroughEffect) {
+        // Restore state before returning
+        restoreViewport();
+        if (wasBlendEnabled) this.gl.enable(this.gl.BLEND);
+        if (wasDepthTestEnabled) this.gl.enable(this.gl.DEPTH_TEST);
+        if (wasScissorEnabled) this.gl.enable(this.gl.SCISSOR_TEST);
+        return sourceTexture;
+      }
+      
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      // Keep whatever viewport the caller requested (typically letterboxed)
+      restoreViewport();
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
+      this.gl.useProgram(passthroughEffect.program);
+      
+      this.gl.enableVertexAttribArray(passthroughEffect.locations.position);
+      this.gl.vertexAttribPointer(passthroughEffect.locations.position, 2, this.gl.FLOAT, false, 16, 0);
+      
+      this.gl.enableVertexAttribArray(passthroughEffect.locations.texCoord);
+      this.gl.vertexAttribPointer(passthroughEffect.locations.texCoord, 2, this.gl.FLOAT, false, 16, 8);
+      
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, sourceTexture);
+      this.gl.uniform1i(passthroughEffect.locations.image, 0);
+      
+      this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+      // Restore state
+      if (wasBlendEnabled) this.gl.enable(this.gl.BLEND);
+      if (wasDepthTestEnabled) this.gl.enable(this.gl.DEPTH_TEST);
+      if (wasScissorEnabled) this.gl.enable(this.gl.SCISSOR_TEST);
+      return null;
+    }
+
+    // Build/update global context values once per apply
+    const nowSec = performance.now() / 1000;
+    const deltaSec = this._lastTimeSec > 0 ? (nowSec - this._lastTimeSec) : 0;
+    this._lastTimeSec = nowSec;
+    this._frame += 1;
+    const ctxTime = nowSec;
+    const ctxDelta = deltaSec;
+    const ctxW = this.width;
+    const ctxH = this.height;
+    const ctxAspect = ctxW / ctxH;
+    const ctxFrame = this._frame;
 
     let inputTexture = sourceTexture;
     let outputIndex = 0;
 
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
 
-    for (let i = 0; i < this.activeEffects.length; i++) {
-      const effectName = this.activeEffects[i];
-      const effect = this.effects.get(effectName);
-      
-      if (!effect) continue;
+    // Priority-ordered pipeline (minimal "effect graph" upgrade)
+    // IMPORTANT: compute "last pass" based on effects that actually exist.
+    // Otherwise, if an unknown name slips into activeEffects, we could end up
+    // rendering the final *executed* pass to an offscreen FBO.
+    const orderedEffectNames = this.activeEffects
+      .filter((name) => this.effects.has(name))
+      .slice()
+      .sort((a, b) => {
+        const ea = this.effects.get(a);
+        const eb = this.effects.get(b);
+        return (ea?.priority ?? 0) - (eb?.priority ?? 0);
+      });
 
-      const isLastEffect = (i === this.activeEffects.length - 1);
+    if (orderedEffectNames.length === 0) {
+      // Nothing valid to run; treat as passthrough.
+      const passthroughEffect = this.effects.get('passthrough');
+      if (!passthroughEffect) {
+        restoreViewport();
+        if (wasBlendEnabled) this.gl.enable(this.gl.BLEND);
+        if (wasDepthTestEnabled) this.gl.enable(this.gl.DEPTH_TEST);
+        if (wasScissorEnabled) this.gl.enable(this.gl.SCISSOR_TEST);
+        return sourceTexture;
+      }
+
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      restoreViewport();
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.quadBuffer);
+      this.gl.useProgram(passthroughEffect.program);
+
+      this.gl.enableVertexAttribArray(passthroughEffect.locations.position);
+      this.gl.vertexAttribPointer(passthroughEffect.locations.position, 2, this.gl.FLOAT, false, 16, 0);
+
+      this.gl.enableVertexAttribArray(passthroughEffect.locations.texCoord);
+      this.gl.vertexAttribPointer(passthroughEffect.locations.texCoord, 2, this.gl.FLOAT, false, 16, 8);
+
+      this.gl.activeTexture(this.gl.TEXTURE0);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, sourceTexture);
+      this.gl.uniform1i(passthroughEffect.locations.image, 0);
+
+      this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+      if (wasBlendEnabled) this.gl.enable(this.gl.BLEND);
+      if (wasDepthTestEnabled) this.gl.enable(this.gl.DEPTH_TEST);
+      if (wasScissorEnabled) this.gl.enable(this.gl.SCISSOR_TEST);
+      return null;
+    }
+
+    for (let i = 0; i < orderedEffectNames.length; i++) {
+      const effectName = orderedEffectNames[i];
+      const effect = this.effects.get(effectName);
+
+      const isLastEffect = (i === orderedEffectNames.length - 1);
       
       // Render to framebuffer or screen
       if (isLastEffect) {
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+        // Draw into whatever viewport the caller set (letterboxed)
+        restoreViewport();
       } else {
         this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.framebuffers[outputIndex]);
+        // Offscreen passes must cover the entire ping-pong texture
+        setOffscreenViewport();
       }
 
       this.gl.useProgram(effect.program);
@@ -211,10 +396,20 @@ export default class PostProcessing {
       this.gl.activeTexture(this.gl.TEXTURE0);
       this.gl.bindTexture(this.gl.TEXTURE_2D, inputTexture);
       this.gl.uniform1i(effect.locations.image, 0);
+
+      // Auto-injected context uniforms (only if the shader defines them)
+      const ctxLoc = effect.contextLocations;
+      if (ctxLoc) {
+        if (ctxLoc.time) this.gl.uniform1f(ctxLoc.time, ctxTime);
+        if (ctxLoc.delta) this.gl.uniform1f(ctxLoc.delta, ctxDelta);
+        if (ctxLoc.resolution) this.gl.uniform2f(ctxLoc.resolution, ctxW, ctxH);
+        if (ctxLoc.aspect) this.gl.uniform1f(ctxLoc.aspect, ctxAspect);
+        if (ctxLoc.frame) this.gl.uniform1f(ctxLoc.frame, ctxFrame);
+      }
       
       // Set custom uniforms
       for (const [name, uniform] of Object.entries(effect.uniforms)) {
-        const location = this.gl.getUniformLocation(effect.program, `u_${name}`);
+        const location = effect.uniformLocations?.[name] ?? this.gl.getUniformLocation(effect.program, `u_${name}`);
         if (location) {
           if (uniform.type === '1f') {
             this.gl.uniform1f(location, uniform.value);
@@ -234,16 +429,29 @@ export default class PostProcessing {
       }
     }
 
+    // Restore state
+    if (wasBlendEnabled) this.gl.enable(this.gl.BLEND);
+    if (wasDepthTestEnabled) this.gl.enable(this.gl.DEPTH_TEST);
+    if (wasScissorEnabled) this.gl.enable(this.gl.SCISSOR_TEST);
+
     return null; // Effects have been applied to screen
   }
 
   resize(width, height) {
-    // Resize framebuffer textures
+    const newWidth = Math.max(1, width | 0);
+    const newHeight = Math.max(1, height | 0);
+
+    // Recreate ping-pong buffers if size changed or not initialized
+    if (newWidth !== this.width || newHeight !== this.height || this.textures.length !== 2) {
+      this.initFramebuffers(newWidth, newHeight);
+    }
+
+    // Resize framebuffer textures (in case initFramebuffers was not called)
     for (const texture of this.textures) {
       this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
       this.gl.texImage2D(
         this.gl.TEXTURE_2D, 0, this.gl.RGBA,
-        width, height, 0,
+        newWidth, newHeight, 0,
         this.gl.RGBA, this.gl.UNSIGNED_BYTE, null
       );
     }
@@ -251,7 +459,7 @@ export default class PostProcessing {
     // Update resolution uniforms for effects that need it
     for (const effect of this.effects.values()) {
       if (effect.uniforms.resolution) {
-        effect.uniforms.resolution.value = [width, height];
+        effect.uniforms.resolution.value = [newWidth, newHeight];
       }
     }
   }

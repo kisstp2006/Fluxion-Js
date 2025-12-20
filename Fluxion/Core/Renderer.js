@@ -35,6 +35,14 @@ export default class Renderer {
     this.maintainAspectRatio = maintainAspectRatio;
     this.enablePostProcessing = enablePostProcessing;
     this.postProcessing = null;
+
+    this.viewport = { x: 0, y: 0, width: 1, height: 1 };
+    this.currentAspectRatio = this.targetAspectRatio;
+
+    this.sceneFramebuffer = null;
+    this.sceneTexture = null;
+    this.sceneWidth = 1;
+    this.sceneHeight = 1;
     
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
@@ -48,8 +56,13 @@ export default class Renderer {
       }
       this.resizeTimeout = requestAnimationFrame(() => {
         this.resizeCanvas();
-        if (this.postProcessing) {
-          this.postProcessing.resize(this.canvas.width, this.canvas.height);
+
+        // Keep post-processing buffers in sync with the letterboxed viewport size
+        if (this.enablePostProcessing) {
+          this.ensureSceneTargets();
+          if (this.postProcessing) {
+            this.postProcessing.resize(this.sceneWidth, this.sceneHeight);
+          }
         }
       });
     });
@@ -107,15 +120,76 @@ export default class Renderer {
       this.canvas.style.width = windowWidth + 'px';
       this.canvas.style.height = windowHeight + 'px';
 
+      // Store viewport info (pixels)
+      this.viewport.x = Math.round(viewportX);
+      this.viewport.y = Math.round(viewportY);
+      this.viewport.width = Math.round(viewportWidth);
+      this.viewport.height = Math.round(viewportHeight);
+      this.currentAspectRatio = this.viewport.width / this.viewport.height;
+
       // Set viewport to maintain aspect ratio with letterboxing
-      this.gl.viewport(viewportX, viewportY, viewportWidth, viewportHeight);
+      this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     } else {
       // Original stretching behavior
       this.canvas.width = windowWidth * dpi;
       this.canvas.height = windowHeight * dpi;
       this.canvas.style.width = windowWidth + 'px';
       this.canvas.style.height = windowHeight + 'px';
+
+      this.viewport.x = 0;
+      this.viewport.y = 0;
+      this.viewport.width = this.canvas.width;
+      this.viewport.height = this.canvas.height;
+      this.currentAspectRatio = this.viewport.width / this.viewport.height;
+
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    }
+  }
+
+  ensureSceneTargets() {
+    if (!this.enablePostProcessing) return;
+
+    const desiredWidth = Math.max(1, this.viewport.width | 0);
+    const desiredHeight = Math.max(1, this.viewport.height | 0);
+
+    if (!this.sceneFramebuffer) {
+      this.sceneFramebuffer = this.gl.createFramebuffer();
+    }
+    if (!this.sceneTexture) {
+      this.sceneTexture = this.gl.createTexture();
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.sceneTexture);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+    }
+
+    if (desiredWidth !== this.sceneWidth || desiredHeight !== this.sceneHeight) {
+      this.sceneWidth = desiredWidth;
+      this.sceneHeight = desiredHeight;
+
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.sceneTexture);
+      this.gl.texImage2D(
+        this.gl.TEXTURE_2D,
+        0,
+        this.gl.RGBA,
+        this.sceneWidth,
+        this.sceneHeight,
+        0,
+        this.gl.RGBA,
+        this.gl.UNSIGNED_BYTE,
+        null
+      );
+
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.sceneFramebuffer);
+      this.gl.framebufferTexture2D(
+        this.gl.FRAMEBUFFER,
+        this.gl.COLOR_ATTACHMENT0,
+        this.gl.TEXTURE_2D,
+        this.sceneTexture,
+        0
+      );
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
     }
   }
 
@@ -183,7 +257,10 @@ export default class Renderer {
     // Initialize post-processing if enabled
     if (this.enablePostProcessing) {
       this.postProcessing = new PostProcessing(this.gl);
-      await this.postProcessing.init();
+
+      // Allocate scene targets to letterboxed viewport size, and init post-processing at that size
+      this.ensureSceneTargets();
+      await this.postProcessing.init(this.sceneWidth, this.sceneHeight);
       console.log('Post-processing initialized');
     }
   }
@@ -237,7 +314,38 @@ export default class Renderer {
 
   clear() {
     if (!this.isReady) return;
+    
+    // If post-processing is enabled, render to framebuffer
+    if (this.enablePostProcessing && this.sceneFramebuffer) {
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.sceneFramebuffer);
+      // Render scene into the offscreen texture at its native size
+      this.gl.viewport(0, 0, this.sceneWidth, this.sceneHeight);
+    } else {
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+    }
+    
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+  }
+  
+  finishFrame() {
+    if (!this.isReady) return;
+    
+    // If post-processing is enabled, apply effects and render to screen
+    if (this.enablePostProcessing && this.postProcessing && this.sceneTexture) {
+      // Unbind framebuffer to render to screen
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      
+      // Clear full screen (keeps black bars clean)
+      this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+
+      // Draw post-processed scene into the letterboxed viewport
+      this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+
+      // Apply post-processing effects
+      this.postProcessing.apply(this.sceneTexture);
+    }
   }
 
   applyTransform(camera) {
@@ -248,7 +356,9 @@ export default class Renderer {
     this.gl.uniform2f(this.cameraPositionLocation, camera.x, camera.y);
     this.gl.uniform1f(this.cameraZoomLocation, camera.zoom);
     this.gl.uniform1f(this.cameraRotationLocation, camera.rotation);
-    this.gl.uniform1f(this.aspectRatioLocation, this.targetAspectRatio);
+
+    // Keep pixel aspect consistent: use the current viewport aspect ratio.
+    this.gl.uniform1f(this.aspectRatioLocation, this.currentAspectRatio);
   }
 
 drawQuad(texture, x, y, width, height, color = [255, 255, 255, 255]) {
