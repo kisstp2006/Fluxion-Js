@@ -20,7 +20,7 @@ if (!gotTheLock) {
         nodeIntegration: false,
         contextIsolation: true,
         enableRemoteModule: false,
-        devTools: false, // IMPORTANT: Disable dev tools in production
+        devTools: true, // Enable dev tools for debugging
         spellcheck: false,
         accessibleTitle: false,
         preload: path.join(__dirname, "preload.js"),
@@ -34,7 +34,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/Character/index.html");
+    mainWindow.loadFile("./Examples/Jolly3Chapter2Elevator/index.html");
   });
 
   ipcMain.on("set-title", (event, title) => {

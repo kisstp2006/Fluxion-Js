@@ -2,9 +2,9 @@ import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 
 export default class Engine {
-    constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true) {
-        // Initialize Renderer with aspect ratio settings
-        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio);
+    constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
+        // Initialize Renderer with aspect ratio settings and post-processing
+        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
         this.camera = new Camera();
         
         this.game = game;
@@ -35,11 +35,6 @@ export default class Engine {
         // Clear the renderer and apply camera transformations
         this.renderer.clear();
         this.renderer.applyTransform(this.camera);
-
-        // If post-processing effects are enabled, apply them
-        if (this.renderer.enablePostProcessing) {
-            this.renderer.applyPostProcessingEffects();
-        }
         
         // Draw the game elements
         if (this.game.draw) {

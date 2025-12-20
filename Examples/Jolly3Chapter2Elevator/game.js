@@ -50,22 +50,23 @@ var elevatorprogress = 0.0;
 
 const game = {
     spriteList: [], // Array to store sprites
-    camera: { x: 2, y: 0, zoom: 1 }, // Camera properties (position and zoom)
+    camera: { x: 2 * (16/9), y: 0, zoom: 1 }, // Camera properties (position and zoom) - adjusted for aspect ratio
     shakeIntensity: 0.001, // Intensity of camera shake effect
     originalCameraPosition: { x: 0, y: 0 }, // Store the original camera position
 
     init(renderer) {
         // Initialize the game
-        const FluxionL = new Sprite(renderer, FluxionLogo, -0.9, -0.8, 0.5, 0.3); // Create and position the Fluxion logo
+        const aspectRatio = 16 / 9;
+        const FluxionL = new Sprite(renderer, FluxionLogo, -0.9 * aspectRatio, -0.8, 0.5 * aspectRatio, 0.3); // Create and position the Fluxion logo
 
         this.camera.zoom = 1.10; // Set initial camera zoom
-        this.spriteList.push(new Sprite(renderer, floor1, -0.5, -3, 1.3, 1.5)); // Create and add floor1 sprite
-        this.spriteList.push(new Sprite(renderer, floor2, -0.5, -6, 1.3, 1.5)); // Create and add floor2 sprite
-        this.spriteList.push(new Sprite(renderer, floor3, -0.5, -9, 1.3, 1.5)); // Create and add floor3 sprite
-        this.spriteList.push(new Sprite(renderer, pipesBg, -1, -2.6, 2.5, 2)); // Create and add pipes background sprite
-        this.spriteList.push(new Sprite(renderer, elevatorDoor[0], -0.2, -0.95, 0.91, 1.9)); // Create and add elevator door sprite
-        this.spriteList.push(new Sprite(renderer, elevator[0], -1, -1, 2.5, 2)); // Create and add elevator sprite
-        this.spriteList.push(new Sprite(renderer, monitor[0], -0.54, 0.22, 0.5, 0.75)); // Create and add monitor sprite
+        this.spriteList.push(new Sprite(renderer, floor1, -0.5 * aspectRatio, -3, 1.3 * aspectRatio, 1.5)); // Create and add floor1 sprite
+        this.spriteList.push(new Sprite(renderer, floor2, -0.5 * aspectRatio, -6, 1.3 * aspectRatio, 1.5)); // Create and add floor2 sprite
+        this.spriteList.push(new Sprite(renderer, floor3, -0.5 * aspectRatio, -9, 1.3 * aspectRatio, 1.5)); // Create and add floor3 sprite
+        this.spriteList.push(new Sprite(renderer, pipesBg, -1 * aspectRatio, -2.6, 2.5 * aspectRatio, 2)); // Create and add pipes background sprite
+        this.spriteList.push(new Sprite(renderer, elevatorDoor[0], -0.2 * aspectRatio, -0.95, 0.91 * aspectRatio, 1.9)); // Create and add elevator door sprite
+        this.spriteList.push(new Sprite(renderer, elevator[0], -1 * aspectRatio, -1, 2.5 * aspectRatio, 2)); // Create and add elevator sprite
+        this.spriteList.push(new Sprite(renderer, monitor[0], -0.54 * aspectRatio, 0.22, 0.5 * aspectRatio, 0.75)); // Create and add monitor sprite
         this.spriteList.push(FluxionL); // Add the Fluxion logo sprite
 
         // Store original camera position
@@ -78,16 +79,17 @@ const game = {
     update(deltaTime) {
         // Update the game logic
         // Update camera position based on mouse input
+        const aspectRatio = 16 / 9;
         if (this.camera.x > 0) {
             if (input.getMousePosition().x < 300) {
-                this.camera.x -= 1.00 * deltaTime; // Move camera left
-                this.spriteList[7].x -= 1.00 * deltaTime; //Move logo left.
+                this.camera.x -= 1.00 * aspectRatio * deltaTime; // Move camera left
+                this.spriteList[7].x -= 1.00 * aspectRatio * deltaTime; //Move logo left.
             }
         }
-        if (this.camera.x < 0.5) {
+        if (this.camera.x < 0.5 * aspectRatio) {
             if (input.getMousePosition().x > 900) {
-                this.camera.x += 1.00 * deltaTime; // Move camera right
-                this.spriteList[7].x += 1.00 * deltaTime; //Move logo right.
+                this.camera.x += 1.00 * aspectRatio * deltaTime; // Move camera right
+                this.spriteList[7].x += 1.00 * aspectRatio * deltaTime; //Move logo right.
             }
         }
 

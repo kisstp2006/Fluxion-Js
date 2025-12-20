@@ -1,5 +1,7 @@
+import PostProcessing from './PostProcessing.js';
+
 export default class Renderer {
-  constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true) {
+  constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
     this.canvas = document.getElementById(canvasId);
     this.gl = this.canvas.getContext("webgl");
 
@@ -31,6 +33,8 @@ export default class Renderer {
     this.targetHeight = targetHeight;
     this.targetAspectRatio = targetWidth / targetHeight;
     this.maintainAspectRatio = maintainAspectRatio;
+    this.enablePostProcessing = enablePostProcessing;
+    this.postProcessing = null;
     
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
@@ -42,7 +46,12 @@ export default class Renderer {
       if (this.resizeTimeout) {
         cancelAnimationFrame(this.resizeTimeout);
       }
-      this.resizeTimeout = requestAnimationFrame(() => this.resizeCanvas());
+      this.resizeTimeout = requestAnimationFrame(() => {
+        this.resizeCanvas();
+        if (this.postProcessing) {
+          this.postProcessing.resize(this.canvas.width, this.canvas.height);
+        }
+      });
     });
 
     this.canvas.addEventListener('webglcontextlost', (e) => {
@@ -170,6 +179,13 @@ export default class Renderer {
     this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
     this.gl.enableVertexAttribArray(this.texcoordLocation);
     this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+    
+    // Initialize post-processing if enabled
+    if (this.enablePostProcessing) {
+      this.postProcessing = new PostProcessing(this.gl);
+      await this.postProcessing.init();
+      console.log('Post-processing initialized');
+    }
   }
 
   createShader(type, source) {
