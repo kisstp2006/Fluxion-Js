@@ -53,4 +53,6 @@ const game = {
     }
 };
 
-new Engine("gameCanvas", game);
+// Use a logical resolution that matches the Electron window defaults (main.js).
+// With the engine's pixel coordinate system, (0,0) is top-left and (1280,720) is bottom-right.
+new Engine("gameCanvas", game, 1280, 720);

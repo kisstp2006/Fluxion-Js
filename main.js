@@ -34,7 +34,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/Jolly3Chapter2ElevatorXaml/index.html");
+    mainWindow.loadFile("./Examples/TextTest/index.html");
   });
 
   // Window Management IPC Handlers

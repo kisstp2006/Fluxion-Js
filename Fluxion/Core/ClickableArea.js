@@ -5,6 +5,13 @@ export default class ClickableArea {
         this.renderer = renderer;
         this.parent = null;
         this.name = "ClickableArea";
+
+        // Optional local rectangle (relative to parent top-left).
+        // If width/height are null, the parent's width/height are used.
+        this.x = 0;
+        this.y = 0;
+        this.width = null;
+        this.height = null;
         
         this.isHovered = false;
         this.isPressed = false;
@@ -18,13 +25,19 @@ export default class ClickableArea {
     }
 
     update(dt, camera) {
-        if (!this.parent || !camera) return;
+        // If we have no parent, we can only function if a world-space rectangle is defined.
+        // (Most common usage is as a child of a Sprite, so parent is expected.)
+        if (!this.parent && (this.width === null || this.height === null)) return;
         
         const input = Input.instance;
         if (!input) return;
 
+        // Prefer the camera actually used for rendering this frame.
+        const activeCamera = (this.renderer && this.renderer.activeCamera) ? this.renderer.activeCamera : camera;
+        if (!activeCamera) return;
+
         const mousePos = input.getMousePosition();
-        const worldPos = this.renderer.screenToWorld(mousePos.x, mousePos.y, camera);
+        const worldPos = this.renderer.screenToWorld(mousePos.x, mousePos.y, activeCamera);
         
         // Check collision with parent bounds
         // Assuming parent has x, y, width, height (centered or top-left?)
@@ -66,11 +79,17 @@ export default class ClickableArea {
         // y <= mouse.y <= y + height
         
         const p = this.parent;
+
+        const boundsX = p ? (p.x + (this.x || 0)) : (this.x || 0);
+        const boundsY = p ? (p.y + (this.y || 0)) : (this.y || 0);
+        const boundsW = (this.width !== null && this.width !== undefined) ? this.width : (p ? p.width : 0);
+        const boundsH = (this.height !== null && this.height !== undefined) ? this.height : (p ? p.height : 0);
+
         const hit = (
-            worldPos.x >= p.x &&
-            worldPos.x <= p.x + p.width &&
-            worldPos.y >= p.y &&
-            worldPos.y <= p.y + p.height
+            worldPos.x >= boundsX &&
+            worldPos.x <= boundsX + boundsW &&
+            worldPos.y >= boundsY &&
+            worldPos.y <= boundsY + boundsH
         );
 
         if (hit) {

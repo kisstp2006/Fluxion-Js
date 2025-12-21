@@ -117,9 +117,13 @@ export default class Renderer {
 
       // Store viewport info (pixels)
       this.viewport.x = Math.round(viewportX);
-      this.viewport.y = Math.round(viewportY);
       this.viewport.width = Math.round(viewportWidth);
       this.viewport.height = Math.round(viewportHeight);
+
+      // IMPORTANT: WebGL viewport Y is measured from the bottom of the drawing buffer.
+      // Our computed viewportY is measured from the top (DOM-style). Convert it.
+      const viewportBottomY = (this.canvas.height - viewportY - viewportHeight);
+      this.viewport.y = Math.round(viewportBottomY);
       this.currentAspectRatio = this.viewport.width / this.viewport.height;
 
       // Set viewport to maintain aspect ratio with letterboxing
@@ -244,7 +248,7 @@ export default class Renderer {
     this.cameraPositionLocation = this.gl.getUniformLocation(this.program, "u_cameraPosition");
     this.cameraZoomLocation = this.gl.getUniformLocation(this.program, "u_cameraZoom");
     this.cameraRotationLocation = this.gl.getUniformLocation(this.program, "u_cameraRotation");
-    this.aspectRatioLocation = this.gl.getUniformLocation(this.program, "u_aspectRatio");
+    this.resolutionLocation = this.gl.getUniformLocation(this.program, "u_resolution");
     this.colorLocation = this.gl.getUniformLocation(this.program, "u_color");
 
 
@@ -303,6 +307,9 @@ export default class Renderer {
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
     this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    // Make (0,0) in UV space correspond to the top-left of the source image/canvas.
+    // This matches our engine's 2D convention (Y down) and keeps sprites/text upright.
+    // this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, true);
 
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
@@ -318,51 +325,43 @@ export default class Renderer {
       image
     );
 
+    // Reset state to avoid surprising other uploads.
+    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+
     this.gl.bindTexture(this.gl.TEXTURE_2D, null);
     return texture;
   }
 
   beginFrame() {
     if (!this.isReady) return;
-    
-    // Always render to the main screen framebuffer first
-    if (this.mainScreenFramebuffer) {
+
+    if (this.enablePostProcessing && this.mainScreenFramebuffer) {
+      // Render to offscreen target for post-processing.
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
-      
+
       // Clear the entire framebuffer (including black bars area)
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-      
+
       // Set viewport to the letterboxed area for the game to draw into
       this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+      return;
     }
+
+    // No post-processing: render directly to the default framebuffer.
+    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+    this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
   }
   
   endFrame() {
     if (!this.isReady) return;
-    
+
     if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {
       // Pass the main screen texture to the post-processing system
       // The output goes to the default framebuffer (null)
       this.postProcessing.render(this.mainScreenTexture, null);
-    } else if (this.mainScreenTexture) {
-      // If post-processing is disabled, just draw the main screen texture to the canvas
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-      this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-      
-      // Use a simple pass-through draw
-      // We can use the post-processing system's quad or a simple internal draw
-      // Since we might not have PostProcessing initialized, we should have a fallback or use a simple shader
-      // But wait, if enablePostProcessing is false, this.postProcessing is null.
-      // We need a way to draw a full screen quad here.
-      
-      // We can reuse drawQuad but we need to set up the shader for it.
-      // drawQuad uses the default shader which expects a camera transform.
-      // We need a simple screen-space draw.
-      
-      // Let's use a simple blit method.
-      this.blitTexture(this.mainScreenTexture);
     }
   }
 
@@ -375,44 +374,61 @@ export default class Renderer {
       this.gl.uniform2f(this.cameraPositionLocation, 0, 0);
       this.gl.uniform1f(this.cameraZoomLocation, 1.0);
       this.gl.uniform1f(this.cameraRotationLocation, 0.0);
-      this.gl.uniform1f(this.aspectRatioLocation, 1.0); // 1.0 because we are drawing in NDC -1 to 1
+      // When blitting, we draw in *pixel* space to cover the full canvas.
+      this.gl.uniform2f(this.resolutionLocation, this.canvas.width, this.canvas.height);
       
-      // Draw a quad from -1 to 1
-      // But wait, drawQuad takes x, y, width, height.
-      // If we pass x=-1, y=-1, width=2, height=2, it should work if the vertex shader handles it.
-      // Let's check the vertex shader.
-      
-      // Actually, let's just implement a simple blit here using the existing buffers
-      // The existing buffer is for sprites.
-      
-      // Let's assume drawQuad works in world coordinates.
-      // If we want to draw to screen space, we need to bypass the camera transform or set it to identity.
-      // I set it to identity above.
+      // Draw a quad that covers the full canvas (device pixels).
       
       // Ensure texture unit 0 is used
       this.gl.uniform1i(this.textureLocation, 0);
       this.gl.activeTexture(this.gl.TEXTURE0);
 
-      // We need to flip Y because drawQuad assumes a coordinate system where Y is down (for sprites),
-      // but in NDC Y is up.
-      // Also drawQuad maps the first pair of vertices to Tex(0,1) which is Top-Left in UV space (if 0,0 is BL).
-      // By passing y=1 and height=-2:
-      // TL becomes (-1, 1) -> Top-Left on screen.
-      // BL becomes (-1, -1) -> Bottom-Left on screen.
-      this.drawQuad(texture, -1, 1, 2, -2);
+      // When sampling from a framebuffer texture, WebGL's texture origin ends up effectively flipped
+      // relative to our normal sprite/image upload path. Flip V here to keep the final image upright.
+      this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+
+      // Ensure vertex attributes are pointing to the correct buffer
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
+      this.gl.enableVertexAttribArray(this.positionLocation);
+      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
+      this.gl.enableVertexAttribArray(this.texcoordLocation);
+      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+
+      // White tint
+      this.gl.uniform4fv(this.colorLocation, [1, 1, 1, 1]);
+
+      const w = this.canvas.width;
+      const h = this.canvas.height;
+
+      // Vertex structure: x, y, u, v
+      // Flip V: top uses v=1, bottom uses v=0
+      const quad = new Float32Array([
+        0, 0, 0, 1,      // Top-left
+        w, 0, 1, 1,      // Top-right
+        0, h, 0, 0,      // Bottom-left
+        w, h, 1, 0,      // Bottom-right
+      ]);
+
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
+      this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
   }
 
   applyTransform(camera) {
     if (!this.isReady) return;
     this.gl.useProgram(this.program);
 
+    // Store the camera used for rendering so other systems (e.g. input hit-testing)
+    // can use the exact same transform.
+    this.activeCamera = camera;
+
     // Set individual uniforms for position, zoom, and rotation
     this.gl.uniform2f(this.cameraPositionLocation, camera.x, camera.y);
     this.gl.uniform1f(this.cameraZoomLocation, camera.zoom);
     this.gl.uniform1f(this.cameraRotationLocation, camera.rotation);
 
-    // Keep pixel aspect consistent: use the current viewport aspect ratio.
-    this.gl.uniform1f(this.aspectRatioLocation, this.currentAspectRatio);
+    // Godot-like logical pixel resolution for world coords.
+    // Objects are placed in [0..targetWidth] x [0..targetHeight] by default.
+    this.gl.uniform2f(this.resolutionLocation, this.targetWidth, this.targetHeight);
   }
 
   drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255]) {
@@ -437,14 +453,13 @@ export default class Renderer {
         const sW = srcWidth || texW;
         const sH = srcHeight || texH;
 
-        // Calculate UVs (assuming standard top-left origin for image data)
-        // WebGL texture coordinates: (0,0) is bottom-left
+        // Calculate UVs using a top-left origin.
+        // Textures are uploaded with UNPACK_FLIP_Y_WEBGL, so v=0 corresponds to the top.
         u0 = sX / texW;
         u1 = (sX + sW) / texW;
-        
-        // Flip Y for UVs because image data is top-down but texture space is bottom-up
-        v1 = 1.0 - (sY / texH);          // Top
-        v0 = 1.0 - ((sY + sH) / texH);   // Bottom
+
+        v0 = sY / texH;          // Top
+        v1 = (sY + sH) / texH;   // Bottom
     }
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
@@ -460,10 +475,10 @@ export default class Renderer {
     // Világkoordinátákban dolgozunk!
     // Vertex structure: x, y, u, v
     const quad = new Float32Array([
-        x, y, u0, v1,           // Top-left
-        x + width, y, u1, v1,   // Top-right
-        x, y + height, u0, v0,  // Bottom-left
-        x + width, y + height, u1, v0, // Bottom-right
+      x, y, u0, v0,           // Top-left
+      x + width, y, u1, v0,   // Top-right
+      x, y + height, u0, v1,  // Bottom-left
+      x + width, y + height, u1, v1, // Bottom-right
     ]);
 
     this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
@@ -475,44 +490,53 @@ export default class Renderer {
 }
 
   screenToWorld(screenX, screenY, camera) {
-      // 1. Convert screen coordinates to Viewport coordinates
-      // The viewport might have an offset (viewport.x, viewport.y)
-      const canvasX = screenX; // Assuming screenX is relative to the canvas/window client area
-      const canvasY = screenY;
+      if (!camera) return { x: 0, y: 0 };
 
-      // 2. Convert to Normalized Device Coordinates (NDC) [-1, 1]
-      // Note: In WebGL, Y is up, but in screen coords, Y is down.
-      const ndcX = ((canvasX - this.viewport.x) / this.viewport.width) * 2 - 1;
-      const ndcY = -(((canvasY - this.viewport.y) / this.viewport.height) * 2 - 1);
+      // Convert client (CSS pixel) coordinates into canvas-relative CSS pixels.
+      // Input uses e.clientX/e.clientY (window coords), so we subtract canvas rect.
+      const rect = this.canvas.getBoundingClientRect();
+      const localCssX = screenX - rect.left;
+      const localCssY = screenY - rect.top;
 
-      // 3. Reverse the Vertex Shader transformations
-      // Shader: 
-      // vec2 transformedPosition = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
-      // transformedPosition.x /= u_aspectRatio;
-      
-      // Reverse Aspect Ratio
-      let worldX = ndcX * this.currentAspectRatio;
-      let worldY = ndcY;
+      // Convert CSS pixels to device pixels (matches this.viewport units).
+      const cssToDeviceX = this.canvas.width / rect.width;
+      const cssToDeviceY = this.canvas.height / rect.height;
+      const localDeviceX = localCssX * cssToDeviceX;
+      const localDeviceY = localCssY * cssToDeviceY;
 
-      // Reverse Zoom
-      worldX /= camera.zoom;
-      worldY /= camera.zoom;
+      // Convert mouse position into WebGL device pixels (origin bottom-left)
+      const webglDeviceX = localDeviceX;
+      const webglDeviceY = this.canvas.height - localDeviceY;
 
-      // Reverse Rotation
+      // Map WebGL device pixels inside the (letterboxed) viewport into normalized viewport UVs.
+      // Note: this.viewport.{x,y,width,height} are in WebGL coordinates (bottom-left).
+      const u = (webglDeviceX - this.viewport.x) / this.viewport.width;
+      const v = (webglDeviceY - this.viewport.y) / this.viewport.height;
+
+      const uClamped = Math.max(0, Math.min(1, u));
+      const vClamped = Math.max(0, Math.min(1, v));
+
+      // Convert to logical pixel coordinates where (0,0) is top-left.
+      const screenPxX = uClamped * this.targetWidth;
+      const screenPxY = (1 - vClamped) * this.targetHeight;
+
+      // Invert the vertex shader math (pixel-space camera):
+      // viewPos = (R * (world - cameraPos)) * zoom
+      // => world = (R^-1 * (viewPos / zoom)) + cameraPos
+      const viewX = screenPxX;
+      const viewY = screenPxY;
+
+      const unzoomX = viewX / camera.zoom;
+      const unzoomY = viewY / camera.zoom;
+
       const cosR = Math.cos(camera.rotation);
       const sinR = Math.sin(camera.rotation);
-      
-      // Inverse rotation matrix (transpose of rotation matrix)
-      // [ cos  sin ]
-      // [ -sin cos ]
-      const rotatedX = worldX * cosR - worldY * (-sinR);
-      const rotatedY = worldX * (-sinR) + worldY * cosR;
 
-      // Reverse Translation
-      const finalX = rotatedX + camera.x;
-      const finalY = rotatedY + camera.y;
+      // Inverse rotation (transpose)
+      const worldRelX = unzoomX * cosR + unzoomY * sinR;
+      const worldRelY = -unzoomX * sinR + unzoomY * cosR;
 
-      return { x: finalX, y: finalY };
+      return { x: worldRelX + camera.x, y: worldRelY + camera.y };
   }
 
 }

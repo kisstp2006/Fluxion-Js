@@ -3,7 +3,7 @@ attribute vec2 a_texcoord;
 uniform vec2 u_cameraPosition;
 uniform float u_cameraZoom;
 uniform float u_cameraRotation;
-uniform float u_aspectRatio;
+uniform vec2 u_resolution;
 varying vec2 v_texcoord;
 
 void main() {
@@ -16,12 +16,17 @@ void main() {
     sinR, cosR
   );
 
-  // Apply transformations: translate -> rotate -> scale
-  vec2 transformedPosition = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
-  
-  // Apply aspect ratio correction to x-coordinate
-  transformedPosition.x /= u_aspectRatio;
+  // Godot-like 2D coordinates:
+  // - a_position is in pixels
+  // - (0,0) is top-left of the viewport when the camera is at (0,0)
+  // - +X right, +Y down
+  // Camera transform is applied in pixel space, then we map to NDC.
+  vec2 viewPos = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
+  vec2 ndc = vec2(
+    (viewPos.x / u_resolution.x) * 2.0 - 1.0,
+    1.0 - (viewPos.y / u_resolution.y) * 2.0
+  );
 
-  gl_Position = vec4(transformedPosition, 0, 1);
+  gl_Position = vec4(ndc, 0.0, 1.0);
   v_texcoord = a_texcoord;
 }

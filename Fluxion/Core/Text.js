@@ -9,7 +9,8 @@ export default class Text extends Sprite {
         this._fontFamily = fontFamily;
         this._textColor = color;
         this.padding = 5;
-        this.pixelsPerUnit = 100; // Default PPU
+        // In the engine's Godot-like coordinate system, 1 world unit = 1 pixel.
+        this.pixelsPerUnit = 1;
         
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');

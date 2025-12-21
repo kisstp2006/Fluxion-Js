@@ -114,6 +114,15 @@ export default class SceneLoader {
         else if (tagName === "ClickableArea") {
             const area = new ClickableArea(renderer);
             area.name = getString("name", "ClickableArea");
+
+            // Optional hitbox rectangle (local to parent top-left).
+            // If width/height are omitted, defaults to parent's bounds.
+            // Coordinates are in pixels in the new coordinate system.
+            area.x = getFloat("x", 0);
+            area.y = getFloat("y", 0);
+            if (node.hasAttribute("width")) area.width = getFloat("width");
+            if (node.hasAttribute("height")) area.height = getFloat("height");
+
             obj = area;
         }
 
