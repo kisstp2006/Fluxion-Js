@@ -12,6 +12,15 @@ const game = {
         this.currentScene = await SceneLoader.load("scene.xml", renderer);
         console.log("Scene loaded:", this.currentScene);
 
+        // Apply scene camera resolution if defined
+        if (this.currentScene.camera && this.currentScene.camera.width > 0 && this.currentScene.camera.height > 0) {
+            console.log(`Setting resolution from scene: ${this.currentScene.camera.width}x${this.currentScene.camera.height}`);
+            renderer.targetWidth = this.currentScene.camera.width;
+            renderer.targetHeight = this.currentScene.camera.height;
+            renderer.targetAspectRatio = renderer.targetWidth / renderer.targetHeight;
+            renderer.resizeCanvas(); // Force resize update
+        }
+
         const btnHitbox = this.currentScene.getObjectByName("ButtonHitbox");
         const counterText = this.currentScene.getObjectByName("Counter");
         const buttonSprite = this.currentScene.getObjectByName("Button");

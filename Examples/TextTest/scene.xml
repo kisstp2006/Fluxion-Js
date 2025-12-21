@@ -1,5 +1,5 @@
 <Scene name="TextScene">
-    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+    <Camera name="MainCamera" x="0" y="0" zoom="1" width="1280" height="720" />
     
     <Text name="Title" text="Hello Fluxion!" x="24" y="24" fontSize="52" fontFamily="Arial" color="#22ff22" />
     

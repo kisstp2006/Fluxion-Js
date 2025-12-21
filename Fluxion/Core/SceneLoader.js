@@ -172,9 +172,15 @@ export default class SceneLoader {
             const zoom = getFloat("zoom", 1);
             const rotation = getFloat("rotation", 0);
             
+            // Use renderer's target resolution as fallback if available, otherwise default to 1920x1080
+            const defaultWidth = renderer ? renderer.targetWidth : 1920;
+            const defaultHeight = renderer ? renderer.targetHeight : 1080;
+
+            const width = getFloat("width", defaultWidth);
+            const height = getFloat("height", defaultHeight);
+            
             // Camera constructor: x, y, zoom, rotation, width, height
-            // Width/Height are usually set by the engine/renderer size, so we might leave them 0 or default.
-            const camera = new Camera(x, y, zoom, rotation);
+            const camera = new Camera(x, y, zoom, rotation, width, height);
             camera.name = getString("name");
             obj = camera;
         }
