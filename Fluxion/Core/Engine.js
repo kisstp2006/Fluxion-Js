@@ -15,19 +15,53 @@ export default class Engine {
         
         this.lastTime = 0;
 
-        // Load default font
-        this.loadDefaultFont().then(() => {
-            // Wait for renderer to be ready before starting
-            this.renderer.readyPromise.then(() => {
-                // Initialize the game
-                if (this.game.init) {
-                    this.game.init(this.renderer);
-                }
-                
-                requestAnimationFrame(this.loop.bind(this));
+        // Load default font and version info
+        Promise.all([this.loadDefaultFont(), this.loadVersionInfo()])
+            .then(() => {
+                // Wait for renderer to be ready before starting
+                this.renderer.readyPromise.then(() => {
+                    // Initialize the game
+                    if (this.game.init) {
+                        this.game.init(this.renderer);
+                    }
+                    
+                    requestAnimationFrame(this.loop.bind(this));
+                });
+            })
+            .catch(error => {
+                console.error("Engine initialization aborted due to critical error:", error);
             });
-        });
     } 
+
+    async loadVersionInfo() {
+        try {
+            const response = await fetch(new URL('../version.py', import.meta.url));
+            if (!response.ok) {
+                throw new Error(`Version file missing or inaccessible (Status: ${response.status})`);
+            }
+
+            const text = await response.text();
+            const lines = text.split('\n');
+            const versionInfo = {};
+            lines.forEach(line => {
+                const match = line.match(/^([A-Z_]+)\s*=\s*"(.*)"/);
+                if (match) {
+                    versionInfo[match[1]] = match[2];
+                }
+            });
+
+            if (!versionInfo.ENGINE_NAME || !versionInfo.VERSION) {
+                throw new Error("Version file is corrupted or missing required fields.");
+            }
+
+            console.log(`Fluxion Engine Loaded: ${versionInfo.ENGINE_NAME} v${versionInfo.VERSION} (${versionInfo.CODENAME})`);
+            this.versionInfo = versionInfo;
+        } catch (error) {
+            console.error("CRITICAL ERROR: Failed to load engine version info.", error);
+            alert("CRITICAL ERROR: Engine version file (version.py) is missing or corrupted. The engine cannot start.");
+            throw error; // Stop initialization
+        }
+    }
 
     async loadDefaultFont() {
         try {
