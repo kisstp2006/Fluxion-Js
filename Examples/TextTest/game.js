@@ -9,7 +9,7 @@ const game = {
     clickCount: 0,
 
     async init(renderer) {
-        this.currentScene = await SceneLoader.load("scene.xml", renderer);
+        this.currentScene = await SceneLoader.load("scene2.xml", renderer);
         console.log("Scene loaded:", this.currentScene);
 
         // Apply scene camera resolution if defined
