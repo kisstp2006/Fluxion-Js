@@ -20,12 +20,12 @@ function resumeAudioContext() {
 const game = {
     scene: null,
     elevatorProgress: 0.0,
-    shakeIntensity: 0.001,
+    shakeIntensity: 1.0, // Increased for pixel coords
     aspectRatio: 16 / 9,
     scrollLeftActive: false,
     scrollRightActive: false,
-    scrollSpeed: 1.0,
-    cameraMinX: 0,
+    scrollSpeed: 1000.0, // Pixels per second
+    cameraMinX: 960,
     cameraMaxX: 0,
 
     async init(renderer) {
@@ -48,7 +48,7 @@ const game = {
         this.scene.setCamera(this.camera);
 
         // Camera pan bounds (start position is the right-most limit)
-        this.cameraMinX = 0;
+        this.cameraMinX = 960;
         this.cameraMaxX = this.camera.x;
 
         // Hook up scroll hitboxes
@@ -80,23 +80,23 @@ const game = {
         const leftZone = this.scene.getObjectByName("ScrollLeftZone");
         const rightZone = this.scene.getObjectByName("ScrollRightZone");
         if (leftZone && rightZone) {
-            const halfViewWidth = this.aspectRatio / this.camera.zoom;
-            const halfViewHeight = 1 / this.camera.zoom;
+            const halfViewWidth = (1920 / this.camera.zoom) / 2;
+            const halfViewHeight = (1080 / this.camera.zoom) / 2;
 
             const viewWidth = halfViewWidth * 2;
             const viewHeight = halfViewHeight * 2;
             const zoneWidth = viewWidth * 0.12;
 
             const viewLeft = this.camera.x - halfViewWidth;
-            const viewBottom = this.camera.y - halfViewHeight;
+            const viewTop = this.camera.y - halfViewHeight;
 
             leftZone.x = viewLeft;
-            leftZone.y = viewBottom;
+            leftZone.y = viewTop;
             leftZone.width = zoneWidth;
             leftZone.height = viewHeight;
 
             rightZone.x = viewLeft + viewWidth - zoneWidth;
-            rightZone.y = viewBottom;
+            rightZone.y = viewTop;
             rightZone.width = zoneWidth;
             rightZone.height = viewHeight;
         }

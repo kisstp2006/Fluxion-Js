@@ -36,22 +36,23 @@ const game = {
         const player = this.scene.getObjectByName("Player");
 
         if (player) {
+            const speed = 500;
             // Move the sprite based on keyboard input
             if (input.getKey("w")) {
                 // If the 'w' key is pressed, move the sprite up
-                player.y += 1 * deltaTime; // Adjust the sprite's y-coordinate based on deltaTime
+                player.y -= speed * deltaTime; // Adjust the sprite's y-coordinate based on deltaTime
             }
             if (input.getKey("a")) {
                 // If the 'a' key is pressed, move the sprite left
-                player.x -= 1 * deltaTime; // Adjust the sprite's x-coordinate based on deltaTime
+                player.x -= speed * deltaTime; // Adjust the sprite's x-coordinate based on deltaTime
             }
             if (input.getKey("s")) {
                 // If the 's' key is pressed, move the sprite down
-                player.y -= 1 * deltaTime; // Adjust the sprite's y-coordinate based on deltaTime
+                player.y += speed * deltaTime; // Adjust the sprite's y-coordinate based on deltaTime
             }
             if (input.getKey("d")) {
                 // If the 'd' key is pressed, move the sprite right
-                player.x += 1 * deltaTime; // Adjust the sprite's x-coordinate based on deltaTime
+                player.x += speed * deltaTime; // Adjust the sprite's x-coordinate based on deltaTime
             }
         }
 

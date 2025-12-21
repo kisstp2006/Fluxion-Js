@@ -1,8 +1,8 @@
 <Scene name="Test Level">
     <Text name="TitleText"
           text="Xaml Loading Example"
-          x="-0.5"
-          y="0.5"
+          x="320"
+          y="100"
           fontSize="48"
           fontFamily="Arial"
           color="#ffffff"/>
@@ -10,10 +10,10 @@
     <!-- Static Background Sprite -->
     <Sprite name="ClickableSprite"
             imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
-            x="-0.8"
-            y="-0.5"
-            width="0.5"
-            height="0.5">
+            x="100"
+            y="300"
+            width="200"
+            height="200">
         <ClickableArea name="MyHitbox"/>
     </Sprite>
 
@@ -22,10 +22,10 @@
     <!-- We'll just animate through them -->
     <AnimatedSprite
         imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
-        x="0.2"
-        y="-0.5"
-        width="0.5"
-        height="0.5"
+        x="800"
+        y="300"
+        width="200"
+        height="200"
         frameWidth="128"
         frameHeight="128">
 

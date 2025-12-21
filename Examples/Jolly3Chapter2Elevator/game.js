@@ -56,18 +56,34 @@ const game = {
 
     init(renderer) {
         // Initialize the game
-        const aspectRatio = 16 / 9;
-        const FluxionL = new Sprite(renderer, FluxionLogo, -0.9 * aspectRatio, -0.8, 0.5 * aspectRatio, 0.3); // Create and position the Fluxion logo
+        // Converted to 1920x1080 pixel coordinates
+        // Scale ~ 540 pixels per unit
+        
+        const FluxionL = new Sprite(renderer, FluxionLogo, 96, 972, 480, 162); 
 
-        this.camera.zoom = 1.10; // Set initial camera zoom
-        this.spriteList.push(new Sprite(renderer, floor1, -0.5 * aspectRatio, -3, 1.3 * aspectRatio, 1.5)); // Create and add floor1 sprite
-        this.spriteList.push(new Sprite(renderer, floor2, -0.5 * aspectRatio, -6, 1.3 * aspectRatio, 1.5)); // Create and add floor2 sprite
-        this.spriteList.push(new Sprite(renderer, floor3, -0.5 * aspectRatio, -9, 1.3 * aspectRatio, 1.5)); // Create and add floor3 sprite
-        this.spriteList.push(new Sprite(renderer, pipesBg, -1 * aspectRatio, -2.6, 2.5 * aspectRatio, 2)); // Create and add pipes background sprite
-        this.spriteList.push(new Sprite(renderer, elevatorDoor[0], -0.2 * aspectRatio, -0.95, 0.91 * aspectRatio, 1.9)); // Create and add elevator door sprite
-        this.spriteList.push(new Sprite(renderer, elevator[0], -1 * aspectRatio, -1, 2.5 * aspectRatio, 2)); // Create and add elevator sprite
-        this.spriteList.push(new Sprite(renderer, monitor[0], -0.54 * aspectRatio, 0.22, 0.5 * aspectRatio, 0.75)); // Create and add monitor sprite
-        this.spriteList.push(FluxionL); // Add the Fluxion logo sprite
+        this.camera.zoom = 1.10; 
+        // Floors (Y was -3, -6, -9 -> 2160, 3780, 5400)
+        this.spriteList.push(new Sprite(renderer, floor1, 480, 2160, 1242, 810)); 
+        this.spriteList.push(new Sprite(renderer, floor2, 480, 3780, 1242, 810)); 
+        this.spriteList.push(new Sprite(renderer, floor3, 480, 5400, 1242, 810)); 
+        
+        // Pipes
+        this.spriteList.push(new Sprite(renderer, pipesBg, 0, 1944, 2400, 1080)); 
+        
+        // Elevator Door
+        this.spriteList.push(new Sprite(renderer, elevatorDoor[0], 770, 1053, 870, 1026)); 
+        
+        // Elevator
+        this.spriteList.push(new Sprite(renderer, elevator[0], 0, 1080, 2400, 1080)); 
+        
+        // Monitor
+        this.spriteList.push(new Sprite(renderer, monitor[0], 441, 421, 475, 405)); 
+        
+        this.spriteList.push(FluxionL); 
+
+        // Camera start position (was 2 * 1.77 = 3.55 -> ~2880)
+        this.camera.x = 2880;
+        this.camera.y = 540;
 
         // Store original camera position
         this.originalCameraPosition.x = this.camera.x;
@@ -79,17 +95,19 @@ const game = {
     update(deltaTime) {
         // Update the game logic
         // Update camera position based on mouse input
-        const aspectRatio = 16 / 9;
-        if (this.camera.x > 0) {
+        const speed = 1000; // Pixels per second
+        
+        if (this.camera.x > 960) { // Was > 0
             if (input.getMousePosition().x < 300) {
-                this.camera.x -= 1.00 * aspectRatio * deltaTime; // Move camera left
-                this.spriteList[7].x -= 1.00 * aspectRatio * deltaTime; //Move logo left.
+                this.camera.x -= speed * deltaTime; 
+                this.spriteList[7].x -= speed * deltaTime; 
             }
         }
-        if (this.camera.x < 0.5 * aspectRatio) {
+        // Limit right movement (was < 0.5 * AR = 0.88 -> ~1440)
+        if (this.camera.x < 1440) {
             if (input.getMousePosition().x > 900) {
-                this.camera.x += 1.00 * aspectRatio * deltaTime; // Move camera right
-                this.spriteList[7].x += 1.00 * aspectRatio * deltaTime; //Move logo right.
+                this.camera.x += speed * deltaTime; 
+                this.spriteList[7].x += speed * deltaTime; 
             }
         }
 

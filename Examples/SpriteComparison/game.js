@@ -42,8 +42,8 @@ const game = {
         this.staticSprite = new Sprite(
             renderer, 
             "../../Fluxion/Icon/Fluxion_icon.png", 
-            -0.5, 0,  // x, y (Normalized coordinates -1 to 1)
-            0.4, 0.4  // w, h
+            320, 360,  // x, y (Pixel coordinates)
+            200, 200   // w, h
         );
 
         // 2. Animated Sprite
@@ -51,13 +51,13 @@ const game = {
         const sheetUrl = createSpritesheet();
         
         // Create AnimatedSprite
-        // x=0.1, y=0, w=0.4, h=0.4
+        // x=700, y=360, w=200, h=200
         // frameWidth=64, frameHeight=64 (matches our canvas drawing above)
         this.animSprite = new AnimatedSprite(
             renderer, 
             sheetUrl, 
-            0.1, 0, 
-            0.4, 0.4, 
+            700, 360, 
+            200, 200, 
             64, 64
         );
 

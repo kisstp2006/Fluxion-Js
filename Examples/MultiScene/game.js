@@ -90,9 +90,9 @@ const game = {
             // Game logic: Move player
             const player = this.currentScene.getObjectByName("Player");
             if (player) {
-                const speed = 3;
-                if (input.getKey("w")) player.y += speed * deltaTime;
-                if (input.getKey("s")) player.y -= speed * deltaTime;
+                const speed = 500;
+                if (input.getKey("w")) player.y -= speed * deltaTime;
+                if (input.getKey("s")) player.y += speed * deltaTime;
                 if (input.getKey("a")) player.x -= speed * deltaTime;
                 if (input.getKey("d")) player.x += speed * deltaTime;
             }

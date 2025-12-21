@@ -17,8 +17,8 @@ const game = {
 
     init(renderer) {
         // Background + moving logo so post effects are obvious.
-        this.sprites.push(new Sprite(renderer, LOGO, -1.0, -1.0, 2.0, 2.0));
-        this.sprites.push(new Sprite(renderer, LOGO, -0.4, -0.4, 0.8, 0.8));
+        this.sprites.push(new Sprite(renderer, LOGO, 0, 0, 1920, 1080));
+        this.sprites.push(new Sprite(renderer, LOGO, 760, 340, 400, 400));
         setActiveEffectsText("(none)");
     },
 
@@ -28,8 +28,8 @@ const game = {
         // Move the foreground logo in a smooth loop.
         const s = this.sprites[1];
         if (s) {
-            s.x = Math.cos(this.t * 0.9) * 0.35 - 0.4;
-            s.y = Math.sin(this.t * 1.1) * 0.35 - 0.4;
+            s.x = 760 + Math.cos(this.t * 0.9) * 200;
+            s.y = 340 + Math.sin(this.t * 1.1) * 200;
         }
 
         const pp = this.engine?.renderer?.postProcessing;

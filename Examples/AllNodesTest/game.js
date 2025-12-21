@@ -35,14 +35,14 @@ const game = {
         const sprite = this.scene.getObjectByName("LogoSprite");
         if (sprite) {
             // Move it up and down
-            sprite.y = Math.sin(Date.now() / 1000) * 0.2;
+            sprite.y = 360 + Math.sin(Date.now() / 1000) * 100;
         }
 
         // 2. Test AnimatedSprite Manipulation
         const animSprite = this.scene.getObjectByName("AnimSprite");
         if (animSprite) {
             // Move it left and right
-            animSprite.x = 0.5 + Math.cos(Date.now() / 1000) * 0.2;
+            animSprite.x = 960 + Math.cos(Date.now() / 1000) * 100;
         }
 
         // 3. Test Camera Manipulation
