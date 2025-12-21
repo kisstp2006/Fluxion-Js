@@ -59,6 +59,12 @@ export default class Engine {
         } catch (error) {
             console.error("CRITICAL ERROR: Failed to load engine version info.", error);
             alert("CRITICAL ERROR: Engine version file (version.py) is missing or corrupted. The engine cannot start.");
+            
+            // Close Electron window if available
+            if (window.electronAPI && window.electronAPI.close) {
+                window.electronAPI.close();
+            }
+            
             throw error; // Stop initialization
         }
     }
