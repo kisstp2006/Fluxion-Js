@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
-  resize: (width, height) => ipcRenderer.send('window-resize', width, height)
+  resize: (width, height) => ipcRenderer.send('window-resize', width, height),
+  saveDebugFile: (filename, content) => ipcRenderer.send('save-debug-file', filename, content)
 }); 

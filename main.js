@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+const fs = require("fs");
 
 let mainWindow;
 const iconPath = "./Fluxion/Icon/Fluxion_icon.ico";
@@ -34,7 +35,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/ActiveTest/index.html");
+    mainWindow.loadFile("./Examples/AnimationTest/index.html");
   });
 
   // Window Management IPC Handlers
@@ -72,5 +73,23 @@ if (!gotTheLock) {
   ipcMain.on("window-resize", (event, width, height) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) win.setSize(width, height);
+  });
+
+  ipcMain.on("save-debug-file", (event, filename, content) => {
+    const filePath = path.join(app.getPath("userData"), "Debug", filename);
+    const dir = path.dirname(filePath);
+    
+    if (!fs.existsSync(dir)){
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    fs.writeFile(filePath, content, (err) => {
+        if (err) {
+            console.error("Failed to save debug file:", err);
+        } else {
+            console.log("Debug file saved to:", filePath);
+            // Optionally notify renderer
+        }
+    });
   });
 } 

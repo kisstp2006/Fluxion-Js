@@ -88,24 +88,43 @@ export default class SceneLoader {
             const sprite = new AnimatedSprite(renderer, src, x, y, w, h, fw, fh);
             sprite.name = getString("name");
             
+            let firstAnimName = null;
+            let hasAutoplay = false;
+
             // Parse animations
             for (const animNode of node.children) {
                 if (animNode.tagName === "Animation") {
                     const name = animNode.getAttribute("name");
                     const framesStr = animNode.getAttribute("frames"); // "0,1,2"
-                    const speed = parseFloat(animNode.getAttribute("speed") || "0.1");
+                    const fps = parseFloat(animNode.getAttribute("speed") || "10");
                     const loop = animNode.getAttribute("loop") !== "false";
                     
                     if (name && framesStr) {
-                        const frames = framesStr.split(',').map(s => parseInt(s.trim()));
-                        sprite.addAnimation(name, frames, speed, loop);
+                        let frames;
+                        // Check if frames are numeric indices or file paths
+                        // If any part is not a number, treat as paths
+                        if (/[^0-9,\s]/.test(framesStr)) {
+                            frames = framesStr.split(',').map(s => s.trim());
+                        } else {
+                            frames = framesStr.split(',').map(s => parseInt(s.trim()));
+                        }
+
+                        sprite.addAnimation(name, frames, fps, loop);
                         
+                        if (!firstAnimName) firstAnimName = name;
+
                         // Auto play if specified
                         if (animNode.getAttribute("autoplay") === "true") {
                             sprite.play(name);
+                            hasAutoplay = true;
                         }
                     }
                 }
+            }
+            
+            // Default to first animation if no autoplay specified
+            if (!hasAutoplay && firstAnimName) {
+                sprite.play(firstAnimName);
             }
             
             obj = sprite;

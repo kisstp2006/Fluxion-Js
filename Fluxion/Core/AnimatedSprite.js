@@ -10,7 +10,7 @@ export default class AnimatedSprite extends Sprite {
         this.isPlaying = false;
         this.timer = 0;
         this.currentFrameIndex = 0;
-        this.speed = 0.1; // Seconds per frame
+        this.fps = 10; // Frames per second
         this.loop = true;
         this.flipX = false;
         this.flipY = false;
@@ -24,11 +24,34 @@ export default class AnimatedSprite extends Sprite {
      * Add an animation sequence
      * @param {string} name - Name of the animation
      * @param {Array} frames - Array of frame indices [0, 1, 2] or frame objects {x, y, w, h}
-     * @param {number} speed - Time in seconds per frame
+     * @param {number} fps - Frames per second
      * @param {boolean} loop - Whether to loop the animation
      */
-    addAnimation(name, frames, speed = 0.1, loop = true) {
-        this.animations.set(name, { frames, speed, loop });
+    addAnimation(name, frames, fps = 10, loop = true) {
+        const anim = { frames, fps, loop };
+        
+        // Check if frames are image paths (strings)
+        if (frames.length > 0 && typeof frames[0] === 'string') {
+            console.log(`[AnimatedSprite] Adding animation '${name}' with images:`, frames);
+            anim.images = new Array(frames.length).fill(null);
+            
+            frames.forEach((src, index) => {
+                const img = new Image();
+                img.src = src;
+                img.onload = () => {
+                    console.log(`[AnimatedSprite] Loaded frame ${index} for '${name}': ${src}`);
+                    // Create texture immediately
+                    anim.images[index] = this.renderer.createTexture(img);
+                };
+                img.onerror = (e) => {
+                    console.error(`[AnimatedSprite] Failed to load animation frame: ${src}`, e);
+                };
+            });
+        } else {
+             console.log(`[AnimatedSprite] Adding animation '${name}' with frame indices:`, frames);
+        }
+        
+        this.animations.set(name, anim);
     }
 
     /**
@@ -37,6 +60,7 @@ export default class AnimatedSprite extends Sprite {
      * @param {boolean} force - Force restart if already playing
      */
     play(name, force = false) {
+        console.log(`[AnimatedSprite] Play requested for '${name}'`);
         if (!this.animations.has(name)) {
             console.warn(`Animation '${name}' not found.`);
             return;
@@ -50,7 +74,7 @@ export default class AnimatedSprite extends Sprite {
         this.timer = 0;
         this.isPlaying = true;
         this.loop = this.currentAnimation.loop;
-        this.speed = this.currentAnimation.speed;
+        this.fps = this.currentAnimation.fps;
     }
 
     stop() {
@@ -73,9 +97,10 @@ export default class AnimatedSprite extends Sprite {
         if (!this.isPlaying || !this.currentAnimation) return;
 
         this.timer += dt;
+        const frameDuration = this.fps > 0 ? 1 / this.fps : 0;
 
-        if (this.timer >= this.speed) {
-            this.timer -= this.speed;
+        if (frameDuration > 0 && this.timer >= frameDuration) {
+            this.timer -= frameDuration;
             const nextFrame = this.currentFrameIndex + 1;
 
             if (nextFrame >= this.currentAnimation.frames.length) {
@@ -95,71 +120,101 @@ export default class AnimatedSprite extends Sprite {
     }
 
     draw() {
-        if (!this.visible || !this.texture) return;
+        if (!this.active) return;
+        if (!this.visible) return;
 
-        let srcX = 0;
-        let srcY = 0;
-        let srcW = this.frameWidth || this.width;
-        let srcH = this.frameHeight || this.height;
+        // Determine drawing mode based on current animation
+        const useImages = this.currentAnimation && this.currentAnimation.images;
 
-        // Calculate source rectangle based on current frame
-        if (this.currentAnimation) {
-            const frame = this.currentAnimation.frames[this.currentFrameIndex];
-            
-            if (typeof frame === 'number') {
-                // Grid-based calculation
-                if (this.texture.width > 0 && this.frameWidth > 0) {
-                    const cols = Math.floor(this.texture.width / this.frameWidth);
-                    const col = frame % cols;
-                    const row = Math.floor(frame / cols);
-                    
-                    srcX = col * this.frameWidth;
-                    srcY = row * this.frameHeight;
-                    srcW = this.frameWidth;
-                    srcH = this.frameHeight;
+        if (useImages) {
+             // Draw using images
+             const tex = this.currentAnimation.images[this.currentFrameIndex];
+             if (tex) {
+                let drawX = this.x;
+                let drawY = this.y;
+                let drawW = this.width;
+                let drawH = this.height;
+
+                if (this.flipX) {
+                    drawX += drawW;
+                    drawW = -drawW;
                 }
-            } else if (typeof frame === 'object') {
-                // Explicit frame object {x, y, w, h}
-                srcX = frame.x;
-                srcY = frame.y;
-                srcW = frame.w || frame.width || this.frameWidth;
-                srcH = frame.h || frame.height || this.frameHeight;
-            }
-        } else {
-            // Default to first frame or full image
-             if (this.frameWidth > 0 && this.frameHeight > 0) {
-                 srcX = 0;
-                 srcY = 0;
-                 srcW = this.frameWidth;
-                 srcH = this.frameHeight;
+                if (this.flipY) {
+                    drawY += drawH;
+                    drawH = -drawH;
+                }
+
+                this.renderer.drawQuad(tex, drawX, drawY, drawW, drawH, this.color);
              } else {
-                 srcW = this.texture.width;
-                 srcH = this.texture.height;
+                 // Debug log for missing texture (throttle to avoid spam)
+                 if (Math.random() < 0.01) console.log(`[AnimatedSprite] Waiting for texture for '${this.currentAnimationName}' frame ${this.currentFrameIndex}`);
              }
-        }
+        } else if (this.texture) {
+            // Draw using sprite sheet (texture)
+            let srcX = 0;
+            let srcY = 0;
+            let srcW = this.frameWidth || this.width;
+            let srcH = this.frameHeight || this.height;
 
-        let drawX = this.x;
-        let drawY = this.y;
-        let drawW = this.width;
-        let drawH = this.height;
+            // Calculate source rectangle based on current frame
+            if (this.currentAnimation) {
+                const frame = this.currentAnimation.frames[this.currentFrameIndex];
+                
+                if (typeof frame === 'number') {
+                    // Grid-based calculation
+                    if (this.texture.width > 0 && this.frameWidth > 0) {
+                        const cols = Math.floor(this.texture.width / this.frameWidth);
+                        const col = frame % cols;
+                        const row = Math.floor(frame / cols);
+                        
+                        srcX = col * this.frameWidth;
+                        srcY = row * this.frameHeight;
+                        srcW = this.frameWidth;
+                        srcH = this.frameHeight;
+                    }
+                } else if (typeof frame === 'object') {
+                    // Explicit frame object {x, y, w, h}
+                    srcX = frame.x;
+                    srcY = frame.y;
+                    srcW = frame.w || frame.width || this.frameWidth;
+                    srcH = frame.h || frame.height || this.frameHeight;
+                }
+            } else {
+                // Default to first frame or full image
+                 if (this.frameWidth > 0 && this.frameHeight > 0) {
+                     srcX = 0;
+                     srcY = 0;
+                     srcW = this.frameWidth;
+                     srcH = this.frameHeight;
+                 } else {
+                     srcW = this.texture.width;
+                     srcH = this.texture.height;
+                 }
+            }
 
-        // Handle flipping by modifying geometry
-        if (this.flipX) {
-            drawX += drawW;
-            drawW = -drawW;
-        }
-        if (this.flipY) {
-            drawY += drawH;
-            drawH = -drawH;
-        }
+            let drawX = this.x;
+            let drawY = this.y;
+            let drawW = this.width;
+            let drawH = this.height;
 
-        // Pass color to drawQuad (requires updated Renderer)
-        this.renderer.drawQuad(
-            this.texture, 
-            drawX, drawY, drawW, drawH, 
-            srcX, srcY, srcW, srcH, 
-            this.color
-        );
+            // Handle flipping by modifying geometry
+            if (this.flipX) {
+                drawX += drawW;
+                drawW = -drawW;
+            }
+            if (this.flipY) {
+                drawY += drawH;
+                drawH = -drawH;
+            }
+
+            // Pass color to drawQuad (requires updated Renderer)
+            this.renderer.drawQuad(
+                this.texture, 
+                drawX, drawY, drawW, drawH, 
+                srcX, srcY, srcW, srcH,
+                this.color
+            );
+        }
 
         // Draw children
         const sortedChildren = [...this.children].sort((a, b) => {

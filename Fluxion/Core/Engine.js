@@ -15,6 +15,13 @@ export default class Engine {
         
         this.lastTime = 0;
 
+        // Debug Key Listener (F8)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'F8') {
+                this.dumpScene();
+            }
+        });
+
         // Load default font and version info
         Promise.all([this.loadDefaultFont(), this.loadVersionInfo()])
             .then(() => {
@@ -105,5 +112,71 @@ export default class Engine {
         
         // Request the next frame
         requestAnimationFrame(this.loop.bind(this));
+    }
+
+    dumpScene() {
+        if (!this.game.currentScene) {
+            console.warn("No active scene to dump.");
+            return;
+        }
+
+        const scene = this.game.currentScene;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `scene_dump_${timestamp}.js`;
+
+        let content = `// Scene Dump: ${scene.name || 'Untitled'}\n`;
+        content += `// Generated: ${new Date().toLocaleString()}\n\n`;
+        content += `export const sceneData = {\n`;
+        content += `    name: "${scene.name || 'Untitled'}",\n`;
+        content += `    objects: [\n`;
+
+        const processObject = (obj, indent = 8) => {
+            const spaces = ' '.repeat(indent);
+            let str = `${spaces}{\n`;
+            str += `${spaces}    name: "${obj.name || 'Unnamed'}",\n`;
+            str += `${spaces}    type: "${obj.constructor.name}",\n`;
+            str += `${spaces}    active: ${obj.active},\n`;
+            
+            // Common properties
+            if (obj.x !== undefined) str += `${spaces}    x: ${obj.x},\n`;
+            if (obj.y !== undefined) str += `${spaces}    y: ${obj.y},\n`;
+            if (obj.width !== undefined) str += `${spaces}    width: ${obj.width},\n`;
+            if (obj.height !== undefined) str += `${spaces}    height: ${obj.height},\n`;
+            if (obj.layer !== undefined) str += `${spaces}    layer: ${obj.layer},\n`;
+            if (obj.visible !== undefined) str += `${spaces}    visible: ${obj.visible},\n`;
+            
+            // Specific properties
+            if (obj.text !== undefined) str += `${spaces}    text: "${obj.text}",\n`;
+            if (obj.fontSize !== undefined) str += `${spaces}    fontSize: ${obj.fontSize},\n`;
+            
+            // Children
+            if (obj.children && obj.children.length > 0) {
+                str += `${spaces}    children: [\n`;
+                obj.children.forEach(child => {
+                    str += processObject(child, indent + 4);
+                });
+                str += `${spaces}    ],\n`;
+            }
+
+            str += `${spaces}},\n`;
+            return str;
+        };
+
+        if (scene.objects) {
+            scene.objects.forEach(obj => {
+                content += processObject(obj);
+            });
+        }
+
+        content += `    ]\n`;
+        content += `};\n`;
+
+        if (window.electronAPI && window.electronAPI.saveDebugFile) {
+            window.electronAPI.saveDebugFile(filename, content);
+            console.log(`Scene dump requested: ${filename}`);
+        } else {
+            console.log(content);
+            console.warn("File saving not available (Electron API missing). Check console output above.");
+        }
     }
 }

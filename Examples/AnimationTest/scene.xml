@@ -1,0 +1,29 @@
+<Scene name="AnimationTestScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+
+    <Text name="Instructions" text="Click to switch animations: Idle -> Walk -> Run" x="50" y="50" fontSize="24" color="white" />
+
+    <!-- 
+        AnimatedSprite Example 
+        imageSrc: Path to the spritesheet
+        frameWidth/frameHeight: Size of a single frame in the spritesheet
+        width/height: Size to render on screen
+    -->
+    <AnimatedSprite name="Hero" imageSrc="hero_sheet.png" x="800" y="400" width="128" height="128" frameWidth="32" frameHeight="32">
+        <!-- 
+            Animation Definitions
+            frames: Comma-separated list of frame indices (0-based, left-to-right, top-to-bottom)
+            speed: Seconds per frame
+            loop: true/false
+            autoplay: true (optional, custom logic in loader handles this)
+        -->
+        <Animation name="Idle" frames="0,1,2,3" speed="0.2" loop="true" autoplay="true" />
+        <Animation name="Walk" frames="4,5,6,7,8,9" speed="0.1" loop="true" />
+        <Animation name="Run" frames="10,11,12,13,14,15" speed="0.05" loop="true" />
+        <Animation name="Attack" frames="16,17,18,19" speed="0.1" loop="false" />
+    </AnimatedSprite>
+
+    <!-- Clickable area to handle interaction -->
+    <ClickableArea name="ScreenClick" x="0" y="0" width="1920" height="1080" />
+
+</Scene>

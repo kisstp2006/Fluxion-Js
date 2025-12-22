@@ -1,0 +1,21 @@
+<Scene name="MultiImageTest">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+
+    <Text name="Instructions" text="Animation using separate image files" x="50" y="50" fontSize="24" color="white" />
+
+    <!-- 
+        AnimatedSprite using separate images.
+        Note: imageSrc on the main tag is optional if we only use animations.
+    -->
+    <AnimatedSprite name="MultiImgHero" x="800" y="400" width="150" height="150">
+        <!-- 
+            frames: Comma-separated list of image paths.
+            The engine detects these are strings and loads them individually.
+        -->
+        <Animation name="Idle" frames="../../Fluxion/Icon/Fluxion_icon.png, ../../Fluxion/Icon/Fluxion_icon.png" speed="0.5" loop="true" autoplay="true" />
+        
+        <!-- Example with hypothetical different images -->
+        <!-- <Animation name="Walk" frames="walk1.png, walk2.png, walk3.png" speed="0.1" loop="true" /> -->
+    </AnimatedSprite>
+
+</Scene>
