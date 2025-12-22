@@ -162,7 +162,13 @@ export default class AnimatedSprite extends Sprite {
         );
 
         // Draw children
-        for (const child of this.children) {
+        const sortedChildren = [...this.children].sort((a, b) => {
+            const layerA = a.layer !== undefined ? a.layer : 0;
+            const layerB = b.layer !== undefined ? b.layer : 0;
+            return layerA - layerB;
+        });
+
+        for (const child of sortedChildren) {
             if (child.draw) {
                 child.draw(this.renderer);
             }

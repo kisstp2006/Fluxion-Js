@@ -185,6 +185,18 @@ export default class SceneLoader {
             obj = camera;
         }
 
+        // Common properties
+        if (obj) {
+            if (node.hasAttribute("layer")) {
+                const layer = parseFloat(node.getAttribute("layer"));
+                if (typeof obj.setLayer === 'function') {
+                    obj.setLayer(layer);
+                } else {
+                    obj.layer = layer;
+                }
+            }
+        }
+
         // Handle children
         if (obj && obj.addChild) {
              for (const childNode of node.children) {

@@ -23,9 +23,14 @@ export default class Sprite {
         this.blue = 255;
         this.color = [this.red, this.green, this.blue, this.transparency];
         this.visible = true;
+        this.layer = 0;
         this.children = [];
         
         this.loadTexture(imageSrc);
+    }
+
+    setLayer(layer) {
+        this.layer = layer;
     }
 
     addChild(child) {
@@ -116,7 +121,13 @@ export default class Sprite {
         }
 
         // Draw children
-        for (const child of this.children) {
+        const sortedChildren = [...this.children].sort((a, b) => {
+            const layerA = a.layer !== undefined ? a.layer : 0;
+            const layerB = b.layer !== undefined ? b.layer : 0;
+            return layerA - layerB;
+        });
+
+        for (const child of sortedChildren) {
             if (child.draw) {
                 child.draw(this.renderer); // Pass renderer just in case
             }

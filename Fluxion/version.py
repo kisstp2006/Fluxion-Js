@@ -1,4 +1,4 @@
-ENGINE_NAME = "Fluxion Web Engine"
-VERSION = "1.0.0"
+ENGINE_NAME = "Fluxion Game Engine"
+VERSION = "0.0.2"
 CODENAME = "Fluxion-Js"
 LICENSE = "MIT/Apache-2.0"

@@ -58,7 +58,15 @@ export default class Scene {
     }
 
     draw(renderer) {
-        for (const obj of this.objects) {
+        // Sort objects by layer before drawing
+        // Objects without a layer property default to layer 0
+        const sortedObjects = [...this.objects].sort((a, b) => {
+            const layerA = a.layer !== undefined ? a.layer : 0;
+            const layerB = b.layer !== undefined ? b.layer : 0;
+            return layerA - layerB;
+        });
+
+        for (const obj of sortedObjects) {
             if (obj.draw) {
                 obj.draw(renderer);
             }
