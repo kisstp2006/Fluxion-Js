@@ -1,0 +1,8 @@
+<Scene name="LayerTestScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" width="1920" height="1080" />
+    
+    <Sprite name="Background" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="100" y="100" width="400" height="400" layer="-1" />
+    <Sprite name="Middle" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="200" y="200" width="200" height="200" layer="0" />
+    <Sprite name="Foreground" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="250" y="250" width="100" height="100" layer="1" />
+    <Text name="LayerInfo" text="Layers: -1 (Big), 0 (Med), 1 (Small)" x="50" y="308.25562175390843" fontSize="32" fontFamily="" color="white" layer="0" />
+</Scene>
