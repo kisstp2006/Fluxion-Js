@@ -1,0 +1,20 @@
+<Scene name="FontTestScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+
+    <!-- 
+        Load a custom font.
+        src: Path to the font file (relative to index.html usually, or absolute)
+        family: The name you want to use to refer to this font
+    -->
+    <Font family="MyCustomFont" src="../../Fluxion/Font/Inter-VariableFont_opsz,wght.ttf" />
+
+    <!-- Use the custom font (Method 1: Pre-loaded via <Font> tag) -->
+    <Text name="Title" text="Custom Font (Pre-loaded)" x="100" y="100" fontSize="64" fontFamily="MyCustomFont" color="#44ff44" />
+    
+    <!-- Use the custom font (Method 2: Direct file path) -->
+    <Text name="Subtitle" text="Custom Font (Direct Path)" x="100" y="200" fontSize="32" fontFamily="../../Fluxion/Font/Inter-VariableFont_opsz,wght.ttf" color="white" />
+
+    <!-- Comparison with default font -->
+    <Text name="Default" text="This is the default font (Arial/System)." x="100" y="300" fontSize="32" fontFamily="Arial" color="#aaaaaa" />
+
+</Scene>

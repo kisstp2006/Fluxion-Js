@@ -24,8 +24,32 @@ export default class SceneLoader {
                 scene.name = sceneNode.getAttribute("name");
             }
 
+            // Pre-load fonts
+            const fontNodes = sceneNode.querySelectorAll("Font");
+            const fontPromises = [];
+            for (const fontNode of fontNodes) {
+                const src = fontNode.getAttribute("src");
+                const family = fontNode.getAttribute("family");
+                if (src && family) {
+                    console.log(`Loading font: ${family} from ${src}`);
+                    const font = new FontFace(family, `url(${src})`);
+                    fontPromises.push(
+                        font.load()
+                            .then(f => {
+                                document.fonts.add(f);
+                                console.log(`Font loaded: ${family}`);
+                            })
+                            .catch(err => console.error(`Failed to load font ${family}:`, err))
+                    );
+                }
+            }
+            if (fontPromises.length > 0) {
+                await Promise.all(fontPromises);
+            }
+
             // Parse children
             for (const child of sceneNode.children) {
+                if (child.tagName === "Font") continue;
                 const obj = await this.parseObject(child, renderer);
                 if (obj) {
                     if (obj instanceof Camera) {
@@ -151,8 +175,34 @@ export default class SceneLoader {
             const y = getFloat("y", 0);
             // Accept both XML-style `fontSize` and common XAML-style `FontSize`
             const fontSize = getFloatAny(["fontSize", "FontSize"], 16);
-            const fontFamily = getString("fontFamily", "Inter");
+            let fontFamily = getString("fontFamily", "Inter");
             const color = getString("color", "white");
+
+            // Check if fontFamily is actually a file path (contains '/' or ends in extension)
+            if (fontFamily.includes('/') || fontFamily.match(/\.(ttf|otf|woff|woff2)$/i)) {
+                const fontPath = fontFamily;
+                // Generate a unique family name based on the filename
+                const familyName = "AutoFont_" + fontPath.split('/').pop().replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, "");
+                
+                // Check if already loaded
+                let fontExists = false;
+                document.fonts.forEach(f => {
+                    if (f.family === familyName) fontExists = true;
+                });
+
+                if (!fontExists) {
+                    console.log(`Auto-loading font from path: ${fontPath} as ${familyName}`);
+                    try {
+                        const font = new FontFace(familyName, `url(${fontPath})`);
+                        await font.load();
+                        document.fonts.add(font);
+                    } catch (err) {
+                        console.error(`Failed to auto-load font from ${fontPath}:`, err);
+                        // Fallback to default if load fails
+                    }
+                }
+                fontFamily = familyName;
+            }
 
             const textObj = new Text(renderer, textContent, x, y, fontSize, fontFamily, color);
             textObj.name = getString("name", "Text");
