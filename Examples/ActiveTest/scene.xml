@@ -1,0 +1,22 @@
+<Scene name="ActiveTestScene">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" />
+
+    <!-- Instructions -->
+    <Text name="Instructions" text="Left: Always Active | Center: Blinking (Auto) | Right: Click to Toggle" x="50" y="50" fontSize="24" color="white" />
+
+    <!-- 1. Always Active Sprite -->
+    <Sprite name="AlwaysActive" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="400" y="300" width="150" height="150" />
+    <Text name="Label1" text="Always Active" x="400" y="460" fontSize="20" color="#AAAAAA" />
+
+    <!-- 2. Blinking Sprite (Toggled by script) -->
+    <Sprite name="BlinkingSprite" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="800" y="300" width="150" height="150" />
+    <Text name="Label2" text="Blinking (2s)" x="800" y="460" fontSize="20" color="#AAAAAA" />
+
+    <!-- 3. Initially Inactive Sprite (Active="false" in XML) -->
+    <Sprite name="ClickToggleSprite" Active="false" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="1200" y="300" width="150" height="150" />
+    <Text name="Label3" text="Initially Hidden (Click to Show)" x="1150" y="460" fontSize="20" color="#AAAAAA" />
+
+    <!-- Clickable area covering the screen to handle clicks for the 3rd sprite -->
+    <ClickableArea name="ScreenClick" x="0" y="0" width="1920" height="1080" />
+
+</Scene>

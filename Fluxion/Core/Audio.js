@@ -16,6 +16,13 @@ class Audio {
       this.volume = 1;
       this.startTime = 0;
       this.pauseTime = 0;
+      this._active = true;
+  }
+
+  get active() { return this._active; }
+  set active(value) {
+      this._active = value;
+      if (!value) this.stop();
   }
 
   /**
@@ -37,6 +44,7 @@ class Audio {
    * @param {boolean} [reset=false] - Whether to restart from the beginning
    */
   play(reset = false) {
+      if (!this.active) return;
       if (!this.buffer || this.isPlaying) return;
 
       if (reset) this.stop();

@@ -6,6 +6,7 @@ export default class Camera {
         this.rotation = rotation;
         this.width = width;
         this.height = height;
+        this.active = true;
     }
     setSize(width, height) {
         this.width = width;

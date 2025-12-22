@@ -195,6 +195,11 @@ export default class SceneLoader {
                     obj.layer = layer;
                 }
             }
+
+            const activeAttr = node.getAttribute("Active");
+            if (activeAttr !== null) {
+                obj.active = activeAttr !== "false";
+            }
         }
 
         // Handle children

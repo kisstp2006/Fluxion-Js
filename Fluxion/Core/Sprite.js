@@ -23,6 +23,7 @@ export default class Sprite {
         this.blue = 255;
         this.color = [this.red, this.green, this.blue, this.transparency];
         this.visible = true;
+        this.active = true;
         this.layer = 0;
         this.children = [];
         
@@ -47,6 +48,8 @@ export default class Sprite {
     }
 
     update(dt, camera) {
+        if (!this.active) return;
+
         for (const child of this.children) {
             if (child.update) {
                 child.update(dt, camera);
@@ -96,6 +99,7 @@ export default class Sprite {
     }
 
     draw() {
+        if (!this.active) return;
         if (!this.visible || !this.texture) return;
 
         const currentTime = Date.now();

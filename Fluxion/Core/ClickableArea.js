@@ -22,9 +22,13 @@ export default class ClickableArea {
         this.onExit = null;
         this.onDown = null;
         this.onUp = null;
+        
+        this.active = true;
     }
 
     update(dt, camera) {
+        if (!this.active) return;
+
         // If we have no parent, we can only function if a world-space rectangle is defined.
         // (Most common usage is as a child of a Sprite, so parent is expected.)
         if (!this.parent && (this.width === null || this.height === null)) return;
