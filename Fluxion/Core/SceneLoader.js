@@ -6,7 +6,16 @@ import Camera from './Camera.js';
 import ClickableArea from './ClickableArea.js';
 import Text from './Text.js';
 
+/**
+ * Utility class for loading scenes from XML files.
+ */
 export default class SceneLoader {
+    /**
+     * Loads a scene from an XML file.
+     * @param {string} url - The URL of the XML file.
+     * @param {Object} renderer - The renderer instance.
+     * @returns {Promise<Scene>} The loaded scene.
+     */
     static async load(url, renderer) {
         try {
             const response = await fetch(url);
@@ -45,6 +54,12 @@ export default class SceneLoader {
         }
     }
 
+    /**
+     * Parses an XML node into a game object.
+     * @param {Element} node - The XML element.
+     * @param {Object} renderer - The renderer instance.
+     * @returns {Promise<Object|null>} The parsed object, or null if unknown.
+     */
     static async parseObject(node, renderer) {
         const tagName = node.tagName;
         let obj = null;

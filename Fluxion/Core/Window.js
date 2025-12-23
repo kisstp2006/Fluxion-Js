@@ -1,9 +1,19 @@
+/**
+ * Handles window management, providing an abstraction over Electron API and browser fallback.
+ */
 export default class Window {
+    /**
+     * Creates an instance of Window.
+     */
     constructor() {
         this.api = window.electronAPI;
         this.isElectron = !!this.api;
     }
 
+    /**
+     * Sets the window title.
+     * @param {string} title - The new title.
+     */
     setTitle(title) {
         if (this.isElectron) {
             this.api.setTitle(title);
@@ -12,6 +22,10 @@ export default class Window {
         }
     }
 
+    /**
+     * Sets the window to full screen mode.
+     * @param {boolean} flag - True to enable full screen, false to disable.
+     */
     setFullScreen(flag) {
         if (this.isElectron) {
             this.api.setFullScreen(flag);
@@ -29,6 +43,10 @@ export default class Window {
         }
     }
 
+    /**
+     * Minimizes the window.
+     * Only supported in Electron.
+     */
     minimize() {
         if (this.isElectron) {
             this.api.minimize();
@@ -37,6 +55,10 @@ export default class Window {
         }
     }
 
+    /**
+     * Maximizes the window.
+     * Only supported in Electron.
+     */
     maximize() {
         if (this.isElectron) {
             this.api.maximize();
@@ -45,6 +67,10 @@ export default class Window {
         }
     }
 
+    /**
+     * Closes the window.
+     * Only supported in Electron.
+     */
     close() {
         if (this.isElectron) {
             this.api.close();
@@ -54,6 +80,12 @@ export default class Window {
         }
     }
 
+    /**
+     * Resizes the window.
+     * Only supported in Electron.
+     * @param {number} width - The new width.
+     * @param {number} height - The new height.
+     */
     resize(width, height) {
         if (this.isElectron) {
             this.api.resize(width, height);

@@ -1,6 +1,13 @@
+/**
+ * Represents an audio object for playing sound effects or music.
+ * Uses the Web Audio API.
+ */
 class Audio {
   static audioContext = null;
  
+  /**
+   * Creates an instance of Audio.
+   */
   constructor() {
       if (!Audio.audioContext) {
           Audio.audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -19,7 +26,17 @@ class Audio {
       this._active = true;
   }
 
+  /**
+   * Gets the active state of the audio object.
+   * @returns {boolean} True if active, false otherwise.
+   */
   get active() { return this._active; }
+
+  /**
+   * Sets the active state of the audio object.
+   * If set to false, the audio stops playing.
+   * @param {boolean} value - The new active state.
+   */
   set active(value) {
       this._active = value;
       if (!value) this.stop();
@@ -28,6 +45,7 @@ class Audio {
   /**
    * Load an audio file from a given URL
    * @param {string} url - Path to audio file
+   * @returns {Promise<void>}
    */
   async load(url) {
       try {

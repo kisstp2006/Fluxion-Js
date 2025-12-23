@@ -1,6 +1,21 @@
 import Sprite from './Sprite.js';
 
+/**
+ * Represents an animated sprite that extends the base Sprite class.
+ * Supports sprite sheet animations and multi-image animations.
+ */
 export default class AnimatedSprite extends Sprite {
+    /**
+     * Creates an instance of AnimatedSprite.
+     * @param {Object} renderer - The renderer instance.
+     * @param {string|string[]} imageSrc - The source URL of the image or an array of URLs.
+     * @param {number} [x=0] - The x-coordinate.
+     * @param {number} [y=0] - The y-coordinate.
+     * @param {number} [width=100] - The width.
+     * @param {number} [height=100] - The height.
+     * @param {number} [frameWidth=0] - The width of a single frame.
+     * @param {number} [frameHeight=0] - The height of a single frame.
+     */
     constructor(renderer, imageSrc, x = 0, y = 0, width = 100, height = 100, frameWidth = 0, frameHeight = 0) {
         super(renderer, imageSrc, x, y, width, height, frameWidth, frameHeight, true);
         
@@ -23,9 +38,9 @@ export default class AnimatedSprite extends Sprite {
     /**
      * Add an animation sequence
      * @param {string} name - Name of the animation
-     * @param {Array} frames - Array of frame indices [0, 1, 2] or frame objects {x, y, w, h}
-     * @param {number} fps - Frames per second
-     * @param {boolean} loop - Whether to loop the animation
+     * @param {Array} frames - Array of frame indices [0, 1, 2] or frame objects {x, y, w, h} or image paths
+     * @param {number} [fps=10] - Frames per second
+     * @param {boolean} [loop=true] - Whether to loop the animation
      */
     addAnimation(name, frames, fps = 10, loop = true) {
         const anim = { frames, fps, loop };
@@ -57,7 +72,7 @@ export default class AnimatedSprite extends Sprite {
     /**
      * Play a specific animation
      * @param {string} name - Name of the animation to play
-     * @param {boolean} force - Force restart if already playing
+     * @param {boolean} [force=false] - Force restart if already playing
      */
     play(name, force = false) {
         console.log(`[AnimatedSprite] Play requested for '${name}'`);
@@ -77,21 +92,35 @@ export default class AnimatedSprite extends Sprite {
         this.fps = this.currentAnimation.fps;
     }
 
+    /**
+     * Stops the animation and resets to the first frame.
+     */
     stop() {
         this.isPlaying = false;
         this.currentFrameIndex = 0;
     }
 
+    /**
+     * Pauses the animation at the current frame.
+     */
     pause() {
         this.isPlaying = false;
     }
 
+    /**
+     * Resumes the animation from the current frame.
+     */
     resume() {
         if (this.currentAnimation) {
             this.isPlaying = true;
         }
     }
 
+    /**
+     * Updates the animation state.
+     * @param {number} dt - The delta time since the last frame.
+     * @param {Object} camera - The camera object.
+     */
     update(dt, camera) {
         super.update(dt, camera);
         if (!this.isPlaying || !this.currentAnimation) return;

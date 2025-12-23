@@ -2,7 +2,19 @@ import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 import Window from "./Window.js";
 
+/**
+ * The main Engine class that manages the game loop, renderer, camera, and window.
+ */
 export default class Engine {
+    /**
+     * Creates an instance of the Engine.
+     * @param {string} canvasId - The ID of the HTML canvas element.
+     * @param {Object} game - The game instance containing init, update, and draw methods.
+     * @param {number} [targetWidth=1920] - The target width of the game resolution.
+     * @param {number} [targetHeight=1080] - The target height of the game resolution.
+     * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
+     * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
+     */
     constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
         // Initialize Renderer with aspect ratio settings and post-processing
         this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
@@ -40,6 +52,11 @@ export default class Engine {
             });
     } 
 
+    /**
+     * Loads the engine version information from the version.py file.
+     * @async
+     * @throws {Error} If the version file is missing or corrupted.
+     */
     async loadVersionInfo() {
         try {
             const response = await fetch(new URL('../version.py', import.meta.url));
@@ -76,6 +93,10 @@ export default class Engine {
         }
     }
 
+    /**
+     * Loads the default font for the engine.
+     * @async
+     */
     async loadDefaultFont() {
         try {
             // Resolve font path relative to this module
@@ -89,6 +110,10 @@ export default class Engine {
         }
     }
 
+    /**
+     * The main game loop.
+     * @param {number} [timestamp=0] - The current timestamp.
+     */
     loop(timestamp = 0) {
         const deltaTime = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
@@ -114,6 +139,10 @@ export default class Engine {
         requestAnimationFrame(this.loop.bind(this));
     }
 
+    /**
+     * Dumps the current scene data to a file or console.
+     * Triggered by pressing F8.
+     */
     dumpScene() {
         if (!this.game.currentScene) {
             console.warn("No active scene to dump.");

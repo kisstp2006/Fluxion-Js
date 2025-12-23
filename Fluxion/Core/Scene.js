@@ -1,4 +1,10 @@
+/**
+ * Represents a scene in the game, containing objects, audio, and a camera.
+ */
 export default class Scene {
+    /**
+     * Creates an instance of Scene.
+     */
     constructor() {
         this.objects = [];
         this.name = "Untitled Scene";
@@ -6,18 +12,35 @@ export default class Scene {
         this.audio = [];
     }
 
+    /**
+     * Adds an object to the scene.
+     * @param {Object} object - The object to add.
+     */
     add(object) {
         this.objects.push(object);
     }
 
+    /**
+     * Adds an audio object to the scene.
+     * @param {Object} audio - The audio object to add.
+     */
     addAudio(audio) {
         this.audio.push(audio);
     }
 
+    /**
+     * Sets the camera for the scene.
+     * @param {Object} camera - The camera object.
+     */
     setCamera(camera) {
         this.camera = camera;
     }
 
+    /**
+     * Retrieves an object by its name.
+     * @param {string} name - The name of the object to retrieve.
+     * @returns {Object|null} The object if found, otherwise null.
+     */
     getObjectByName(name) {
         if (this.camera && this.camera.name === name) return this.camera;
         
@@ -42,6 +65,10 @@ export default class Scene {
         return null;
     }
 
+    /**
+     * Removes an object from the scene.
+     * @param {Object} object - The object to remove.
+     */
     remove(object) {
         const index = this.objects.indexOf(object);
         if (index > -1) {
@@ -49,6 +76,10 @@ export default class Scene {
         }
     }
 
+    /**
+     * Updates all objects in the scene.
+     * @param {number} dt - The delta time since the last frame.
+     */
     update(dt) {
         for (const obj of this.objects) {
             if (obj.update) {
@@ -57,6 +88,10 @@ export default class Scene {
         }
     }
 
+    /**
+     * Draws all objects in the scene.
+     * @param {Object} renderer - The renderer instance.
+     */
     draw(renderer) {
         // Sort objects by layer before drawing
         // Objects without a layer property default to layer 0

@@ -1,4 +1,19 @@
+/**
+ * Represents a 2D sprite object that can be rendered on the screen.
+ */
 export default class Sprite {
+    /**
+     * Creates an instance of Sprite.
+     * @param {Object} renderer - The renderer instance.
+     * @param {string|string[]} imageSrc - The source URL of the image or an array of URLs for animation.
+     * @param {number} [x=1] - The x-coordinate of the sprite.
+     * @param {number} [y=1] - The y-coordinate of the sprite.
+     * @param {number} [width=1] - The width of the sprite.
+     * @param {number} [height=1] - The height of the sprite.
+     * @param {number} [frameWidth=0] - The width of a single frame in a sprite sheet.
+     * @param {number} [frameHeight=0] - The height of a single frame in a sprite sheet.
+     * @param {boolean} [useSpriteSheet=true] - Whether to treat the image as a sprite sheet.
+     */
     constructor(renderer, imageSrc, x=1, y=1, width=1, height=1, frameWidth = 0, frameHeight = 0, useSpriteSheet = true) {
         this.renderer = renderer;
         this.x = x;
@@ -30,15 +45,27 @@ export default class Sprite {
         this.loadTexture(imageSrc);
     }
 
+    /**
+     * Sets the rendering layer of the sprite.
+     * @param {number} layer - The layer index.
+     */
     setLayer(layer) {
         this.layer = layer;
     }
 
+    /**
+     * Adds a child object to this sprite.
+     * @param {Object} child - The child object to add.
+     */
     addChild(child) {
         child.parent = this;
         this.children.push(child);
     }
 
+    /**
+     * Removes a child object from this sprite.
+     * @param {Object} child - The child object to remove.
+     */
     removeChild(child) {
         const index = this.children.indexOf(child);
         if (index > -1) {
@@ -47,6 +74,11 @@ export default class Sprite {
         }
     }
 
+    /**
+     * Updates the sprite and its children.
+     * @param {number} dt - The delta time since the last frame.
+     * @param {Object} camera - The camera object.
+     */
     update(dt, camera) {
         if (!this.active) return;
 
@@ -57,6 +89,12 @@ export default class Sprite {
         }
     }
 
+    /**
+     * Sets the color tint of the sprite.
+     * @param {number} red - The red component (0-255).
+     * @param {number} green - The green component (0-255).
+     * @param {number} blue - The blue component (0-255).
+     */
     setColor(red, green, blue) {
         this.red = Math.max(0, Math.min(255, red));
         this.green = Math.max(0, Math.min(255, green));
@@ -64,19 +102,35 @@ export default class Sprite {
         this.color = [this.red, this.green, this.blue, this.transparency];
     }
 
+    /**
+     * Gets the current color tint of the sprite.
+     * @returns {{red: number, green: number, blue: number, transparency: number}} The color components.
+     */
     getColor() {
         return { red: this.red, green: this.green, blue: this.blue, transparency: this.transparency };
     }
 
+    /**
+     * Sets the transparency (alpha) of the sprite.
+     * @param {number} alpha - The alpha value (0-255).
+     */
     setTransparency(alpha) {
         this.transparency = Math.max(0, Math.min(255, alpha));
         this.color[3] = this.transparency;
     }
 
+    /**
+     * Gets the current transparency of the sprite.
+     * @returns {number} The alpha value (0-255).
+     */
     getTransparency() {
         return this.transparency;
     }
 
+    /**
+     * Loads the texture(s) for the sprite.
+     * @param {string|string[]} imageSrc - The source URL(s) of the image(s).
+     */
     loadTexture(imageSrc) {
         // Allow invisible/logic-only sprites by omitting imageSrc.
         // Also avoids accidental fetches of the current page when img.src is "".

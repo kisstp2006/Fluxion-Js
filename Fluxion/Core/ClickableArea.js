@@ -1,6 +1,14 @@
 import Input from './Input.js';
 
+/**
+ * Represents a clickable area that can detect mouse interactions.
+ * Can be attached to a parent object or placed independently.
+ */
 export default class ClickableArea {
+    /**
+     * Creates an instance of ClickableArea.
+     * @param {Object} renderer - The renderer instance.
+     */
     constructor(renderer) {
         this.renderer = renderer;
         this.parent = null;
@@ -26,6 +34,11 @@ export default class ClickableArea {
         this.active = true;
     }
 
+    /**
+     * Updates the clickable area state and triggers events.
+     * @param {number} dt - The delta time since the last frame.
+     * @param {Object} camera - The camera object.
+     */
     update(dt, camera) {
         if (!this.active) return;
 

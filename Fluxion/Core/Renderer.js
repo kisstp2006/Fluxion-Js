@@ -1,6 +1,17 @@
 import PostProcessing from './PostProcessing.js';
 
+/**
+ * Handles WebGL rendering, including shader management, resizing, and post-processing.
+ */
 export default class Renderer {
+  /**
+   * Creates an instance of Renderer.
+   * @param {string} canvasId - The ID of the HTML canvas element.
+   * @param {number} [targetWidth=1920] - The target width of the game resolution.
+   * @param {number} [targetHeight=1080] - The target height of the game resolution.
+   * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
+   * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
+   */
   constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
     this.canvas = document.getElementById(canvasId);
     this.gl = this.canvas.getContext("webgl");
@@ -78,6 +89,9 @@ export default class Renderer {
     });
   } 
 
+  /**
+   * Resizes the canvas to fit the window, maintaining aspect ratio if configured.
+   */
   resizeCanvas() {
     const dpi = window.devicePixelRatio || 1;
     const windowWidth = window.innerWidth;
@@ -147,6 +161,9 @@ export default class Renderer {
     this.ensureMainScreenTargets();
   }
 
+  /**
+   * Ensures that the main screen framebuffer and texture are created and sized correctly.
+   */
   ensureMainScreenTargets() {
     const desiredWidth = this.canvas.width;
     const desiredHeight = this.canvas.height;
@@ -201,6 +218,12 @@ export default class Renderer {
     }
   }
 
+  /**
+   * Loads a shader file from a URL.
+   * @param {string} url - The URL of the shader file.
+   * @returns {Promise<string>} The shader source code.
+   * @throws {Error} If the shader file fails to load.
+   */
   async loadShaderFile(url) {
     try {
       const response = await fetch(url);
@@ -215,6 +238,10 @@ export default class Renderer {
   }
   
 
+  /**
+   * Initializes WebGL, including shaders, buffers, and post-processing.
+   * @returns {Promise<void>}
+   */
   async initGL() {
     this.gl.clearColor(0, 0, 0, 1);
     this.gl.enable(this.gl.BLEND);
@@ -276,6 +303,12 @@ export default class Renderer {
     }
   }
 
+  /**
+   * Creates and compiles a shader.
+   * @param {number} type - The type of shader (VERTEX_SHADER or FRAGMENT_SHADER).
+   * @param {string} source - The shader source code.
+   * @returns {WebGLShader|null} The compiled shader, or null if compilation failed.
+   */
   createShader(type, source) {
     const shader = this.gl.createShader(type);
     this.gl.shaderSource(shader, source);
@@ -288,6 +321,12 @@ export default class Renderer {
     return shader;
   }
 
+  /**
+   * Creates and links a WebGL program.
+   * @param {WebGLShader} vertexShader - The compiled vertex shader.
+   * @param {WebGLShader} fragmentShader - The compiled fragment shader.
+   * @returns {WebGLProgram|null} The linked program, or null if linking failed.
+   */
   createProgram(vertexShader, fragmentShader) {
     const program = this.gl.createProgram();
     this.gl.attachShader(program, vertexShader);

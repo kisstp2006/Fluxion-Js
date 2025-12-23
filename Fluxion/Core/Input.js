@@ -1,6 +1,14 @@
+/**
+ * Handles keyboard and mouse input.
+ * Implements the Singleton pattern.
+ */
 export default class Input {
     static instance = null;
 
+    /**
+     * Creates an instance of Input.
+     * If an instance already exists, returns that instance.
+     */
     constructor() {
         if (Input.instance) {
             return Input.instance;
@@ -26,22 +34,45 @@ export default class Input {
         window.addEventListener('mousemove', this.handleMouseMove.bind(this));
     }
 
+    /**
+     * Checks if a key is currently held down.
+     * @param {string} key - The key to check.
+     * @returns {boolean} True if the key is held down, false otherwise.
+     */
     getKey(key) {
         return this.keys.has(key);
     }
 
+    /**
+     * Checks if a key was pressed in the current frame.
+     * @param {string} key - The key to check.
+     * @returns {boolean} True if the key was pressed, false otherwise.
+     */
     getKeyDown(key) {
         return this.keys.has(key) && !this.previousKeys.has(key);
     }
 
+    /**
+     * Checks if a key was released in the current frame.
+     * @param {string} key - The key to check.
+     * @returns {boolean} True if the key was released, false otherwise.
+     */
     getKeyUp(key) {
         return !this.keys.has(key) && this.previousKeys.has(key);
     }
 
+    /**
+     * Adds a listener for key down events.
+     * @param {Function} listener - The listener function.
+     */
     onKeyDown(listener) {
         this.keyDownListeners.push(listener);
     }
 
+    /**
+     * Adds a listener for key up events.
+     * @param {Function} listener - The listener function.
+     */
     onKeyUp(listener) {
         this.keyUpListeners.push(listener);
     }
@@ -62,30 +93,61 @@ export default class Input {
         }
     }
 
+    /**
+     * Checks if a mouse button is currently held down.
+     * @param {number} buttonIndex - The index of the mouse button (0: left, 1: middle, 2: right).
+     * @returns {boolean} True if the button is held down, false otherwise.
+     */
     getMouseButton(buttonIndex) {
         return this.mouseButtons.has(buttonIndex);
     }
 
+    /**
+     * Checks if a mouse button was pressed in the current frame.
+     * @param {number} buttonIndex - The index of the mouse button.
+     * @returns {boolean} True if the button was pressed, false otherwise.
+     */
     getMouseButtonDown(buttonIndex) {
         return this.mouseButtons.has(buttonIndex) && !this.previousMouseButtons.has(buttonIndex);
     }
 
+    /**
+     * Checks if a mouse button was released in the current frame.
+     * @param {number} buttonIndex - The index of the mouse button.
+     * @returns {boolean} True if the button was released, false otherwise.
+     */
     getMouseButtonUp(buttonIndex) {
         return !this.mouseButtons.has(buttonIndex) && this.previousMouseButtons.has(buttonIndex);
     }
 
+    /**
+     * Gets the current mouse position.
+     * @returns {{x: number, y: number}} The mouse position.
+     */
     getMousePosition() {
         return { ...this.mousePosition };
     }
 
+    /**
+     * Adds a listener for mouse down events.
+     * @param {Function} listener - The listener function.
+     */
     onMouseDown(listener) {
         this.mouseDownListeners.push(listener);
     }
 
+    /**
+     * Adds a listener for mouse up events.
+     * @param {Function} listener - The listener function.
+     */
     onMouseUp(listener) {
         this.mouseUpListeners.push(listener);
     }
 
+    /**
+     * Adds a listener for mouse move events.
+     * @param {Function} listener - The listener function.
+     */
     onMouseMove(listener) {
         this.mouseMoveListeners.push(listener);
     }
