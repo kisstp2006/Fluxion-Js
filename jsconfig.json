@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "module": "esnext",
+    "target": "es2020",
+    "moduleResolution": "node",
+    "lib": ["dom", "es2020"],
+    "strict": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": [
+    "**/*.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "3rdParty",
+    "**/dist",
+    "**/out"
+  ]
+}

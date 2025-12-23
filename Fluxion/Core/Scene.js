@@ -1,3 +1,5 @@
+/** @typedef {import('./Camera.js').default} Camera */
+
 /**
  * Represents a scene in the game, containing objects, audio, and a camera.
  */
@@ -8,6 +10,7 @@ export default class Scene {
     constructor() {
         this.objects = [];
         this.name = "Untitled Scene";
+        /** @type {Camera | null} */
         this.camera = null;
         this.audio = [];
     }
@@ -30,7 +33,7 @@ export default class Scene {
 
     /**
      * Sets the camera for the scene.
-     * @param {Object} camera - The camera object.
+     * @param {Camera} camera - The camera object.
      */
     setCamera(camera) {
         this.camera = camera;

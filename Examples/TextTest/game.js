@@ -1,29 +1,53 @@
+// @ts-check
+
 import Engine from "../../Fluxion/Core/Engine.js";
 import SceneLoader from "../../Fluxion/Core/SceneLoader.js";
 import Input from "../../Fluxion/Core/Input.js";
 
+/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../Fluxion/Core/Scene.js").default} Scene */
+/** @typedef {import("../../Fluxion/Core/ClickableArea.js").default} ClickableArea */
+/** @typedef {import("../../Fluxion/Core/Text.js").default} TextNode */
+/** @typedef {import("../../Fluxion/Core/Sprite.js").default} Sprite */
+
 const input = new Input();
 
+/**
+ * @type {{
+ *   currentScene: Scene | null,
+ *   clickCount: number,
+ *   init(renderer: Renderer): Promise<void>,
+ *   update(dt: number): void,
+ *   draw(renderer: Renderer): void,
+ * }}
+ */
 const game = {
+    /** @type {Scene | null} */
     currentScene: null,
     clickCount: 0,
 
+    /** @param {Renderer} renderer */
     async init(renderer) {
-        this.currentScene = await SceneLoader.load("scene2.xml", renderer);
-        console.log("Scene loaded:", this.currentScene);
+        const scene = await SceneLoader.load("scene2.xml", renderer);
+        this.currentScene = scene;
+        console.log("Scene loaded:", scene);
 
         // Apply scene camera resolution if defined
-        if (this.currentScene.camera && this.currentScene.camera.width > 0 && this.currentScene.camera.height > 0) {
-            console.log(`Setting resolution from scene: ${this.currentScene.camera.width}x${this.currentScene.camera.height}`);
-            renderer.targetWidth = this.currentScene.camera.width;
-            renderer.targetHeight = this.currentScene.camera.height;
-            renderer.targetAspectRatio = renderer.targetWidth / renderer.targetHeight;
+        const cam = scene.camera;
+        if (cam && cam.width > 0 && cam.height > 0) {
+            console.log(`Setting resolution from scene: ${cam.width}x${cam.height}`);
+            renderer.targetWidth = cam.width;
+            renderer.targetHeight = cam.height;
+            renderer.targetAspectRatio = cam.width / cam.height;
             renderer.resizeCanvas(); // Force resize update
         }
 
-        const btnHitbox = this.currentScene.getObjectByName("ButtonHitbox");
-        const counterText = this.currentScene.getObjectByName("Counter");
-        const buttonSprite = this.currentScene.getObjectByName("Button");
+        /** @type {ClickableArea | null} */
+        const btnHitbox = /** @type {any} */ (scene.getObjectByName("ButtonHitbox"));
+        /** @type {TextNode | null} */
+        const counterText = /** @type {any} */ (scene.getObjectByName("Counter"));
+        /** @type {Sprite | null} */
+        const buttonSprite = /** @type {any} */ (scene.getObjectByName("Button"));
 
         if (btnHitbox) {
             btnHitbox.onEnter = () => {
@@ -43,11 +67,13 @@ const game = {
                     const g = Math.floor(Math.random() * 255);
                     const b = Math.floor(Math.random() * 255);
                     counterText.textColor = `rgb(${r},${g},${b})`;
+                    
                 }
             };
         }
     },
 
+    /** @param {number} dt */
     update(dt) {
         if (this.currentScene) {
             this.currentScene.update(dt);
@@ -55,6 +81,7 @@ const game = {
         input.update();
     },
 
+    /** @param {Renderer} renderer */
     draw(renderer) {
         if (this.currentScene) {
             this.currentScene.draw(renderer);
