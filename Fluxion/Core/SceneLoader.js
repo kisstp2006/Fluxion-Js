@@ -171,6 +171,31 @@ export default class SceneLoader {
 
             const textObj = new Text(renderer, textContent, x, y, fontSize, fontFamily, color);
             textObj.name = getString("name", "Text");
+
+            // Optional: allow Text nodes to be clickable without requiring a non-self-closing tag.
+            // Example:
+            //   <Text name="Play" text="Play" x="..." y="..." clickable="true" />
+            // This will create a ClickableArea child that defaults to the Text's bounds.
+            const clickableAttr = node.getAttribute("clickable");
+            const shouldAutoClickable = clickableAttr !== null && clickableAttr.toLowerCase() === "true";
+            if (shouldAutoClickable) {
+                // Avoid duplicating if a ClickableArea child is already declared.
+                let hasClickableChild = false;
+                for (const child of node.children) {
+                    if (child.tagName === "ClickableArea") {
+                        hasClickableChild = true;
+                        break;
+                    }
+                }
+
+                if (!hasClickableChild) {
+                    const area = new ClickableArea(renderer);
+                    area.name = getString("clickableName", `${textObj.name}_Hitbox`);
+                    // width/height remain null so it inherits Text width/height like Sprites do.
+                    textObj.addChild(area);
+                }
+            }
+
             obj = textObj;
         }
 
