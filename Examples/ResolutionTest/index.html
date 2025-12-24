@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resolution & Fullscreen Test</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="ui-layer">
+        <h1>Settings</h1>
+        <div class="control-group">
+            <button id="btn-fullscreen">Toggle Fullscreen</button>
+        </div>
+        <div class="control-group">
+            <h3>Window Size</h3>
+            <button onclick="setRes(1280, 720)">1280x720</button>
+            <button onclick="setRes(1920, 1080)">1920x1080</button>
+            <button onclick="setRes(800, 600)">800x600</button>
+        </div>
+        <div id="status">Current: Checking...</div>
+        <p style="font-size: 12px; color: #aaa;">Note: Window size changes only work in Electron.</p>
+    </div>
+    <canvas id="gameCanvas"></canvas>
+    <script type="module" src="game.js"></script>
+</body>
+</html>

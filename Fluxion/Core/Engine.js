@@ -111,6 +111,31 @@ export default class Engine {
     }
 
     /**
+     * Sets the window to full screen mode.
+     * @param {boolean} flag - True to enable full screen, false to disable.
+     */
+    setFullScreen(flag) {
+        this.window.setFullScreen(flag);
+    }
+
+    /**
+     * Sets the window size.
+     * @param {number} width - The new width.
+     * @param {number} height - The new height.
+     */
+    setWindowSize(width, height) {
+        this.window.resize(width, height);
+    }
+
+    /**
+     * Sets the window title.
+     * @param {string} title - The new title.
+     */
+    setWindowTitle(title) {
+        this.window.setTitle(title);
+    }
+
+    /**
      * The main game loop.
      * @param {number} [timestamp=0] - The current timestamp.
      */
