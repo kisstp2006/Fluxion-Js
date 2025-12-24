@@ -48,6 +48,17 @@ const game = {
     update(dt) {
         if (this.currentScene) {
             this.currentScene.update(dt);
+            
+            // Test Camera Movement
+            const cam = this.currentScene.getObjectByName("MainCamera");
+            if (cam) {
+                // Move camera with arrow keys
+                const speed = 200 * dt;
+                if (input.getKey("ArrowRight")) cam.x += speed;
+                if (input.getKey("ArrowLeft")) cam.x -= speed;
+                if (input.getKey("ArrowDown")) cam.y += speed;
+                if (input.getKey("ArrowUp")) cam.y -= speed;
+            }
         }
         input.update();
     },

@@ -1,4 +1,5 @@
 <Scene name="Test Level">
+    <Camera name="MainCamera" x="0" y="0" zoom="1.0" />
     <Text name="TitleText"
           text="Xaml Loading Example"
           x="320"

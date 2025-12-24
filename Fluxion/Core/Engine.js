@@ -150,7 +150,14 @@ export default class Engine {
         
         // Clear the renderer and apply camera transformations
         this.renderer.beginFrame();
-        this.renderer.applyTransform(this.camera);
+        
+        // Use the scene's camera if available, otherwise use the default engine camera
+        let activeCamera = this.camera;
+        if (this.game.currentScene && this.game.currentScene.camera) {
+            activeCamera = this.game.currentScene.camera;
+        }
+        
+        this.renderer.applyTransform(activeCamera);
         
         // Draw the game elements
         if (this.game.draw) {
