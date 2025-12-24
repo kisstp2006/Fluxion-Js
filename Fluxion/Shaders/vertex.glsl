@@ -1,12 +1,17 @@
 attribute vec2 a_position;
 attribute vec2 a_texcoord;
+attribute vec4 a_color;
+
 uniform vec2 u_cameraPosition;
 uniform float u_cameraZoom;
 uniform float u_cameraRotation;
 uniform vec2 u_resolution;
+
 varying vec2 v_texcoord;
+varying vec4 v_color;
 
 void main() {
+  v_color = a_color;
   float cosR = cos(u_cameraRotation);
   float sinR = sin(u_cameraRotation);
 

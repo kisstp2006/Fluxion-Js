@@ -271,23 +271,56 @@ export default class Renderer {
     // Get attribute and uniform locations
     this.positionLocation = this.gl.getAttribLocation(this.program, "a_position");
     this.texcoordLocation = this.gl.getAttribLocation(this.program, "a_texcoord");
+    this.colorLocation = this.gl.getAttribLocation(this.program, "a_color"); // Changed to attribute
+    
     this.textureLocation = this.gl.getUniformLocation(this.program, "u_texture");
     this.cameraPositionLocation = this.gl.getUniformLocation(this.program, "u_cameraPosition");
     this.cameraZoomLocation = this.gl.getUniformLocation(this.program, "u_cameraZoom");
     this.cameraRotationLocation = this.gl.getUniformLocation(this.program, "u_cameraRotation");
     this.resolutionLocation = this.gl.getUniformLocation(this.program, "u_resolution");
-    this.colorLocation = this.gl.getUniformLocation(this.program, "u_color");
+    // this.colorLocation = this.gl.getUniformLocation(this.program, "u_color"); // Removed uniform
 
+    // --- Batch Rendering Initialization ---
+    this.MAX_QUADS = 2000;
+    this.VERTEX_SIZE = 8; // x, y, u, v, r, g, b, a
+    this.STRIDE = this.VERTEX_SIZE * 4; // bytes
+    
+    this.vertexData = new Float32Array(this.MAX_QUADS * 4 * this.VERTEX_SIZE);
+    this.quadCount = 0;
+    this.currentTexture = null;
 
-    // Create and bind buffers
-    this.buffer = this.gl.createBuffer();
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
+    // Create and bind vertex buffer (dynamic)
+    this.vertexBuffer = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, this.vertexData.byteLength, this.gl.DYNAMIC_DRAW);
+
+    // Create and bind index buffer (static)
+    this.indexBuffer = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+    
+    // Generate indices: 0,1,2, 0,2,3, 4,5,6, 4,6,7, ...
+    const indices = new Uint16Array(this.MAX_QUADS * 6);
+    for (let i = 0; i < this.MAX_QUADS; i++) {
+        const v = i * 4;
+        const idx = i * 6;
+        indices[idx] = v;
+        indices[idx + 1] = v + 1;
+        indices[idx + 2] = v + 2;
+        indices[idx + 3] = v;
+        indices[idx + 4] = v + 2;
+        indices[idx + 5] = v + 3;
+    }
+    this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indices, this.gl.STATIC_DRAW);
 
     // Enable attributes
     this.gl.enableVertexAttribArray(this.positionLocation);
-    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
+    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+    
     this.gl.enableVertexAttribArray(this.texcoordLocation);
-    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8); // Offset 2 floats (8 bytes)
+
+    this.gl.enableVertexAttribArray(this.colorLocation);
+    this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16); // Offset 4 floats (16 bytes)
     
     // Initialize post-processing if enabled
     if (this.enablePostProcessing) {
@@ -374,6 +407,10 @@ export default class Renderer {
   beginFrame() {
     if (!this.isReady) return;
 
+    // Reset batch state
+    this.quadCount = 0;
+    this.currentTexture = null;
+
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
       this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
@@ -397,11 +434,41 @@ export default class Renderer {
   endFrame() {
     if (!this.isReady) return;
 
+    // Flush any remaining quads
+    this.flush();
+
     if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {
       // Pass the main screen texture to the post-processing system
       // The output goes to the default framebuffer (null)
       this.postProcessing.render(this.mainScreenTexture, null);
     }
+  }
+
+  flush() {
+    if (this.quadCount === 0) return;
+
+    this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
+    
+    // Bind vertex buffer and upload data
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+    // Only upload the used portion of the buffer
+    const view = this.vertexData.subarray(0, this.quadCount * 4 * this.VERTEX_SIZE);
+    this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, view);
+
+    // Ensure attributes are enabled and pointing to the correct buffer
+    this.gl.enableVertexAttribArray(this.positionLocation);
+    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+    
+    this.gl.enableVertexAttribArray(this.texcoordLocation);
+    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
+
+    this.gl.enableVertexAttribArray(this.colorLocation);
+    this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+
+    // Draw
+    this.gl.drawElements(this.gl.TRIANGLES, this.quadCount * 6, this.gl.UNSIGNED_SHORT, 0);
+
+    this.quadCount = 0;
   }
 
   blitTexture(texture) {
@@ -426,34 +493,45 @@ export default class Renderer {
       // relative to our normal sprite/image upload path. Flip V here to keep the final image upright.
       this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
 
-      // Ensure vertex attributes are pointing to the correct buffer
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
-      this.gl.enableVertexAttribArray(this.positionLocation);
-      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
-      this.gl.enableVertexAttribArray(this.texcoordLocation);
-      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
-
+      // Use a separate buffer or just overwrite the batch buffer for this single draw
+      // For simplicity, let's use the batch buffer but treat it as a single quad
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+      
       // White tint
-      this.gl.uniform4fv(this.colorLocation, [1, 1, 1, 1]);
+      // this.gl.uniform4fv(this.colorLocation, [1, 1, 1, 1]); // Removed uniform
 
       const w = this.canvas.width;
       const h = this.canvas.height;
 
-      // Vertex structure: x, y, u, v
+      // Vertex structure: x, y, u, v, r, g, b, a
       // Flip V: top uses v=1, bottom uses v=0
       const quad = new Float32Array([
-        0, 0, 0, 1,      // Top-left
-        w, 0, 1, 1,      // Top-right
-        0, h, 0, 0,      // Bottom-left
-        w, h, 1, 0,      // Bottom-right
+        0, 0, 0, 1, 1, 1, 1, 1,      // Top-left
+        w, 0, 1, 1, 1, 1, 1, 1,      // Top-right
+        0, h, 0, 0, 1, 1, 1, 1,      // Bottom-left
+        w, h, 1, 0, 1, 1, 1, 1,      // Bottom-right
       ]);
 
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, this.vertexData.byteLength, this.gl.DYNAMIC_DRAW); // Reallocate to be safe
+      this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, quad);
+
+      // Ensure attributes
+      this.gl.enableVertexAttribArray(this.positionLocation);
+      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+      this.gl.enableVertexAttribArray(this.texcoordLocation);
+      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
+      this.gl.enableVertexAttribArray(this.colorLocation);
+      this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+
       this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
   }
 
   applyTransform(camera) {
     if (!this.isReady) return;
+    
+    // Flush current batch because camera uniforms are changing
+    this.flush();
+
     this.gl.useProgram(this.program);
 
     // Store the camera used for rendering so other systems (e.g. input hit-testing)
@@ -501,31 +579,61 @@ export default class Renderer {
         v1 = (sY + sH) / texH;   // Bottom
     }
 
-    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    // Check if we need to flush
+    if (this.currentTexture !== texture || this.quadCount >= this.MAX_QUADS) {
+        this.flush();
+        this.currentTexture = texture;
+    }
 
-    // Ensure vertex attributes are pointing to the correct buffer
-    // This is necessary because PostProcessing might have changed the bindings
-    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
-    this.gl.enableVertexAttribArray(this.positionLocation);
-    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, 16, 0);
-    this.gl.enableVertexAttribArray(this.texcoordLocation);
-    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, 16, 8);
+    const r = finalColor[0] / 255;
+    const g = finalColor[1] / 255;
+    const b = finalColor[2] / 255;
+    const a = finalColor[3] / 255;
 
-    // Világkoordinátákban dolgozunk!
-    // Vertex structure: x, y, u, v
-    const quad = new Float32Array([
-      x, y, u0, v0,           // Top-left
-      x + width, y, u1, v0,   // Top-right
-      x, y + height, u0, v1,  // Bottom-left
-      x + width, y + height, u1, v1, // Bottom-right
-    ]);
+    // Append to vertex data
+    let offset = this.quadCount * 4 * this.VERTEX_SIZE;
 
-    this.gl.bufferData(this.gl.ARRAY_BUFFER, quad, this.gl.STATIC_DRAW);
+    // Top-left
+    this.vertexData[offset++] = x;
+    this.vertexData[offset++] = y;
+    this.vertexData[offset++] = u0;
+    this.vertexData[offset++] = v0;
+    this.vertexData[offset++] = r;
+    this.vertexData[offset++] = g;
+    this.vertexData[offset++] = b;
+    this.vertexData[offset++] = a;
 
-    const normalizedColor = finalColor.map(c => c / 255);
-    this.gl.uniform4fv(this.colorLocation, normalizedColor);
+    // Top-right
+    this.vertexData[offset++] = x + width;
+    this.vertexData[offset++] = y;
+    this.vertexData[offset++] = u1;
+    this.vertexData[offset++] = v0;
+    this.vertexData[offset++] = r;
+    this.vertexData[offset++] = g;
+    this.vertexData[offset++] = b;
+    this.vertexData[offset++] = a;
 
-    this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+    // Bottom-right
+    this.vertexData[offset++] = x + width;
+    this.vertexData[offset++] = y + height;
+    this.vertexData[offset++] = u1;
+    this.vertexData[offset++] = v1;
+    this.vertexData[offset++] = r;
+    this.vertexData[offset++] = g;
+    this.vertexData[offset++] = b;
+    this.vertexData[offset++] = a;
+
+    // Bottom-left
+    this.vertexData[offset++] = x;
+    this.vertexData[offset++] = y + height;
+    this.vertexData[offset++] = u0;
+    this.vertexData[offset++] = v1;
+    this.vertexData[offset++] = r;
+    this.vertexData[offset++] = g;
+    this.vertexData[offset++] = b;
+    this.vertexData[offset++] = a;
+
+    this.quadCount++;
 }
 
   screenToWorld(screenX, screenY, camera) {
