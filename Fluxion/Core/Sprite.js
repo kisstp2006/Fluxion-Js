@@ -42,6 +42,11 @@ export default class Sprite {
         this.layer = 0;
         this.children = [];
         
+        // Camera following properties
+        this.followCamera = false;
+        this.baseX = x;
+        this.baseY = y;
+
         this.loadTexture(imageSrc);
     }
 
@@ -81,6 +86,20 @@ export default class Sprite {
      */
     update(dt, camera) {
         if (!this.active) return;
+
+        // Handle camera following
+        if (this.followCamera && camera) {
+            this.x = camera.x + this.baseX;
+            this.y = camera.y + this.baseY;
+        } else if (!this.followCamera) {
+            // If we switched off followCamera, we might want to sync baseX/Y to current x/y
+            // But usually baseX/Y are only used when followCamera is true.
+            // If we move the object while followCamera is false, we should update baseX/Y 
+            // so that if we re-enable it, it doesn't jump? 
+            // For now, let's assume baseX/Y are the "relative" coords.
+            // If the user manually moves .x/.y, we should probably update .baseX/.baseY if followCamera is true.
+            // But here we are overwriting .x/.y.
+        }
 
         for (const child of this.children) {
             if (child.update) {

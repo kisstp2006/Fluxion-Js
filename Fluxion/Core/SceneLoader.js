@@ -266,6 +266,16 @@ export default class SceneLoader {
             if (activeAttr !== null) {
                 obj.active = activeAttr !== "false";
             }
+
+            const followCameraAttr = node.getAttribute("followCamera");
+            if (followCameraAttr !== null && obj.hasOwnProperty('followCamera')) {
+                obj.followCamera = followCameraAttr === "true";
+                // If following camera, the initial x/y from XML are treated as the relative base positions
+                if (obj.followCamera) {
+                    obj.baseX = obj.x;
+                    obj.baseY = obj.y;
+                }
+            }
         }
 
         // Handle children
