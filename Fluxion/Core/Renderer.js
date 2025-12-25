@@ -53,6 +53,11 @@ export default class Renderer {
     this.mainScreenFramebuffer = null;
     this.mainScreenTexture = null;
     
+    // Performance optimizations
+    this.textureCache = new Map(); // Cache textures by image source
+    this.drawCallCount = 0; // Track draw calls for profiling
+    this.lastFrameDrawCalls = 0;
+    
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
     this.resizeCanvas();
@@ -372,7 +377,12 @@ export default class Renderer {
     return program;
   }
 
-  createTexture(image) {
+  createTexture(image, cacheKey = null) {
+    // Check cache if key provided
+    if (cacheKey && this.textureCache.has(cacheKey)) {
+      return this.textureCache.get(cacheKey);
+    }
+
     const texture = this.gl.createTexture();
     texture.width = image.width;
     texture.height = image.height;
@@ -385,8 +395,16 @@ export default class Renderer {
 
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
     this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
-    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
-    this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+    
+    // Use mipmapping for better performance when downscaling
+    const isPowerOf2 = (value) => (value & (value - 1)) === 0;
+    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR_MIPMAP_LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+    } else {
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
+    }
 
     this.gl.texImage2D(
       this.gl.TEXTURE_2D,
@@ -397,10 +415,21 @@ export default class Renderer {
       image
     );
 
+    // Generate mipmaps for power-of-2 textures
+    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+      this.gl.generateMipmap(this.gl.TEXTURE_2D);
+    }
+
     // Reset state to avoid surprising other uploads.
     this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+    
+    // Cache texture if key provided
+    if (cacheKey) {
+      this.textureCache.set(cacheKey, texture);
+    }
+    
     return texture;
   }
 
@@ -410,6 +439,8 @@ export default class Renderer {
     // Reset batch state
     this.quadCount = 0;
     this.currentTexture = null;
+    this.lastFrameDrawCalls = this.drawCallCount;
+    this.drawCallCount = 0;
 
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
@@ -467,7 +498,8 @@ export default class Renderer {
 
     // Draw
     this.gl.drawElements(this.gl.TRIANGLES, this.quadCount * 6, this.gl.UNSIGNED_SHORT, 0);
-
+    
+    this.drawCallCount++;
     this.quadCount = 0;
   }
 
@@ -635,6 +667,22 @@ export default class Renderer {
 
     this.quadCount++;
 }
+
+  getStats() {
+    return {
+      drawCalls: this.lastFrameDrawCalls,
+      quadsRendered: this.MAX_QUADS,
+      texturesCached: this.textureCache.size
+    };
+  }
+
+  clearTextureCache() {
+    // Delete all cached textures from GPU
+    for (const texture of this.textureCache.values()) {
+      this.gl.deleteTexture(texture);
+    }
+    this.textureCache.clear();
+  }
 
   screenToWorld(screenX, screenY, camera) {
       if (!camera) return { x: 0, y: 0 };

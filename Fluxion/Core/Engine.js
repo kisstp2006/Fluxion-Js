@@ -26,11 +26,22 @@ export default class Engine {
         this.game.window = this.window;
         
         this.lastTime = 0;
+        
+        // Performance monitoring
+        this.fps = 0;
+        this.frameCount = 0;
+        this.fpsUpdateTime = 0;
+        this.deltaTimeAccumulator = 0;
+        this.showStats = false; // Toggle with F9
 
         // Debug Key Listener (F8)
         window.addEventListener('keydown', (e) => {
             if (e.key === 'F8') {
                 this.dumpScene();
+            }
+            if (e.key === 'F9') {
+                this.showStats = !this.showStats;
+                console.log(`Performance stats ${this.showStats ? 'enabled' : 'disabled'}`);
             }
         });
 
@@ -142,10 +153,27 @@ export default class Engine {
     loop(timestamp = 0) {
         const deltaTime = (timestamp - this.lastTime) / 1000;
         this.lastTime = timestamp;
+        
+        // Cap delta time to prevent huge jumps (e.g., when tab is inactive)
+        const cappedDeltaTime = Math.min(deltaTime, 0.1);
 
         // Update the game logic
         if (this.game.update) {
-            this.game.update(deltaTime);
+            this.game.update(cappedDeltaTime);
+        }
+        
+        // FPS calculation
+        this.frameCount++;
+        this.deltaTimeAccumulator += deltaTime;
+        if (timestamp - this.fpsUpdateTime >= 1000) {
+            this.fps = Math.round(this.frameCount * 1000 / (timestamp - this.fpsUpdateTime));
+            this.frameCount = 0;
+            this.fpsUpdateTime = timestamp;
+            
+            if (this.showStats) {
+                const stats = this.renderer.getStats();
+                console.log(`FPS: ${this.fps} | Draw Calls: ${stats.drawCalls} | Textures: ${stats.texturesCached}`);
+            }
         }
         
         // Clear the renderer and apply camera transformations

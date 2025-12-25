@@ -55,8 +55,8 @@ export default class AnimatedSprite extends Sprite {
                 img.src = src;
                 img.onload = () => {
                     console.log(`[AnimatedSprite] Loaded frame ${index} for '${name}': ${src}`);
-                    // Create texture immediately
-                    anim.images[index] = this.renderer.createTexture(img);
+                    // Create texture with caching
+                    anim.images[index] = this.renderer.createTexture(img, src);
                 };
                 img.onerror = (e) => {
                     console.error(`[AnimatedSprite] Failed to load animation frame: ${src}`, e);

@@ -21,6 +21,7 @@ export default class Scene {
      */
     add(object) {
         this.objects.push(object);
+        this._objectsDirty = true;
     }
 
     /**
@@ -76,6 +77,7 @@ export default class Scene {
         const index = this.objects.indexOf(object);
         if (index > -1) {
             this.objects.splice(index, 1);
+            this._objectsDirty = true;
         }
     }
 
@@ -97,14 +99,17 @@ export default class Scene {
      */
     draw(renderer) {
         // Sort objects by layer before drawing
-        // Objects without a layer property default to layer 0
-        const sortedObjects = [...this.objects].sort((a, b) => {
-            const layerA = a.layer !== undefined ? a.layer : 0;
-            const layerB = b.layer !== undefined ? b.layer : 0;
-            return layerA - layerB;
-        });
+        // Cache sorted objects to avoid sorting every frame
+        if (!this._sortedObjects || this._objectsDirty) {
+            this._sortedObjects = [...this.objects].sort((a, b) => {
+                const layerA = a.layer !== undefined ? a.layer : 0;
+                const layerB = b.layer !== undefined ? b.layer : 0;
+                return layerA - layerB;
+            });
+            this._objectsDirty = false;
+        }
 
-        for (const obj of sortedObjects) {
+        for (const obj of this._sortedObjects) {
             if (obj.draw) {
                 obj.draw(renderer);
             }

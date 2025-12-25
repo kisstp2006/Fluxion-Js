@@ -55,7 +55,12 @@ export default class Sprite {
      * @param {number} layer - The layer index.
      */
     setLayer(layer) {
-        this.layer = layer;
+        if (this.layer !== layer) {
+            this.layer = layer;
+            if (this.parent) {
+                this.parent._childrenDirty = true;
+            }
+        }
     }
 
     /**
@@ -65,6 +70,7 @@ export default class Sprite {
     addChild(child) {
         child.parent = this;
         this.children.push(child);
+        this._childrenDirty = true;
     }
 
     /**
@@ -76,6 +82,7 @@ export default class Sprite {
         if (index > -1) {
             this.children.splice(index, 1);
             child.parent = null;
+            this._childrenDirty = true;
         }
     }
 
@@ -160,7 +167,8 @@ export default class Sprite {
             const img = new Image();
             img.src = imageSrc;
             img.onload = () => {
-                this.texture = this.renderer.createTexture(img);
+                // Use texture cache with image source as key
+                this.texture = this.renderer.createTexture(img, imageSrc);
             };
         } else if (Array.isArray(imageSrc)) {
             imageSrc.forEach((src) => {
@@ -172,8 +180,7 @@ export default class Sprite {
     }
 
     draw() {
-        if (!this.active) return;
-        if (!this.visible || !this.texture) return;
+        if (!this.active || !this.visible || !this.texture) return;
 
         const currentTime = Date.now();
         
@@ -197,14 +204,20 @@ export default class Sprite {
 
         }
 
-        // Draw children
-        const sortedChildren = [...this.children].sort((a, b) => {
-            const layerA = a.layer !== undefined ? a.layer : 0;
-            const layerB = b.layer !== undefined ? b.layer : 0;
-            return layerA - layerB;
-        });
+        // Draw children - only sort if needed
+        if (this.children.length === 0) return;
+        
+        // Cache sorted children if layer hasn't changed
+        if (!this._sortedChildren || this._childrenDirty) {
+            this._sortedChildren = [...this.children].sort((a, b) => {
+                const layerA = a.layer !== undefined ? a.layer : 0;
+                const layerB = b.layer !== undefined ? b.layer : 0;
+                return layerA - layerB;
+            });
+            this._childrenDirty = false;
+        }
 
-        for (const child of sortedChildren) {
+        for (const child of this._sortedChildren) {
             if (child.draw) {
                 child.draw(this.renderer); // Pass renderer just in case
             }

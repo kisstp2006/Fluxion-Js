@@ -114,7 +114,7 @@ export default class Text extends Sprite {
         this.ctx.textBaseline = 'top';
         this.ctx.fillText(this.textContent, this.padding, this.padding);
 
-        // Update WebGL texture
+        // Update WebGL texture - don't use cache for text (dynamic content)
         if (this.texture) {
             this.renderer.gl.deleteTexture(this.texture);
         }

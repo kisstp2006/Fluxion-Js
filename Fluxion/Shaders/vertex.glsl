@@ -1,3 +1,5 @@
+precision highp float;
+
 attribute vec2 a_position;
 attribute vec2 a_texcoord;
 attribute vec4 a_color;
@@ -12,26 +14,22 @@ varying vec4 v_color;
 
 void main() {
   v_color = a_color;
+  v_texcoord = a_texcoord;
+  
+  // Optimized rotation - precompute sin/cos on CPU when possible
   float cosR = cos(u_cameraRotation);
   float sinR = sin(u_cameraRotation);
 
-  // Rotation matrix
-  mat2 rotationMatrix = mat2(
-    cosR, -sinR,
-    sinR, cosR
-  );
-
-  // Godot-like 2D coordinates:
-  // - a_position is in pixels
-  // - (0,0) is top-left of the viewport when the camera is at (0,0)
-  // - +X right, +Y down
-  // Camera transform is applied in pixel space, then we map to NDC.
-  vec2 viewPos = (rotationMatrix * (a_position - u_cameraPosition)) * u_cameraZoom;
-  vec2 ndc = vec2(
-    (viewPos.x / u_resolution.x) * 2.0 - 1.0,
-    1.0 - (viewPos.y / u_resolution.y) * 2.0
-  );
+  // Camera transform in pixel space
+  vec2 worldPos = a_position - u_cameraPosition;
+  vec2 viewPos = vec2(
+    worldPos.x * cosR - worldPos.y * sinR,
+    worldPos.x * sinR + worldPos.y * cosR
+  ) * u_cameraZoom;
+  
+  // Map to NDC - optimized division
+  vec2 invResolution = vec2(2.0, -2.0) / u_resolution;
+  vec2 ndc = viewPos * invResolution + vec2(-1.0, 1.0);
 
   gl_Position = vec4(ndc, 0.0, 1.0);
-  v_texcoord = a_texcoord;
 }
