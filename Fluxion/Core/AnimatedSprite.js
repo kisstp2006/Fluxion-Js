@@ -51,16 +51,28 @@ export default class AnimatedSprite extends Sprite {
             anim.images = new Array(frames.length).fill(null);
             
             frames.forEach((src, index) => {
+                // Fast path: if already cached, avoid loading.
+                if (this.renderer?.hasCachedTexture?.(src)) {
+                    anim.images[index] = this.renderer.getCachedTexture(src);
+                    return;
+                }
+
                 const img = new Image();
-                img.src = src;
-                img.onload = () => {
+                const loadPromise = new Promise((resolve) => {
+                    img.onload = () => {
                     console.log(`[AnimatedSprite] Loaded frame ${index} for '${name}': ${src}`);
                     // Create texture with caching
                     anim.images[index] = this.renderer.createTexture(img, src);
-                };
-                img.onerror = (e) => {
+                    resolve(true);
+                    };
+                    img.onerror = (e) => {
                     console.error(`[AnimatedSprite] Failed to load animation frame: ${src}`, e);
-                };
+                    resolve(false);
+                    };
+                });
+
+                this.renderer?.trackAssetPromise?.(loadPromise);
+                img.src = src;
             });
         } else {
              console.log(`[AnimatedSprite] Adding animation '${name}' with frame indices:`, frames);

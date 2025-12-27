@@ -209,9 +209,10 @@ export default class SceneLoader {
             const audio = new Audio();
             audio.name = getString("name");
             if (src) {
-                // Start loading but don't await it here to avoid blocking scene load too much?
-                // Actually, Audio.load is async.
-                await audio.load(src);
+                // Track + await audio decoding so loading flows (e.g., splash) can wait.
+                const p = audio.load(src);
+                renderer?.trackAssetPromise?.(p);
+                await p;
             }
             audio.loop = loop;
             audio.volume = volume;

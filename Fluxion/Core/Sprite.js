@@ -164,17 +164,38 @@ export default class Sprite {
         if (typeof imageSrc === 'string' && imageSrc.trim() === '') return;
 
         if (this.useSpriteSheet) {
+            // Fast path: if already cached, avoid a network fetch.
+            if (this.renderer?.hasCachedTexture?.(imageSrc)) {
+                this.texture = this.renderer.getCachedTexture(imageSrc);
+                return;
+            }
+
             const img = new Image();
+            const loadPromise = new Promise((resolve) => {
+                img.onload = () => {
+                    // Use texture cache with image source as key
+                    this.texture = this.renderer.createTexture(img, imageSrc);
+                    resolve(true);
+                };
+                img.onerror = () => resolve(false);
+            });
+
+            this.renderer?.trackAssetPromise?.(loadPromise);
             img.src = imageSrc;
-            img.onload = () => {
-                // Use texture cache with image source as key
-                this.texture = this.renderer.createTexture(img, imageSrc);
-            };
         } else if (Array.isArray(imageSrc)) {
             imageSrc.forEach((src) => {
+                // Track raw image loads (even though this mode doesn't currently create textures).
                 const img = new Image();
+                const loadPromise = new Promise((resolve) => {
+                    img.onload = () => {
+                        this.images.push(img);
+                        resolve(true);
+                    };
+                    img.onerror = () => resolve(false);
+                });
+
+                this.renderer?.trackAssetPromise?.(loadPromise);
                 img.src = src;
-                img.onload = () => this.images.push(img);
             });
         }
     }

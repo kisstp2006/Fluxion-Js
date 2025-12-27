@@ -1,6 +1,7 @@
 import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 import Window from "./Window.js";
+import SplashScreen from "./SplashScreen.js";
 
 /**
  * The main Engine class that manages the game loop, renderer, camera, and window.
@@ -15,7 +16,7 @@ export default class Engine {
      * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
      * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
      */
-    constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
+    constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
         // Initialize Renderer with aspect ratio settings and post-processing
         this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
         this.camera = new Camera();
@@ -35,6 +36,21 @@ export default class Engine {
         this.deltaTimeAccumulator = 0;
         this.showStats = false; // Toggle with F9
 
+        // Splash screen
+        this.splashScreen = new SplashScreen();
+        const splashCfg = options && typeof options === 'object' ? (options.splashScreen || {}) : {};
+        this.splashEnabled = splashCfg.enabled !== false;
+        const showBrandingWhenDisabled = splashCfg.showMadeWithFluxionWhenDisabled !== false;
+
+        if (this.splashEnabled) {
+            this.splashScreen.showLoading({
+                logoText: splashCfg.logoText || 'Made with Fluxion',
+                logoUrl: splashCfg.logoUrl || null
+            });
+        } else if (showBrandingWhenDisabled) {
+            this.splashScreen.showMadeWithFluxion(3000);
+        }
+
         // Debug Key Listener (F8)
         window.addEventListener('keydown', (e) => {
             if (e.key === 'F8') {
@@ -46,23 +62,38 @@ export default class Engine {
             }
         });
 
-        // Load default font and version info
-        Promise.all([this.loadDefaultFont(), this.loadVersionInfo()])
-            .then(() => {
-                // Wait for renderer to be ready before starting
-                this.renderer.readyPromise.then(() => {
-                    // Initialize the game
-                    if (this.game.init) {
-                        this.game.init(this.renderer);
-                    }
-                    
-                    requestAnimationFrame(this.loop.bind(this));
-                });
-            })
-            .catch(error => {
-                console.error("Engine initialization aborted due to critical error:", error);
-            });
+        // Boot sequence (async): load fonts/version, wait renderer ready, init game, wait assets, then start loop.
+        this._startAsync(options).catch(error => {
+            console.error("Engine initialization aborted due to critical error:", error);
+        });
     } 
+
+    async _startAsync(options = {}) {
+        await Promise.all([this.loadDefaultFont(), this.loadVersionInfo()]);
+
+        // Wait for renderer to be ready before starting
+        await this.renderer.readyPromise;
+
+        // Initialize the game (support async init)
+        if (this.game.init) {
+            const initResult = this.game.init(this.renderer);
+            if (initResult && typeof initResult.then === 'function') {
+                await initResult;
+            }
+        }
+
+        // Wait for tracked assets (textures/audio) spawned during init
+        if (this.renderer.waitForTrackedAssets) {
+            await this.renderer.waitForTrackedAssets({ timeoutMs: 30000 });
+        }
+
+        // Hide splash once ready
+        if (this.splashEnabled) {
+            await this.splashScreen.hide();
+        }
+
+        requestAnimationFrame(this.loop.bind(this));
+    }
 
     /**
      * Loads the engine version information from the version.py file.

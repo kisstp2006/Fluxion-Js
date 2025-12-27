@@ -57,6 +57,9 @@ export default class Renderer {
     this.textureCache = new Map(); // Cache textures by image source
     this.drawCallCount = 0; // Track draw calls for profiling
     this.lastFrameDrawCalls = 0;
+
+    // Asset tracking (textures/audio/etc). Used for splash screens / loading flows.
+    this._pendingAssets = new Set();
     
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
@@ -93,6 +96,68 @@ export default class Renderer {
       this.isReady = true;
     });
   } 
+
+  /**
+   * Returns true if a texture is already cached for a given key.
+   * @param {string} cacheKey
+   */
+  hasCachedTexture(cacheKey) {
+    return !!cacheKey && this.textureCache.has(cacheKey);
+  }
+
+  /**
+   * Gets a cached texture by key, or null.
+   * @param {string} cacheKey
+   */
+  getCachedTexture(cacheKey) {
+    if (!cacheKey) return null;
+    return this.textureCache.get(cacheKey) || null;
+  }
+
+  /**
+   * Track a promise representing an asset load.
+   * The promise is removed once it settles.
+   * @template T
+   * @param {Promise<T>} promise
+   * @returns {Promise<T>}
+   */
+  trackAssetPromise(promise) {
+    if (!promise || typeof promise.then !== 'function') return promise;
+
+    this._pendingAssets.add(promise);
+    promise.finally(() => {
+      this._pendingAssets.delete(promise);
+    });
+    return promise;
+  }
+
+  /**
+   * Number of pending tracked asset promises.
+   */
+  getPendingAssetCount() {
+    return this._pendingAssets.size;
+  }
+
+  /**
+   * Wait until all currently tracked assets have settled.
+   * If new assets are tracked while waiting, they are also awaited.
+   * @param {{timeoutMs?: number}} [opts]
+   */
+  async waitForTrackedAssets(opts = {}) {
+    const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 30000;
+    const start = performance.now();
+
+    // Loop until stable empty.
+    while (this._pendingAssets.size > 0) {
+      if (performance.now() - start > timeoutMs) {
+        console.warn(`[Renderer] waitForTrackedAssets timed out with ${this._pendingAssets.size} pending assets.`);
+        return;
+      }
+
+      const snapshot = Array.from(this._pendingAssets);
+      await Promise.allSettled(snapshot);
+    }
+  }
 
   /**
    * Resizes the canvas to fit the window, maintaining aspect ratio if configured.

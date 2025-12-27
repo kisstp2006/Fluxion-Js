@@ -6,6 +6,7 @@
 
 // Core Engine
 export { default as Engine } from './Engine.js';
+export { default as SplashScreen } from './SplashScreen.js';
 
 // Rendering
 export { default as Renderer } from './Renderer.js';
