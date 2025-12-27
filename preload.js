@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   resize: (width, height) => ipcRenderer.send('window-resize', width, height),
-  saveDebugFile: (filename, content) => ipcRenderer.send('save-debug-file', filename, content)
+  saveDebugFile: (filename, content) => ipcRenderer.send('save-debug-file', filename, content),
+  getGPUInfo: () => ipcRenderer.invoke('get-gpu-info')
 }); 

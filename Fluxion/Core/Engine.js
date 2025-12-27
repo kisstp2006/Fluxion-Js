@@ -148,6 +148,66 @@ export default class Engine {
     }
 
     /**
+     * Checks if GPU acceleration is enabled and available.
+     * @async
+     * @returns {Promise<Object>} Object containing GPU acceleration status and details.
+     */
+    async isGPUAccelerationEnabled() {
+        const result = {
+            enabled: false,
+            webgl: false,
+            webgl2: false,
+            canvas2d: false,
+            details: null
+        };
+
+        // Check WebGL support
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        const gl2 = canvas.getContext('webgl2');
+        
+        result.webgl = gl !== null;
+        result.webgl2 = gl2 !== null;
+        
+        // Check Canvas 2D acceleration
+        const ctx2d = canvas.getContext('2d');
+        result.canvas2d = ctx2d !== null;
+
+        // Get GPU info from Electron if available
+        if (window.electronAPI && window.electronAPI.getGPUInfo) {
+            try {
+                const gpuInfo = await window.electronAPI.getGPUInfo();
+                result.details = gpuInfo;
+                
+                // Check if key features are enabled
+                if (gpuInfo) {
+                    result.enabled = (
+                        gpuInfo.webgl !== 'disabled' &&
+                        gpuInfo.webgl2 !== 'disabled' &&
+                        gpuInfo.canvas_oop_rasterization !== 'disabled'
+                    );
+                }
+            } catch (error) {
+                console.warn('Could not retrieve GPU info from Electron:', error);
+            }
+        } else {
+            // Fallback for non-Electron environments (browser)
+            result.enabled = result.webgl || result.webgl2;
+        }
+
+        // Get WebGL renderer info if available
+        if (gl) {
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            if (debugInfo) {
+                result.renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                result.vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+            }
+        }
+
+        return result;
+    }
+
+    /**
      * The main game loop.
      * @param {number} [timestamp=0] - The current timestamp.
      */

@@ -9,8 +9,14 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Enable GPU acceleration
   app.commandLine.appendSwitch("enable-gpu-rasterization");
   app.commandLine.appendSwitch("ignore-gpu-blacklist");
+  app.commandLine.appendSwitch("enable-webgl");
+  app.commandLine.appendSwitch("enable-webgl2-compute-context");
+  app.commandLine.appendSwitch("disable-gpu-driver-bug-workarounds");
+  app.commandLine.appendSwitch("enable-accelerated-2d-canvas");
+  app.commandLine.appendSwitch("enable-zero-copy");
 
   app.whenReady().then(() => {
     mainWindow = new BrowserWindow({
@@ -91,5 +97,15 @@ if (!gotTheLock) {
             // Optionally notify renderer
         }
     });
+  });
+
+  // GPU Acceleration Info
+  ipcMain.handle("get-gpu-info", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      const gpuInfo = await app.getGPUFeatureStatus();
+      return gpuInfo;
+    }
+    return null;
   });
 } 
