@@ -82,6 +82,30 @@ export default class Scene {
     }
 
     /**
+     * Stops all audio in the scene that has stopOnSceneChange set to true.
+     * Call this method when switching away from this scene.
+     */
+    stopAudio() {
+        for (const audio of this.audio) {
+            if (audio.stopOnSceneChange) {
+                audio.stop();
+            }
+        }
+    }
+
+    /**
+     * Plays all audio in the scene that has autoplay enabled.
+     * Call this method when switching to this scene.
+     */
+    playAutoplayAudio() {
+        for (const audio of this.audio) {
+            if (audio.autoplay && audio.stopOnSceneChange) {
+                audio.play(true);
+            }
+        }
+    }
+
+    /**
      * Updates all objects in the scene.
      * @param {number} dt - The delta time since the last frame.
      */

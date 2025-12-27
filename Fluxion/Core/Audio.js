@@ -24,6 +24,8 @@ class Audio {
       this.startTime = 0;
       this.pauseTime = 0;
       this._active = true;
+      this.stopOnSceneChange = true; // Default: stop audio when scene changes
+      this.autoplay = false; // Whether this audio should autoplay when scene becomes active
   }
 
   /**

@@ -26,6 +26,7 @@ export default class Engine {
         this.game.window = this.window;
         
         this.lastTime = 0;
+        this.previousScene = null; // Track previous scene for audio management
         
         // Performance monitoring
         this.fps = 0;
@@ -157,6 +158,19 @@ export default class Engine {
         // Cap delta time to prevent huge jumps (e.g., when tab is inactive)
         const cappedDeltaTime = Math.min(deltaTime, 0.1);
 
+        // Automatic scene audio management
+        if (this.game.currentScene && this.game.currentScene !== this.previousScene) {
+            // Stop audio from previous scene
+            if (this.previousScene && this.previousScene.stopAudio) {
+                this.previousScene.stopAudio();
+            }
+            // Play audio for new scene
+            if (this.game.currentScene.playAutoplayAudio) {
+                this.game.currentScene.playAutoplayAudio();
+            }
+            this.previousScene = this.game.currentScene;
+        }
+        
         // Update the game logic
         if (this.game.update) {
             this.game.update(cappedDeltaTime);

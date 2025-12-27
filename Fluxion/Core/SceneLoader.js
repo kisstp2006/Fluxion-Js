@@ -204,6 +204,7 @@ export default class SceneLoader {
             const loop = getBool("loop", false);
             const volume = getFloat("volume", 1.0);
             const autoplay = getBool("autoplay", false);
+            const stopOnSceneChange = getBool("stopOnSceneChange", true);
 
             const audio = new Audio();
             audio.name = getString("name");
@@ -214,13 +215,11 @@ export default class SceneLoader {
             }
             audio.loop = loop;
             audio.volume = volume;
+            audio.stopOnSceneChange = stopOnSceneChange;
+            audio.autoplay = autoplay; // Store autoplay flag for later use
             
-            if (autoplay) {
-                // We might need to wait for user interaction before playing audio in some browsers,
-                // but let's assume the engine handles that or the user has already interacted.
-                // Also, audio.play() checks if buffer is loaded. Since we awaited load, it should be fine.
-                audio.play();
-            }
+            // Don't autoplay here - let the scene switching logic handle it
+            // This prevents audio from playing when loading scenes that aren't active yet
 
             obj = audio;
         }
