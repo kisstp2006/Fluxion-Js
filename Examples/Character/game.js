@@ -1,7 +1,4 @@
-import Engine from "../../Fluxion/Core/Engine.js"; // Import the Engine class from the specified path
-import Sprite from "../../Fluxion/Core/Sprite.js"; // Import the Sprite class from the specified path
-import Input from "../../Fluxion/Core/Input.js"; // Import the Input class from the specified path
-import SceneLoader from "../../Fluxion/Core/SceneLoader.js"; // Import SceneLoader
+import { Engine, Sprite, Input, SceneLoader } from "../../Fluxion/index.js";
 
 const input = new Input(); // Create a new Input instance to handle user input
 

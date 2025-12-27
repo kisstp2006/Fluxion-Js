@@ -1,5 +1,4 @@
-import Engine from '../../Fluxion/Core/Engine.js';
-import Text from '../../Fluxion/Core/Text.js';
+import { Engine, Text } from '../../Fluxion/index.js';
 
 class ResolutionGame {
     constructor() {

@@ -1,7 +1,5 @@
-import Engine from "../../Fluxion/Core/Engine.js";
-import Input from "../../Fluxion/Core/Input.js";
-import SceneLoader from "../../Fluxion/Core/SceneLoader.js";
-import Audio from "../../Fluxion/Core/Audio.js";
+import { Engine, Input, SceneLoader } from "../../Fluxion/index.js";
+import { Audio } from "../../Fluxion/extras.js";
 
 const input = new Input();
 

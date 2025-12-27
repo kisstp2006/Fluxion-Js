@@ -1,5 +1,4 @@
-import Engine from "../../Fluxion/Core/Engine.js";
-import SceneLoader from "../../Fluxion/Core/SceneLoader.js";
+import { Engine, SceneLoader } from "../../Fluxion/index.js";
 
 const game = {
     currentScene: null,

@@ -1,8 +1,6 @@
 // @ts-check
 
-import Engine from "../../Fluxion/Core/Engine.js";
-import SceneLoader from "../../Fluxion/Core/SceneLoader.js";
-import Input from "../../Fluxion/Core/Input.js";
+import { Engine, SceneLoader, Input } from "../../Fluxion/index.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 /** @typedef {import("../../Fluxion/Core/Scene.js").default} Scene */

@@ -1,6 +1,4 @@
-import Engine from "../../Fluxion/Core/Engine.js";
-import Sprite from "../../Fluxion/Core/Sprite.js";
-import AnimatedSprite from "../../Fluxion/Core/AnimatedSprite.js";
+import { Engine, Sprite, AnimatedSprite } from "../../Fluxion/index.js";
 
 // Helper to generate a simple spritesheet data URL
 function createSpritesheet() {

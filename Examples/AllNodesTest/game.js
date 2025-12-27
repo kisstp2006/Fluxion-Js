@@ -1,6 +1,4 @@
-import Engine from "../../Fluxion/Core/Engine.js";
-import Input from "../../Fluxion/Core/Input.js";
-import SceneLoader from "../../Fluxion/Core/SceneLoader.js";
+import { Engine, Input, SceneLoader } from "../../Fluxion/index.js";
 
 const input = new Input();
 

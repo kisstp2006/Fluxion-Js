@@ -1,6 +1,4 @@
-import Engine from "../../Fluxion/Core/Engine.js";
-import Sprite from "../../Fluxion/Core/Sprite.js";
-import Input from "../../Fluxion/Core/Input.js";
+import { Engine, Sprite, Input } from "../../Fluxion/index.js";
 
 const input = new Input();
 const LOGO = "../../Fluxion/Icon/Fluxion_icon.png";

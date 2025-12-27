@@ -1,7 +1,5 @@
-import Engine from "../../Fluxion/Core/Engine.js"; // Import the Engine class
-import Sprite from "../../Fluxion/Core/Sprite.js"; // Import the Sprite class
-import Input from "../../Fluxion/Core/Input.js"; // Import the Input class
-import Audio from "../../Fluxion/Core/Audio.js"; // Import the Audio class
+import { Engine, Sprite, Input } from "../../Fluxion/index.js";
+import { Audio } from "../../Fluxion/extras.js";
 
 const input = new Input(); // Create an Input instance for handling user input
 const elevatorSound = new Audio(); // Create an Audio instance for the elevator sound
