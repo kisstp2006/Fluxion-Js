@@ -76,7 +76,7 @@ const game = {
         if (this.currentScene) {
             this.currentScene.update(dt);
         }
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     /** @param {Renderer} renderer */

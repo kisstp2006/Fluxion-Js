@@ -41,6 +41,9 @@ export default class Sprite {
         this.active = true;
         this.layer = 0;
         this.children = [];
+
+        this._disposed = false;
+        this.textureKey = null;
         
         // Camera following properties
         this.followCamera = false;
@@ -164,17 +167,24 @@ export default class Sprite {
         if (typeof imageSrc === 'string' && imageSrc.trim() === '') return;
 
         if (this.useSpriteSheet) {
+            this.textureKey = typeof imageSrc === 'string' ? imageSrc : null;
+
             // Fast path: if already cached, avoid a network fetch.
             if (this.renderer?.hasCachedTexture?.(imageSrc)) {
-                this.texture = this.renderer.getCachedTexture(imageSrc);
+                // Refcount-aware acquire.
+                this.texture = this.renderer.acquireTexture?.(imageSrc) || this.renderer.getCachedTexture(imageSrc);
                 return;
             }
 
             const img = new Image();
             const loadPromise = new Promise((resolve) => {
                 img.onload = () => {
+                    if (this._disposed) {
+                        resolve(false);
+                        return;
+                    }
                     // Use texture cache with image source as key
-                    this.texture = this.renderer.createTexture(img, imageSrc);
+                    this.texture = this.renderer.createAndAcquireTexture?.(img, imageSrc) || this.renderer.createTexture(img, imageSrc);
                     resolve(true);
                 };
                 img.onerror = () => resolve(false);
@@ -198,6 +208,29 @@ export default class Sprite {
                 img.src = src;
             });
         }
+    }
+
+    /**
+     * Releases GPU resources owned by this sprite.
+     * Safe to call multiple times.
+     */
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+
+        // Dispose children first.
+        if (this.children && this.children.length > 0) {
+            for (const child of this.children) {
+                if (child && typeof child.dispose === 'function') child.dispose();
+            }
+        }
+
+        if (this.textureKey && this.renderer?.releaseTexture) {
+            this.renderer.releaseTexture(this.textureKey);
+        }
+
+        this.texture = null;
+        this.images.length = 0;
     }
 
     draw() {

@@ -106,7 +106,7 @@ const game = {
         this.currentScene.update(deltaTime);
 
         // Update input state for next frame (required for getKeyDown/Up)
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {

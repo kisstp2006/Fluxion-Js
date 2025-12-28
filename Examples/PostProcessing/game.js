@@ -56,7 +56,7 @@ const game = {
         }
 
         // Update previous input state AFTER we query getKeyDown.
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {

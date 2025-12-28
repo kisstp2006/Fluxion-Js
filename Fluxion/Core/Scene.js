@@ -13,6 +13,8 @@ export default class Scene {
         /** @type {Camera | null} */
         this.camera = null;
         this.audio = [];
+        this.disposeOnSceneChange = false;
+        this._disposed = false;
     }
 
     /**
@@ -138,5 +140,34 @@ export default class Scene {
                 obj.draw(renderer);
             }
         }
+    }
+
+    /**
+     * Dispose scene resources (textures, etc.) by calling dispose on objects.
+     * Safe to call multiple times.
+     */
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+
+        // Stop audio.
+        this.stopAudio();
+
+        const disposeRecursive = (obj) => {
+            if (!obj) return;
+            if (obj.children && obj.children.length > 0) {
+                for (const child of obj.children) disposeRecursive(child);
+            }
+            if (typeof obj.dispose === 'function') obj.dispose();
+        };
+
+        for (const obj of this.objects) disposeRecursive(obj);
+
+        // Clear references.
+        this.objects.length = 0;
+        this.audio.length = 0;
+        this._sortedObjects = null;
+        this._objectsDirty = true;
+        this.camera = null;
     }
 }

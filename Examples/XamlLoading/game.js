@@ -58,7 +58,7 @@ const game = {
                 if (input.getKey("ArrowUp")) cam.y -= speed;
             }
         }
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {

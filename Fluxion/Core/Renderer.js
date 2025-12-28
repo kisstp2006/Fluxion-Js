@@ -54,7 +54,15 @@ export default class Renderer {
     this.mainScreenTexture = null;
     
     // Performance optimizations
-    this.textureCache = new Map(); // Cache textures by image source
+    // Texture cache entries: cacheKey -> { texture, refCount, bytes, lastUsedFrame }
+    this.textureCache = new Map();
+    this._textureToCacheKey = new WeakMap();
+    this._frameId = 0;
+    this._cacheLimits = {
+      maxTextures: Infinity,
+      maxBytes: Infinity,
+    };
+    this._cacheBytes = 0;
     this.drawCallCount = 0; // Track draw calls for profiling
     this.lastFrameDrawCalls = 0;
 
@@ -111,7 +119,145 @@ export default class Renderer {
    */
   getCachedTexture(cacheKey) {
     if (!cacheKey) return null;
-    return this.textureCache.get(cacheKey) || null;
+    const entry = this.textureCache.get(cacheKey);
+    return entry ? entry.texture : null;
+  }
+
+  /**
+   * Configure texture cache limits.
+   * @param {{maxTextures?: number, maxBytes?: number}} limits
+   */
+  setTextureCacheLimits(limits = {}) {
+    if (limits && typeof limits === 'object') {
+      if (typeof limits.maxTextures === 'number' && isFinite(limits.maxTextures) && limits.maxTextures > 0) {
+        this._cacheLimits.maxTextures = limits.maxTextures;
+      }
+      if (typeof limits.maxBytes === 'number' && isFinite(limits.maxBytes) && limits.maxBytes > 0) {
+        this._cacheLimits.maxBytes = limits.maxBytes;
+      }
+    }
+    this._evictIfNeeded();
+  }
+
+  /**
+   * Increment ref-count for a cached texture key and return the WebGLTexture.
+   * @param {string} cacheKey
+   * @returns {WebGLTexture|null}
+   */
+  acquireTexture(cacheKey) {
+    if (!cacheKey) return null;
+    const entry = this.textureCache.get(cacheKey);
+    if (!entry) return null;
+    entry.refCount++;
+    entry.lastUsedFrame = this._frameId;
+    return entry.texture;
+  }
+
+  /**
+   * Decrement ref-count for a cached texture key.
+   * If cache is over limits, unused (refCount==0) textures are evicted by LRU.
+   * @param {string} cacheKey
+   */
+  releaseTexture(cacheKey) {
+    if (!cacheKey) return;
+    const entry = this.textureCache.get(cacheKey);
+    if (!entry) return;
+    entry.refCount = Math.max(0, entry.refCount - 1);
+    this._evictIfNeeded();
+  }
+
+  _estimateTextureBytes(width, height) {
+    const w = Math.max(0, width | 0);
+    const h = Math.max(0, height | 0);
+    // Approx RGBA8. (Mips not included; this is a heuristic for budgeting.)
+    return w * h * 4;
+  }
+
+  _setCacheEntry(cacheKey, texture, bytes) {
+    if (!cacheKey) return;
+
+    const existing = this.textureCache.get(cacheKey);
+    if (existing) {
+      // Keep refCount/usage; replace texture handle + byte accounting.
+      this._cacheBytes -= existing.bytes || 0;
+      existing.texture = texture;
+      existing.bytes = bytes || 0;
+      existing.lastUsedFrame = this._frameId;
+      this._cacheBytes += existing.bytes;
+      this._textureToCacheKey.set(texture, cacheKey);
+      return;
+    }
+
+    const entry = {
+      texture,
+      refCount: 0,
+      bytes: bytes || 0,
+      lastUsedFrame: this._frameId,
+    };
+    this.textureCache.set(cacheKey, entry);
+    this._textureToCacheKey.set(texture, cacheKey);
+    this._cacheBytes += entry.bytes;
+  }
+
+  /**
+   * Create a texture and immediately acquire it (refCount++).
+   * This is the preferred API for sprites/animations.
+   * @param {HTMLImageElement|HTMLCanvasElement|ImageBitmap} image
+   * @param {string} cacheKey
+   */
+  createAndAcquireTexture(image, cacheKey) {
+    if (!cacheKey) {
+      // No key: behave like createTexture (no caching).
+      return this.createTexture(image, null);
+    }
+
+    const existing = this.textureCache.get(cacheKey);
+    if (existing && existing.texture) {
+      existing.refCount++;
+      existing.lastUsedFrame = this._frameId;
+      return existing.texture;
+    }
+
+    const texture = this.createTexture(image, cacheKey);
+    // createTexture will call _setCacheEntry; now acquire.
+    const entry = this.textureCache.get(cacheKey);
+    if (entry) {
+      entry.refCount++;
+      entry.lastUsedFrame = this._frameId;
+    }
+    this._evictIfNeeded();
+    return texture;
+  }
+
+  _evictIfNeeded() {
+    if (!isFinite(this._cacheLimits.maxTextures) && !isFinite(this._cacheLimits.maxBytes)) return;
+
+    const overTextures = this.textureCache.size > this._cacheLimits.maxTextures;
+    const overBytes = this._cacheBytes > this._cacheLimits.maxBytes;
+    if (!overTextures && !overBytes) return;
+
+    // Evict only entries that are not referenced by any live object (refCount==0).
+    // Use least-recently-used (oldest lastUsedFrame) first.
+    /** @type {Array<[string, any]>} */
+    const candidates = [];
+    for (const [key, entry] of this.textureCache.entries()) {
+      if (!entry || !entry.texture) continue;
+      if ((entry.refCount || 0) === 0) candidates.push([key, entry]);
+    }
+    if (candidates.length === 0) return;
+
+    candidates.sort((a, b) => (a[1].lastUsedFrame || 0) - (b[1].lastUsedFrame || 0));
+
+    for (const [key, entry] of candidates) {
+      const stillOverTextures = this.textureCache.size > this._cacheLimits.maxTextures;
+      const stillOverBytes = this._cacheBytes > this._cacheLimits.maxBytes;
+      if (!stillOverTextures && !stillOverBytes) break;
+
+      this.gl.deleteTexture(entry.texture);
+      this._cacheBytes -= entry.bytes || 0;
+      this.textureCache.delete(key);
+      // WeakMap entries will go away naturally.
+    }
   }
 
   /**
@@ -445,7 +591,7 @@ export default class Renderer {
   createTexture(image, cacheKey = null) {
     // Check cache if key provided
     if (cacheKey && this.textureCache.has(cacheKey)) {
-      return this.textureCache.get(cacheKey);
+      return this.textureCache.get(cacheKey).texture;
     }
 
     const texture = this.gl.createTexture();
@@ -492,7 +638,9 @@ export default class Renderer {
     
     // Cache texture if key provided
     if (cacheKey) {
-      this.textureCache.set(cacheKey, texture);
+      const bytes = this._estimateTextureBytes(texture.width, texture.height);
+      this._setCacheEntry(cacheKey, texture, bytes);
+      this._evictIfNeeded();
     }
     
     return texture;
@@ -500,6 +648,8 @@ export default class Renderer {
 
   beginFrame() {
     if (!this.isReady) return;
+
+    this._frameId++;
 
     // Reset batch state
     this.quadCount = 0;
@@ -647,6 +797,13 @@ export default class Renderer {
 
   drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255]) {
     if (!this.isReady) return;
+
+    // Mark cache usage for LRU.
+    const key = this._textureToCacheKey.get(texture);
+    if (key) {
+      const entry = this.textureCache.get(key);
+      if (entry) entry.lastUsedFrame = this._frameId;
+    }
     
     let finalColor = color;
     let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
@@ -737,16 +894,18 @@ export default class Renderer {
     return {
       drawCalls: this.lastFrameDrawCalls,
       quadsRendered: this.MAX_QUADS,
-      texturesCached: this.textureCache.size
+      texturesCached: this.textureCache.size,
+      textureCacheBytes: this._cacheBytes
     };
   }
 
   clearTextureCache() {
     // Delete all cached textures from GPU
-    for (const texture of this.textureCache.values()) {
-      this.gl.deleteTexture(texture);
+    for (const entry of this.textureCache.values()) {
+      if (entry?.texture) this.gl.deleteTexture(entry.texture);
     }
     this.textureCache.clear();
+    this._cacheBytes = 0;
   }
 
   screenToWorld(screenX, screenY, camera) {

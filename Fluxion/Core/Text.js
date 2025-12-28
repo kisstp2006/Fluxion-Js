@@ -124,4 +124,24 @@ export default class Text extends Sprite {
         this.width = this.canvas.width / this.pixelsPerUnit;
         this.height = this.canvas.height / this.pixelsPerUnit;
     }
+
+    /**
+     * Releases the underlying GPU texture.
+     */
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+
+        // Dispose children if any.
+        if (this.children && this.children.length > 0) {
+            for (const child of this.children) {
+                if (child && typeof child.dispose === 'function') child.dispose();
+            }
+        }
+
+        if (this.texture && this.renderer?.gl) {
+            this.renderer.gl.deleteTexture(this.texture);
+        }
+        this.texture = null;
+    }
 }

@@ -2,6 +2,7 @@ import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 import Window from "./Window.js";
 import SplashScreen from "./SplashScreen.js";
+import Input from "./Input.js";
 
 /**
  * The main Engine class that manages the game loop, renderer, camera, and window.
@@ -66,6 +67,15 @@ export default class Engine {
         this._startAsync(options).catch(error => {
             console.error("Engine initialization aborted due to critical error:", error);
         });
+
+        // Input auto-update (so getKeyDown/getMouseButtonDown work without manual ticking)
+        const inputCfg = options && typeof options === 'object' ? (options.input || {}) : {};
+        this._autoUpdateInput = inputCfg.autoUpdate !== false;
+        if (this._autoUpdateInput) {
+            // Ensure the singleton exists.
+            // Many examples do `new Input()` manually; this remains compatible.
+            new Input();
+        }
     } 
 
     async _startAsync(options = {}) {
@@ -255,6 +265,10 @@ export default class Engine {
             if (this.previousScene && this.previousScene.stopAudio) {
                 this.previousScene.stopAudio();
             }
+            // Optional: dispose previous scene resources (textures, etc.)
+            if (this.previousScene && this.previousScene.disposeOnSceneChange && typeof this.previousScene.dispose === 'function') {
+                this.previousScene.dispose();
+            }
             // Play audio for new scene
             if (this.game.currentScene.playAutoplayAudio) {
                 this.game.currentScene.playAutoplayAudio();
@@ -265,6 +279,11 @@ export default class Engine {
         // Update the game logic
         if (this.game.update) {
             this.game.update(cappedDeltaTime);
+        }
+
+        // Tick input state once per frame (edge detection).
+        if (this._autoUpdateInput && Input.instance) {
+            Input.instance.update();
         }
         
         // FPS calculation

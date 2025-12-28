@@ -49,11 +49,12 @@ export default class AnimatedSprite extends Sprite {
         if (frames.length > 0 && typeof frames[0] === 'string') {
             console.log(`[AnimatedSprite] Adding animation '${name}' with images:`, frames);
             anim.images = new Array(frames.length).fill(null);
+            anim._frameKeys = frames.slice();
             
             frames.forEach((src, index) => {
                 // Fast path: if already cached, avoid loading.
                 if (this.renderer?.hasCachedTexture?.(src)) {
-                    anim.images[index] = this.renderer.getCachedTexture(src);
+                    anim.images[index] = this.renderer.acquireTexture?.(src) || this.renderer.getCachedTexture(src);
                     return;
                 }
 
@@ -62,7 +63,11 @@ export default class AnimatedSprite extends Sprite {
                     img.onload = () => {
                     console.log(`[AnimatedSprite] Loaded frame ${index} for '${name}': ${src}`);
                     // Create texture with caching
-                    anim.images[index] = this.renderer.createTexture(img, src);
+                    if (this._disposed) {
+                        resolve(false);
+                        return;
+                    }
+                    anim.images[index] = this.renderer.createAndAcquireTexture?.(img, src) || this.renderer.createTexture(img, src);
                     resolve(true);
                     };
                     img.onerror = (e) => {
@@ -79,6 +84,28 @@ export default class AnimatedSprite extends Sprite {
         }
         
         this.animations.set(name, anim);
+    }
+
+    /**
+     * Releases GPU resources owned by this AnimatedSprite.
+     */
+    dispose() {
+        if (this._disposed) return;
+
+        // Release per-frame textures for image-path animations.
+        if (this.animations && this.renderer?.releaseTexture) {
+            const released = new Set();
+            for (const anim of this.animations.values()) {
+                if (!anim || !anim._frameKeys) continue;
+                for (const key of anim._frameKeys) {
+                    if (!key || released.has(key)) continue;
+                    released.add(key);
+                    this.renderer.releaseTexture(key);
+                }
+            }
+        }
+
+        super.dispose();
     }
 
     /**
@@ -257,16 +284,19 @@ export default class AnimatedSprite extends Sprite {
             );
         }
 
-        // Draw children
-        const sortedChildren = [...this.children].sort((a, b) => {
-            const layerA = a.layer !== undefined ? a.layer : 0;
-            const layerB = b.layer !== undefined ? b.layer : 0;
-            return layerA - layerB;
-        });
+        // Draw children (Sprite handles cached sorting)
+        if (this.children && this.children.length > 0) {
+            if (!this._sortedChildren || this._childrenDirty) {
+                this._sortedChildren = [...this.children].sort((a, b) => {
+                    const layerA = a.layer !== undefined ? a.layer : 0;
+                    const layerB = b.layer !== undefined ? b.layer : 0;
+                    return layerA - layerB;
+                });
+                this._childrenDirty = false;
+            }
 
-        for (const child of sortedChildren) {
-            if (child.draw) {
-                child.draw(this.renderer);
+            for (const child of this._sortedChildren) {
+                if (child.draw) child.draw(this.renderer);
             }
         }
     }
