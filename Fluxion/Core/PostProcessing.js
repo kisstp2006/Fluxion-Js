@@ -1,6 +1,7 @@
 export default class PostProcessing {
   constructor(gl) {
     this.gl = gl;
+    this.isWebGL2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanceof WebGL2RenderingContext);
     this.effects = new Map();
     this.activeEffects = [];
     this.framebuffers = [];
@@ -32,7 +33,10 @@ export default class PostProcessing {
 
   async loadEffect(name, fragmentShaderPath, uniforms = {}, options = {}) {
     try {
-      const vertexSource = await this.loadShader('../../Fluxion/Shaders/PostProcessing/vertex.glsl');
+      const vertexPath = this.isWebGL2
+        ? '../../Fluxion/Shaders/PostProcessing/vertex_300es.glsl'
+        : '../../Fluxion/Shaders/PostProcessing/vertex.glsl';
+      const vertexSource = await this.loadShader(vertexPath);
       const fragmentSource = await this.loadShader(fragmentShaderPath);
       
       const program = this.createShaderProgram(vertexSource, fragmentSource);
@@ -80,16 +84,20 @@ export default class PostProcessing {
 
   async init(width = 1, height = 1) {
     // Load all available effects
+    const effect = (name) => this.isWebGL2
+      ? `../../Fluxion/Shaders/PostProcessing/${name}_300es.glsl`
+      : `../../Fluxion/Shaders/PostProcessing/${name}.glsl`;
+
     await Promise.all([
-      this.loadEffect('passthrough', '../../Fluxion/Shaders/PostProcessing/passthrough.glsl', {}, { priority: 0 }),
-      this.loadEffect('blur', '../../Fluxion/Shaders/PostProcessing/blur.glsl', {
+      this.loadEffect('passthrough', effect('passthrough'), {}, { priority: 0 }),
+      this.loadEffect('blur', effect('blur'), {
         resolution: { type: '2f', value: [width, height] }
       }, { priority: 10 }),
-      this.loadEffect('grayscale', '../../Fluxion/Shaders/PostProcessing/grayscale.glsl', {}, { priority: 20 }),
-      this.loadEffect('crt', '../../Fluxion/Shaders/PostProcessing/crt.glsl', {
+      this.loadEffect('grayscale', effect('grayscale'), {}, { priority: 20 }),
+      this.loadEffect('crt', effect('crt'), {
         time: { type: '1f', value: 0 }
       }, { priority: 90 }),
-      this.loadEffect('contrast', '../../Fluxion/Shaders/PostProcessing/contrast.glsl', {
+      this.loadEffect('contrast', effect('contrast'), {
         intensity: { type: '1f', value: 1.5 }
       }, { priority: 100 })
     ]);

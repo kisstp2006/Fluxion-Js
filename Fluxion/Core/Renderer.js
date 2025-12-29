@@ -34,6 +34,7 @@ export default class Renderer {
     this.gl = ctx.gl;
     this.isWebGL2 = ctx.isWebGL2;
     this.webglContextName = ctx.contextName;
+    this._loggedContextInfo = false;
 
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
@@ -537,13 +538,35 @@ export default class Renderer {
    * @returns {Promise<void>}
    */
   async initGL() {
+    if (!this._loggedContextInfo && this.gl) {
+      this._loggedContextInfo = true;
+      try {
+        const gl = this.gl;
+        const version = gl.getParameter(gl.VERSION);
+        const shadingLang = gl.getParameter(gl.SHADING_LANGUAGE_VERSION);
+        console.log(`Fluxion Renderer: ${this.webglContextName || 'unknown'} (WebGL2=${this.isWebGL2})`);
+        console.log(`  GL_VERSION: ${version}`);
+        console.log(`  GLSL: ${shadingLang}`);
+      } catch (e) {
+        console.log(`Fluxion Renderer: ${this.webglContextName || 'unknown'} (WebGL2=${this.isWebGL2})`);
+      }
+    }
+
     this.gl.clearColor(0, 0, 0, 1);
     this.gl.enable(this.gl.BLEND);
     this.gl.blendFunc(this.gl.SRC_ALPHA, this.gl.ONE_MINUS_SRC_ALPHA);
 
-    // Load shaders from files - use absolute path from root
-    const vertexShaderSource = await this.loadShaderFile('../../Fluxion/Shaders/vertex.glsl');
-    const fragmentShaderSource = await this.loadShaderFile('../../Fluxion/Shaders/fragment.glsl');
+    // Load shaders from files.
+    // Use dedicated GLSL 3.00 ES sources for WebGL2 and keep GLSL 1.00 sources for WebGL1 fallback.
+    const vertexShaderPath = this.isWebGL2
+      ? '../../Fluxion/Shaders/vertex_300es.glsl'
+      : '../../Fluxion/Shaders/vertex.glsl';
+    const fragmentShaderPath = this.isWebGL2
+      ? '../../Fluxion/Shaders/fragment_300es.glsl'
+      : '../../Fluxion/Shaders/fragment.glsl';
+
+    const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
+    const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
 
     // Create shaders
     this.vertexShader = this.createShader(this.gl.VERTEX_SHADER, vertexShaderSource);
