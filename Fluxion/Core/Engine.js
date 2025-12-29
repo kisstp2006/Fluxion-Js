@@ -119,6 +119,40 @@ export default class Engine {
     }
 
     /**
+     * Sets MSAA samples for the main offscreen render target.
+     *
+     * Notes:
+     * - Requires WebGL2.
+     * - Only applies when Engine was created with enablePostProcessing=true.
+     * - Use 0 to disable; 1-4 to enable.
+     *
+     * @param {number} samples
+     * @returns {boolean}
+     */
+    setMsaaSamples(samples) {
+        return !!this.renderer?.setMsaaSamples?.(samples);
+    }
+
+    /** @param {number} [samples=4] */
+    enableMsaa(samples = 4) {
+        return this.setMsaaSamples(samples);
+    }
+
+    disableMsaa() {
+        return this.setMsaaSamples(0);
+    }
+
+    /** @returns {number} */
+    getMsaaSamples() {
+        return (this.renderer?.getMsaaSamples?.() ?? 0) | 0;
+    }
+
+    /** @returns {number} */
+    getRequestedMsaaSamples() {
+        return (this.renderer?.getRequestedMsaaSamples?.() ?? 0) | 0;
+    }
+
+    /**
      * Loads the engine version information from the version.py file.
      * @async
      * @throws {Error} If the version file is missing or corrupted.

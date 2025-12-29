@@ -40,6 +40,21 @@ const engine = new Engine("gameCanvas", game, 1920, 1080, true, true, {
 });
 ```
 
+### Changing MSAA at runtime
+
+You can change MSAA while the game is running, but it reallocates the MSAA renderbuffers (best done between frames / on a settings apply button).
+
+```js
+// Enable MSAA (clamped to 1..4)
+engine.enableMsaa(4);
+
+// Or set directly (0 disables, 1..4 enables)
+engine.setMsaaSamples(2);
+
+// Disable
+engine.disableMsaa();
+```
+
 ## Useful runtime flags
 
 - `engine.renderer.isWebGL2` (boolean)

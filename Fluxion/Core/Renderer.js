@@ -84,6 +84,7 @@ export default class Renderer {
     this.mainScreenMsaaColorRbo = null;
     this.mainScreenMsaaDepthStencilRbo = null;
     this.mainScreenMsaaSamples = Math.max(0, (renderTargets.msaaSamples ?? 0) | 0);
+    this._activeMainScreenMsaaSamples = 0;
     
     // Performance optimizations
     // Texture cache entries: cacheKey -> { texture, refCount, bytes, lastUsedFrame }
@@ -143,6 +144,74 @@ export default class Renderer {
       this.isReady = true;
     });
   } 
+
+  /**
+   * Enable/disable MSAA for the main offscreen render target.
+   *
+   * Notes:
+   * - This MSAA path only applies to the offscreen post-processing input target.
+   * - Changing the sample count reallocates GPU renderbuffers (do it on a frame boundary).
+   *
+   * @param {number} samples 0 disables MSAA; 1-4 enables it.
+   * @returns {boolean} true if applied (or queued), false if not supported/usable.
+   */
+  setMsaaSamples(samples) {
+    const raw = Number(samples);
+    if (!Number.isFinite(raw)) {
+      console.warn('Renderer.setMsaaSamples: samples must be a finite number');
+      return false;
+    }
+
+    // Requested API: clamp to 1-4 when enabling; allow 0 to disable.
+    let desired = raw | 0;
+    if (desired < 0) desired = 0;
+    if (desired > 4) desired = 4;
+
+    // This MSAA implementation is WebGL2-only.
+    if (!this.isWebGL2) {
+      this.mainScreenMsaaSamples = 0;
+      this._activeMainScreenMsaaSamples = 0;
+      console.warn('Renderer.setMsaaSamples: MSAA render targets require WebGL2');
+      return false;
+    }
+
+    // This MSAA implementation is only used when post-processing is enabled.
+    if (!this.enablePostProcessing) {
+      console.warn('Renderer.setMsaaSamples: enablePostProcessing must be true to use MSAA render targets');
+      return false;
+    }
+
+    // Clamp to device capabilities.
+    try {
+      const maxSamples = this.gl.getParameter(this.gl.MAX_SAMPLES) | 0;
+      if (maxSamples > 0) desired = Math.min(desired, maxSamples);
+    } catch {
+      // ignore
+    }
+
+    this.mainScreenMsaaSamples = desired;
+    this.ensureMainScreenTargets();
+    return true;
+  }
+
+  /** @param {number} [samples=4] */
+  enableMsaa(samples = 4) {
+    return this.setMsaaSamples(samples);
+  }
+
+  disableMsaa() {
+    return this.setMsaaSamples(0);
+  }
+
+  /** Returns the currently active MSAA sample count (0 if disabled/unavailable). */
+  getMsaaSamples() {
+    return (this._activeMainScreenMsaaSamples | 0) || 0;
+  }
+
+  /** Returns the currently requested MSAA sample count (0 if disabled). */
+  getRequestedMsaaSamples() {
+    return (this.mainScreenMsaaSamples | 0) || 0;
+  }
 
   /**
    * Create a WebGL context with requested version and fallback rules.
@@ -478,15 +547,31 @@ export default class Renderer {
     const desiredHeight = this.canvas.height;
 
     const gl = this.gl;
-    const wantMsaa = this.isWebGL2 && this.mainScreenMsaaSamples > 0;
+
+    // Clamp requested MSAA (0 disables). API target: 1-4.
+    let requestedSamples = (this.mainScreenMsaaSamples | 0);
+    if (requestedSamples < 0) requestedSamples = 0;
+    if (requestedSamples > 4) requestedSamples = 4;
+
+    if (this.isWebGL2 && requestedSamples > 0) {
+      try {
+        const maxSamples = gl.getParameter(gl.MAX_SAMPLES) | 0;
+        if (maxSamples > 0) requestedSamples = Math.min(requestedSamples, maxSamples);
+      } catch {
+        // ignore
+      }
+    }
+
+    const wantMsaa = this.isWebGL2 && requestedSamples > 0;
 
     const sizeChanged =
       !this.mainScreenTexture ||
       (this.mainScreenTexture.width !== desiredWidth || this.mainScreenTexture.height !== desiredHeight);
 
     const msaaStateChanged = wantMsaa ? (!this.mainScreenMsaaFramebuffer) : (!!this.mainScreenMsaaFramebuffer);
+    const msaaSamplesChanged = wantMsaa && (this._activeMainScreenMsaaSamples !== requestedSamples);
 
-    if (sizeChanged || msaaStateChanged) {
+    if (sizeChanged || msaaStateChanged || msaaSamplesChanged) {
       // Dispose old resources (safe to call with nulls)
       if (this.mainScreenFramebuffer) gl.deleteFramebuffer(this.mainScreenFramebuffer);
       if (this.mainScreenTexture) gl.deleteTexture(this.mainScreenTexture);
@@ -501,6 +586,7 @@ export default class Renderer {
       this.mainScreenMsaaFramebuffer = null;
       this.mainScreenMsaaColorRbo = null;
       this.mainScreenMsaaDepthStencilRbo = null;
+      this._activeMainScreenMsaaSamples = 0;
     }
 
     if (!this.mainScreenFramebuffer) {
@@ -587,7 +673,7 @@ export default class Renderer {
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.mainScreenMsaaColorRbo);
         gl.renderbufferStorageMultisample(
           gl.RENDERBUFFER,
-          this.mainScreenMsaaSamples,
+          requestedSamples,
           gl.RGBA8,
           desiredWidth,
           desiredHeight
@@ -597,7 +683,7 @@ export default class Renderer {
         gl.bindRenderbuffer(gl.RENDERBUFFER, this.mainScreenMsaaDepthStencilRbo);
         gl.renderbufferStorageMultisample(
           gl.RENDERBUFFER,
-          this.mainScreenMsaaSamples,
+          requestedSamples,
           gl.DEPTH24_STENCIL8,
           desiredWidth,
           desiredHeight
@@ -616,6 +702,9 @@ export default class Renderer {
           this.mainScreenMsaaFramebuffer = null;
           this.mainScreenMsaaColorRbo = null;
           this.mainScreenMsaaDepthStencilRbo = null;
+          this._activeMainScreenMsaaSamples = 0;
+        } else {
+          this._activeMainScreenMsaaSamples = requestedSamples;
         }
       }
 
@@ -933,6 +1022,33 @@ export default class Renderer {
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     this.gl.clear(this.gl.COLOR_BUFFER_BIT);
     this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+  }
+
+  /**
+   * Clears the currently bound framebuffer.
+   * Kept for backward compatibility with older examples.
+   * @param {number} [r]
+   * @param {number} [g]
+   * @param {number} [b]
+   * @param {number} [a]
+   */
+  clear(r, g, b, a) {
+    if (!this.isReady) return;
+
+    // Ensure pending draws are submitted before clearing.
+    this.flush();
+
+    if (
+      typeof r === 'number' && typeof g === 'number' &&
+      typeof b === 'number' && typeof a === 'number'
+    ) {
+      this.gl.clearColor(r, g, b, a);
+    }
+
+    const mask = (this.mainScreenMsaaFramebuffer || this.mainScreenDepthStencilRbo)
+      ? (this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT | this.gl.STENCIL_BUFFER_BIT)
+      : this.gl.COLOR_BUFFER_BIT;
+    this.gl.clear(mask);
   }
   
   endFrame() {
