@@ -79,5 +79,13 @@ const game = {
 
 window.addEventListener("load", () => {
     // Start engine with post-processing disabled for this simple demo
-    new Engine("gameCanvas", game, 1280, 720, true, false);
+    new Engine("gameCanvas", game, 1280, 720, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 });

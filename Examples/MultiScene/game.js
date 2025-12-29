@@ -175,7 +175,7 @@ const game = {
 };
 
 // Start the engine
-new Engine("gameCanvas", game, 1920, 1080, true, false, {
+new Engine("gameCanvas", game, 1920, 1080, true, true, {
     renderer: {
         webglVersion: 2,
         allowFallback: true,

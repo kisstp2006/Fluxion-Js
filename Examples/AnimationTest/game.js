@@ -53,4 +53,12 @@ const game = {
     }
 };
 
-new Engine("gameCanvas", game);
+new Engine("gameCanvas", game, 1920, 1080, true, true, {
+    renderer: {
+        webglVersion: 2,
+        allowFallback: true,
+        renderTargets: {
+            msaaSamples: 4,
+        },
+    },
+});

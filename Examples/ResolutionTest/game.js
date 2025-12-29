@@ -67,5 +67,13 @@ class ResolutionGame {
 
 const game = new ResolutionGame();
 // Initialize engine with a default resolution
-const engine = new Engine("gameCanvas", game, 1280, 720);
+const engine = new Engine("gameCanvas", game, 1280, 720, true, true, {
+    renderer: {
+        webglVersion: 2,
+        allowFallback: true,
+        renderTargets: {
+            msaaSamples: 4,
+        },
+    },
+});
 game.engine = engine; // Give game access to engine

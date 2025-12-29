@@ -80,5 +80,13 @@ const game = {
 window.onload = async () => {
     // Event listener for when the window finishes loading
     // Start the game with aspect ratio preservation (1920x1080, 16:9)
-    new Engine("gameCanvas", game, 1920, 1080, true); // Create a new Engine instance with aspect ratio preservation
+    new Engine("gameCanvas", game, 1920, 1080, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    }); // Create a new Engine instance with aspect ratio preservation
 };
