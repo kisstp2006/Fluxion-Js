@@ -105,6 +105,16 @@ export default class Renderer {
     this.drawCallCount = 0; // Track draw calls for profiling
     this.lastFrameDrawCalls = 0;
 
+    // Per-frame stats
+    this._spritesThisFrame = 0;
+    this.lastFrameSprites = 0;
+    this._instancedDrawCallsThisFrame = 0;
+    this._legacyDrawCallsThisFrame = 0;
+    this.lastFrameInstancedDrawCalls = 0;
+    this.lastFrameLegacyDrawCalls = 0;
+    this._usedInstancingThisFrame = false;
+    this.lastFrameUsedInstancing = false;
+
     // Asset tracking (textures/audio/etc). Used for splash screens / loading flows.
     this._pendingAssets = new Set();
     
@@ -1105,7 +1115,15 @@ export default class Renderer {
     this.quadCount = 0;
     this.currentTexture = null;
     this.lastFrameDrawCalls = this.drawCallCount;
+    this.lastFrameSprites = this._spritesThisFrame;
+    this.lastFrameInstancedDrawCalls = this._instancedDrawCallsThisFrame;
+    this.lastFrameLegacyDrawCalls = this._legacyDrawCallsThisFrame;
+    this.lastFrameUsedInstancing = this._usedInstancingThisFrame;
     this.drawCallCount = 0;
+    this._spritesThisFrame = 0;
+    this._instancedDrawCallsThisFrame = 0;
+    this._legacyDrawCallsThisFrame = 0;
+    this._usedInstancingThisFrame = false;
 
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
@@ -1190,6 +1208,7 @@ export default class Renderer {
 
       this.gl.bindVertexArray(null);
       this.drawCallCount++;
+      this._instancedDrawCallsThisFrame++;
       this.quadCount = 0;
       return;
     }
@@ -1229,6 +1248,7 @@ export default class Renderer {
     }
     
     this.drawCallCount++;
+    this._legacyDrawCallsThisFrame++;
     this.quadCount = 0;
   }
 
@@ -1336,6 +1356,8 @@ export default class Renderer {
   drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255]) {
     if (!this.isReady) return;
 
+    this._spritesThisFrame++;
+
     // Mark cache usage for LRU.
     const key = this._textureToCacheKey.get(texture);
     if (key) {
@@ -1384,6 +1406,7 @@ export default class Renderer {
 
     // WebGL2 instanced path: one instance per sprite (no per-vertex expansion)
     if (this._isInstancingEnabled()) {
+      this._usedInstancingThisFrame = true;
       let i = this.quadCount * this._instanceFloats;
       this.instanceData[i++] = x;
       this.instanceData[i++] = y;
@@ -1461,6 +1484,11 @@ export default class Renderer {
   getStats() {
     return {
       drawCalls: this.lastFrameDrawCalls,
+      spritesLastFrame: this.lastFrameSprites,
+      instanced2DActive: this._isInstancingEnabled(),
+      instancedUsedLastFrame: !!this.lastFrameUsedInstancing,
+      instancedDrawCalls: this.lastFrameInstancedDrawCalls,
+      legacyDrawCalls: this.lastFrameLegacyDrawCalls,
       quadsRendered: this.MAX_QUADS,
       texturesCached: this.textureCache.size,
       textureCacheBytes: this._cacheBytes

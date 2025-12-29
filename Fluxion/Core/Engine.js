@@ -24,6 +24,7 @@ export default class Engine {
     *     renderTargets?: {
     *       msaaSamples?: number
     *     }
+    *     instancing2D?: boolean
      *   },
      *   splashScreen?: any,
      *   input?: any
@@ -343,7 +344,13 @@ export default class Engine {
             
             if (this.showStats) {
                 const stats = this.renderer.getStats();
-                console.log(`FPS: ${this.fps} | Draw Calls: ${stats.drawCalls} | Textures: ${stats.texturesCached}`);
+                const inst = stats.instanced2DActive ? 'ON' : 'OFF';
+                const used = stats.instancedUsedLastFrame ? 'USED' : 'NOT_USED';
+                console.log(
+                    `FPS: ${this.fps} | Sprites: ${stats.spritesLastFrame} | Draw Calls: ${stats.drawCalls} ` +
+                    `| Instancing2D: ${inst} (${used}, instanced=${stats.instancedDrawCalls}, legacy=${stats.legacyDrawCalls}) ` +
+                    `| Textures: ${stats.texturesCached}`
+                );
             }
         }
         
