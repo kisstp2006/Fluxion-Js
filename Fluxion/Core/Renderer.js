@@ -629,15 +629,37 @@ export default class Renderer {
     }
     this.gl.bufferData(this.gl.ELEMENT_ARRAY_BUFFER, indices, this.gl.STATIC_DRAW);
 
-    // Enable attributes
-    this.gl.enableVertexAttribArray(this.positionLocation);
-    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
-    
-    this.gl.enableVertexAttribArray(this.texcoordLocation);
-    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8); // Offset 2 floats (8 bytes)
+    // WebGL2: capture the quad vertex format with a VAO (fast rebind + less state churn).
+    // WebGL1: fall back to the classic attribute setup.
+    this.quadVao = null;
+    if (this.isWebGL2 && typeof this.gl.createVertexArray === 'function') {
+      this.quadVao = this.gl.createVertexArray();
+      this.gl.bindVertexArray(this.quadVao);
 
-    this.gl.enableVertexAttribArray(this.colorLocation);
-    this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16); // Offset 4 floats (16 bytes)
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+
+      this.gl.enableVertexAttribArray(this.positionLocation);
+      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+
+      this.gl.enableVertexAttribArray(this.texcoordLocation);
+      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
+
+      this.gl.enableVertexAttribArray(this.colorLocation);
+      this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+
+      this.gl.bindVertexArray(null);
+    } else {
+      // Enable attributes (WebGL1 path)
+      this.gl.enableVertexAttribArray(this.positionLocation);
+      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+
+      this.gl.enableVertexAttribArray(this.texcoordLocation);
+      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8); // Offset 2 floats (8 bytes)
+
+      this.gl.enableVertexAttribArray(this.colorLocation);
+      this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16); // Offset 4 floats (16 bytes)
+    }
     
     // Initialize post-processing if enabled
     if (this.enablePostProcessing) {
@@ -795,6 +817,13 @@ export default class Renderer {
     if (this.quadCount === 0) return;
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
+
+    if (this.quadVao) {
+      this.gl.bindVertexArray(this.quadVao);
+    } else {
+      // WebGL1 safety: make sure the index buffer is bound (ELEMENT_ARRAY_BUFFER binding can be disturbed).
+      this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
+    }
     
     // Bind vertex buffer and upload data
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
@@ -802,18 +831,24 @@ export default class Renderer {
     const view = this.vertexData.subarray(0, this.quadCount * 4 * this.VERTEX_SIZE);
     this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, view);
 
-    // Ensure attributes are enabled and pointing to the correct buffer
-    this.gl.enableVertexAttribArray(this.positionLocation);
-    this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
-    
-    this.gl.enableVertexAttribArray(this.texcoordLocation);
-    this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
+    if (!this.quadVao) {
+      // WebGL1: Ensure attributes are enabled and pointing to the correct buffer
+      this.gl.enableVertexAttribArray(this.positionLocation);
+      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+      
+      this.gl.enableVertexAttribArray(this.texcoordLocation);
+      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
 
-    this.gl.enableVertexAttribArray(this.colorLocation);
-    this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+      this.gl.enableVertexAttribArray(this.colorLocation);
+      this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+    }
 
     // Draw
     this.gl.drawElements(this.gl.TRIANGLES, this.quadCount * 6, this.gl.UNSIGNED_SHORT, 0);
+
+    if (this.quadVao) {
+      this.gl.bindVertexArray(null);
+    }
     
     this.drawCallCount++;
     this.quadCount = 0;
@@ -863,15 +898,23 @@ export default class Renderer {
       this.gl.bufferData(this.gl.ARRAY_BUFFER, this.vertexData.byteLength, this.gl.DYNAMIC_DRAW); // Reallocate to be safe
       this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, quad);
 
-      // Ensure attributes
-      this.gl.enableVertexAttribArray(this.positionLocation);
-      this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
-      this.gl.enableVertexAttribArray(this.texcoordLocation);
-      this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
-      this.gl.enableVertexAttribArray(this.colorLocation);
-      this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+      if (this.quadVao) {
+        this.gl.bindVertexArray(this.quadVao);
+      } else {
+        // Ensure attributes (WebGL1)
+        this.gl.enableVertexAttribArray(this.positionLocation);
+        this.gl.vertexAttribPointer(this.positionLocation, 2, this.gl.FLOAT, false, this.STRIDE, 0);
+        this.gl.enableVertexAttribArray(this.texcoordLocation);
+        this.gl.vertexAttribPointer(this.texcoordLocation, 2, this.gl.FLOAT, false, this.STRIDE, 8);
+        this.gl.enableVertexAttribArray(this.colorLocation);
+        this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16);
+      }
 
       this.gl.drawArrays(this.gl.TRIANGLE_STRIP, 0, 4);
+
+      if (this.quadVao) {
+        this.gl.bindVertexArray(null);
+      }
   }
 
   applyTransform(camera) {
