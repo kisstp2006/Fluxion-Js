@@ -812,8 +812,8 @@ export default class Renderer {
     this.fragmentShader = this.createShader(this.gl.FRAGMENT_SHADER, fragmentShaderSource);
   
     if (!this.vertexShader || !this.fragmentShader) {
-    throw new Error("Shader compilation failed. Renderer initialization aborted.");
-  }
+      throw new Error("Shader compilation failed. Renderer initialization aborted.");
+    }
 
     this.program = this.createProgram(this.vertexShader, this.fragmentShader);
     if (!this.program) {
@@ -859,6 +859,11 @@ export default class Renderer {
     this.cameraRotationLocation = this.gl.getUniformLocation(this.program, "u_cameraRotation");
     this.resolutionLocation = this.gl.getUniformLocation(this.program, "u_resolution");
     // this.colorLocation = this.gl.getUniformLocation(this.program, "u_color"); // Removed uniform
+
+    // Sampler defaults to unit 0, but set explicitly once for clarity.
+    if (this.textureLocation) {
+      this.gl.uniform1i(this.textureLocation, 0);
+    }
 
     // --- Batch Rendering Initialization ---
     this.MAX_QUADS = 2000;
@@ -926,6 +931,9 @@ export default class Renderer {
 
     // --- WebGL2 Instanced Sprite Path ---
     if (this.isWebGL2 && this.instancedProgram) {
+      // Ensure sampler uses texture unit 0 for this program.
+      this.gl.useProgram(this.instancedProgram);
+
       // Cache locations for the instanced program
       this._instancedAttribs = {
         position: this.gl.getAttribLocation(this.instancedProgram, 'a_position'),
@@ -942,6 +950,10 @@ export default class Renderer {
         cameraRotation: this.gl.getUniformLocation(this.instancedProgram, 'u_cameraRotation'),
         resolution: this.gl.getUniformLocation(this.instancedProgram, 'u_resolution'),
       };
+
+      if (this._instancedUniforms.texture) {
+        this.gl.uniform1i(this._instancedUniforms.texture, 0);
+      }
 
       // Base quad: (x,y,u,v) for TRIANGLE_STRIP with positions in 0..1
       const baseQuad = new Float32Array([
@@ -997,6 +1009,12 @@ export default class Renderer {
       this.gl.bindVertexArray(null);
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
     }
+
+    // Restore the default sprite program as active.
+    this.gl.useProgram(this.program);
+
+    // Scratch buffer for blitting (avoid per-call allocations).
+    this._blitQuadScratch = new Float32Array(4 * this.VERTEX_SIZE);
     
     // Initialize post-processing if enabled
     if (this.enablePostProcessing) {
@@ -1266,8 +1284,6 @@ export default class Renderer {
       
       // Draw a quad that covers the full canvas (device pixels).
       
-      // Ensure texture unit 0 is used
-      this.gl.uniform1i(this.textureLocation, 0);
       this.gl.activeTexture(this.gl.TEXTURE0);
 
       // When sampling from a framebuffer texture, WebGL's texture origin ends up effectively flipped
@@ -1286,14 +1302,17 @@ export default class Renderer {
 
       // Vertex structure: x, y, u, v, r, g, b, a
       // Flip V: top uses v=1, bottom uses v=0
-      const quad = new Float32Array([
-        0, 0, 0, 1, 1, 1, 1, 1,      // Top-left
-        w, 0, 1, 1, 1, 1, 1, 1,      // Top-right
-        0, h, 0, 0, 1, 1, 1, 1,      // Bottom-left
-        w, h, 1, 0, 1, 1, 1, 1,      // Bottom-right
-      ]);
+      const quad = this._blitQuadScratch;
+      // Top-left
+      quad[0] = 0;   quad[1] = 0;   quad[2] = 0; quad[3] = 1; quad[4] = 1; quad[5] = 1; quad[6] = 1; quad[7] = 1;
+      // Top-right
+      quad[8] = w;   quad[9] = 0;   quad[10] = 1; quad[11] = 1; quad[12] = 1; quad[13] = 1; quad[14] = 1; quad[15] = 1;
+      // Bottom-left
+      quad[16] = 0;  quad[17] = h;  quad[18] = 0; quad[19] = 0; quad[20] = 1; quad[21] = 1; quad[22] = 1; quad[23] = 1;
+      // Bottom-right
+      quad[24] = w;  quad[25] = h;  quad[26] = 1; quad[27] = 0; quad[28] = 1; quad[29] = 1; quad[30] = 1; quad[31] = 1;
 
-      this.gl.bufferData(this.gl.ARRAY_BUFFER, this.vertexData.byteLength, this.gl.DYNAMIC_DRAW); // Reallocate to be safe
+      // vertexBuffer was allocated large enough in initGL; no need to reallocate per blit.
       this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, quad);
 
       if (this.quadVao) {
@@ -1323,11 +1342,6 @@ export default class Renderer {
 
     if (this._isInstancingEnabled()) {
       this.gl.useProgram(this.instancedProgram);
-
-      // Ensure sampler uses texture unit 0 for this program as well.
-      if (this._instancedUniforms?.texture) {
-        this.gl.uniform1i(this._instancedUniforms.texture, 0);
-      }
 
       this.activeCamera = camera;
       this.gl.uniform2f(this._instancedUniforms.cameraPosition, camera.x, camera.y);
@@ -1489,7 +1503,8 @@ export default class Renderer {
       instancedUsedLastFrame: !!this.lastFrameUsedInstancing,
       instancedDrawCalls: this.lastFrameInstancedDrawCalls,
       legacyDrawCalls: this.lastFrameLegacyDrawCalls,
-      quadsRendered: this.MAX_QUADS,
+      quadsRendered: this.lastFrameSprites,
+      maxQuads: this.MAX_QUADS,
       texturesCached: this.textureCache.size,
       textureCacheBytes: this._cacheBytes
     };
