@@ -3,8 +3,10 @@ import Sprite from './Sprite.js';
 import AnimatedSprite from './AnimatedSprite.js';
 import Audio from './Audio.js';
 import Camera from './Camera.js';
+import Camera3D from './Camera3D.js';
 import ClickableArea from './ClickableArea.js';
 import Text from './Text.js';
+import MeshNode from './MeshNode.js';
 
 /**
  * Utility class for loading scenes from XML files.
@@ -33,18 +35,48 @@ export default class SceneLoader {
                 scene.name = sceneNode.getAttribute("name");
             }
 
-            // Parse children
-            for (const child of sceneNode.children) {
+            const children = Array.from(sceneNode.children);
+
+            // Pass 1: register named mesh resources (top-level <Mesh ... />)
+            for (const child of children) {
+                if (child.tagName !== 'Mesh') continue;
+
+                const name = child.getAttribute('name') || '';
+                const type = child.getAttribute('type') || child.getAttribute('source') || child.getAttribute('mesh') || '';
+                if (!name || !type) continue;
+
+                const color = this._parseColor(child.getAttribute('color'));
+                const params = this._parseMeshParams(child);
+                scene.registerMesh(name, { type, color, params });
+            }
+
+            // Pass 2: parse objects (including <Camera3D> and <MeshNode>)
+            for (const child of children) {
+                if (child.tagName === 'Mesh') continue;
+
                 const obj = await this.parseObject(child, renderer);
-                if (obj) {
-                    if (obj instanceof Camera) {
-                        scene.setCamera(obj);
-                    } else if (obj instanceof Audio) {
-                        scene.addAudio(obj);
-                    } else {
-                        scene.add(obj);
-                    }
+                if (!obj) continue;
+
+                if (obj instanceof Camera) {
+                    scene.setCamera(obj);
+                    continue;
                 }
+                if (obj instanceof Camera3D) {
+                    scene.setCamera3D(obj);
+                    continue;
+                }
+                if (obj instanceof Audio) {
+                    scene.addAudio(obj);
+                    continue;
+                }
+
+                // Resolve named mesh resources onto mesh nodes.
+                if (obj instanceof MeshNode) {
+                    const def = scene.getMeshDefinition(obj.source);
+                    if (def) obj.setMeshDefinition(def);
+                }
+
+                scene.add(obj);
             }
 
             return scene;
@@ -52,6 +84,89 @@ export default class SceneLoader {
             console.error("SceneLoader Error:", error);
             return new Scene(); // Return empty scene on error
         }
+    }
+
+    /**
+     * Parse a color string into [r,g,b,a] floats.
+     * Supports: "r,g,b", "r,g,b,a" (0..1 or 0..255) and "#RRGGBB" / "#RRGGBBAA".
+     * @param {string | null} str
+     * @returns {[number,number,number,number]}
+     */
+    static _parseColor(str) {
+        if (!str) return [1, 1, 1, 1];
+        const s = String(str).trim();
+
+        if (s.startsWith('#')) {
+            const hex = s.slice(1);
+            if (hex.length === 6 || hex.length === 8) {
+                const r = parseInt(hex.slice(0, 2), 16);
+                const g = parseInt(hex.slice(2, 4), 16);
+                const b = parseInt(hex.slice(4, 6), 16);
+                const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) : 255;
+                return [r / 255, g / 255, b / 255, a / 255];
+            }
+        }
+
+        if (s.includes(',')) {
+            const parts = s.split(',').map(p => parseFloat(p.trim())).filter(v => !Number.isNaN(v));
+            if (parts.length >= 3) {
+                const r = parts[0];
+                const g = parts[1];
+                const b = parts[2];
+                const a = parts.length >= 4 ? parts[3] : 1;
+                const max = Math.max(r, g, b, a);
+                if (max > 1.0) {
+                    return [r / 255, g / 255, b / 255, a / 255];
+                }
+                return [r, g, b, a];
+            }
+        }
+
+        return [1, 1, 1, 1];
+    }
+
+    /**
+     * Parses common mesh parameters from an element.
+     * @param {Element} node
+     */
+    static _parseMeshParams(node) {
+        const getNum = (name, def = undefined) => {
+            const v = node.getAttribute(name);
+            return v !== null ? parseFloat(v) : def;
+        };
+        const getInt = (name, def = undefined) => {
+            const v = node.getAttribute(name);
+            return v !== null ? (parseInt(v) | 0) : def;
+        };
+
+        /** @type {any} */
+        const params = {};
+
+        // Dimensions
+        const width = getNum('width');
+        const height = getNum('height');
+        const depth = getNum('depth');
+        const size = getNum('size');
+        const radius = getNum('radius');
+
+        if (width !== undefined) params.width = width;
+        if (height !== undefined) params.height = height;
+        if (depth !== undefined) params.depth = depth;
+        if (size !== undefined) params.size = size;
+        if (radius !== undefined) params.radius = radius;
+
+        // Segments
+        const subdivisions = getInt('subdivisions');
+        const radialSegments = getInt('radialSegments');
+        const heightSegments = getInt('heightSegments');
+        const capSegments = getInt('capSegments');
+
+        if (subdivisions !== undefined) params.subdivisions = subdivisions;
+        if (radialSegments !== undefined) params.radialSegments = radialSegments;
+        if (heightSegments !== undefined) params.heightSegments = heightSegments;
+        if (capSegments !== undefined) params.capSegments = capSegments;
+
+        return params;
     }
 
     /**
@@ -242,6 +357,62 @@ export default class SceneLoader {
             const camera = new Camera(x, y, zoom, rotation, width, height);
             camera.name = getString("name");
             obj = camera;
+        }
+
+        else if (tagName === "Camera3D") {
+            const cam = new Camera3D();
+            cam.position.x = getFloatAny(["x", "posX"], cam.position.x);
+            cam.position.y = getFloatAny(["y", "posY"], cam.position.y);
+            cam.position.z = getFloatAny(["z", "posZ"], cam.position.z);
+
+            const tx = getFloatAny(["targetX"], cam.target.x);
+            const ty = getFloatAny(["targetY"], cam.target.y);
+            const tz = getFloatAny(["targetZ"], cam.target.z);
+            cam.target.x = tx;
+            cam.target.y = ty;
+            cam.target.z = tz;
+
+            cam.fovY = getFloatAny(["fovY"], cam.fovY);
+            cam.near = getFloatAny(["near"], cam.near);
+            cam.far = getFloatAny(["far"], cam.far);
+
+            cam._dirty = true;
+            cam.name = getString("name", "Camera3D");
+            obj = cam;
+        }
+
+        else if (tagName === "MeshNode") {
+            const n = new MeshNode();
+            n.name = getString("name", "MeshNode");
+
+            // Transform
+            n.x = getFloatAny(["x"], 0);
+            n.y = getFloatAny(["y"], 0);
+            n.z = getFloatAny(["z"], 0);
+
+            n.scaleX = getFloatAny(["scaleX"], 1);
+            n.scaleY = getFloatAny(["scaleY"], 1);
+            n.scaleZ = getFloatAny(["scaleZ"], 1);
+
+            // Rotation (radians)
+            n.rotX = getFloatAny(["rotX", "rotationX"], 0);
+            n.rotY = getFloatAny(["rotY", "rotationY"], 0);
+            n.rotZ = getFloatAny(["rotZ", "rotationZ"], 0);
+
+            // Source: primitive name (Sphere/Cube/Plane/etc.) or named mesh definition
+            n.source = getString("source", getString("mesh", "Cube"));
+
+            if (node.hasAttribute('color')) {
+                n.color = this._parseColor(node.getAttribute('color'));
+            }
+
+            // Optional primitive parameters if using direct primitive source
+            const params = this._parseMeshParams(node);
+            if (Object.keys(params).length > 0) {
+                n.meshDefinition = { type: n.source, color: n.color, params };
+            }
+
+            obj = n;
         }
 
         // Common properties

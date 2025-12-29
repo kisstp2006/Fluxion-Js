@@ -1,4 +1,6 @@
 import PostProcessing from './PostProcessing.js';
+import Camera3D from './Camera3D.js';
+import { Mat4 } from './Math3D.js';
 
 /**
  * Handles WebGL rendering, including shader management, resizing, and post-processing.
@@ -45,6 +47,14 @@ export default class Renderer {
     // WebGL2-only: use instanced rendering for 2D sprites (default true).
     // Falls back automatically to the legacy quad-vertex batching path.
     this.instancing2D = !!instancing2D;
+
+    // 3D pass (layer 0) groundwork
+    this._in3DPass = false;
+    this._defaultCamera3D = new Camera3D();
+    this._identityModel3D = Mat4.identity();
+    this.program3D = null;
+    this._program3DAttribs = null;
+    this._program3DUniforms = null;
 
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
@@ -803,6 +813,8 @@ export default class Renderer {
       : '../../Fluxion/Shaders/fragment.glsl';
 
     const instancedVertexShaderPath = '../../Fluxion/Shaders/vertex_instanced_300es.glsl';
+    const vertex3DShaderPath = '../../Fluxion/Shaders/vertex3d_300es.glsl';
+    const fragment3DShaderPath = '../../Fluxion/Shaders/fragment3d_300es.glsl';
 
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
@@ -843,6 +855,31 @@ export default class Renderer {
       } catch (e) {
         // If instanced shader fails to load/compile/link, continue with legacy batching.
         this.instancedProgram = null;
+      }
+    }
+
+    // Optional 3D program (WebGL2 groundwork)
+    if (this.isWebGL2) {
+      try {
+        const v3 = await this.loadShaderFile(vertex3DShaderPath);
+        const f3 = await this.loadShaderFile(fragment3DShaderPath);
+        const vs3 = this.createShader(this.gl.VERTEX_SHADER, v3);
+        const fs3 = this.createShader(this.gl.FRAGMENT_SHADER, f3);
+        if (vs3 && fs3) {
+          this.program3D = this.createProgram(vs3, fs3);
+          if (this.program3D) {
+            this._program3DAttribs = {
+              position: this.gl.getAttribLocation(this.program3D, 'a_position'),
+              color: this.gl.getAttribLocation(this.program3D, 'a_color'),
+            };
+            this._program3DUniforms = {
+              viewProj: this.gl.getUniformLocation(this.program3D, 'u_viewProj'),
+              model: this.gl.getUniformLocation(this.program3D, 'u_model'),
+            };
+          }
+        }
+      } catch {
+        this.program3D = null;
       }
     }
 
@@ -1199,6 +1236,11 @@ export default class Renderer {
     // Flush any remaining quads
     this.flush();
 
+    // Ensure we exit any 3D pass before post-processing.
+    if (this._in3DPass) {
+      this.end3D();
+    }
+
     if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {
       // Resolve MSAA render target (if enabled) into the main screen texture before post-processing.
       this.resolveMainScreenTargetIfNeeded();
@@ -1207,6 +1249,97 @@ export default class Renderer {
       // The output goes to the default framebuffer (null)
       this.postProcessing.render(this.mainScreenTexture, null);
     }
+  }
+
+  /**
+   * Begin 3D rendering (render layer 0).
+   * 3D pass is intentionally explicit so the engine can treat 3D as a base layer.
+   * @param {Camera3D|null|undefined} camera3D
+   */
+  begin3D(camera3D) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.program3D) return false;
+
+    // Flush 2D before switching programs/state.
+    this.flush();
+
+    const gl = this.gl;
+    const cam = camera3D || this._defaultCamera3D;
+
+    // Keep perspective aspect synced to renderer target.
+    const aspect = (this.targetWidth > 0 && this.targetHeight > 0)
+      ? (this.targetWidth / this.targetHeight)
+      : 1;
+    cam.setPerspective(cam.fovY, aspect, cam.near, cam.far);
+
+    gl.useProgram(this.program3D);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+
+    // Clear depth to avoid leaking previous frame depth.
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    const vp = cam.getViewProjectionMatrix();
+    if (this._program3DUniforms?.viewProj) gl.uniformMatrix4fv(this._program3DUniforms.viewProj, false, vp);
+
+    this._in3DPass = true;
+    return true;
+  }
+
+  /**
+   * Draw a mesh during the 3D pass.
+   * @param {import('./Mesh.js').default} mesh
+   * @param {Float32Array|null|undefined} modelMatrix
+   */
+  drawMesh(mesh, modelMatrix) {
+    if (!this._in3DPass) {
+      // Caller must begin3D() explicitly so we preserve predictable layering.
+      return false;
+    }
+    if (!mesh) return false;
+
+    const gl = this.gl;
+    const model = modelMatrix || this._identityModel3D;
+
+    // Bind mesh VAO/layout (cached on mesh side)
+    mesh.bindLayout(this._program3DAttribs.position, this._program3DAttribs.color);
+
+    if (mesh.vao && typeof gl.bindVertexArray === 'function') {
+      gl.bindVertexArray(mesh.vao);
+    } else {
+      // WebGL1/compat fallback: set attrib pointers each draw
+      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
+      if (mesh.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
+      const stride = 7 * 4;
+      gl.enableVertexAttribArray(this._program3DAttribs.position);
+      gl.vertexAttribPointer(this._program3DAttribs.position, 3, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(this._program3DAttribs.color);
+      gl.vertexAttribPointer(this._program3DAttribs.color, 4, gl.FLOAT, false, stride, 12);
+    }
+
+    if (this._program3DUniforms?.model) gl.uniformMatrix4fv(this._program3DUniforms.model, false, model);
+
+    // Draw call
+    mesh.draw();
+    return true;
+  }
+
+  /** End 3D rendering and restore 2D state. */
+  end3D() {
+    if (!this._in3DPass) return;
+    const gl = this.gl;
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    // Restore the active 2D program (instanced vs legacy).
+    if (this._isInstancingEnabled()) {
+      gl.useProgram(this.instancedProgram);
+    } else {
+      gl.useProgram(this.program);
+    }
+    this._in3DPass = false;
   }
 
   flush() {

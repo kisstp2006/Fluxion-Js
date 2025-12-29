@@ -1,0 +1,65 @@
+// @ts-check
+
+import { Engine, SceneLoader, Vector3 } from "../../Fluxion/index.js";
+
+/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+
+const game = {
+  /** @type {import("../../Fluxion/Core/Scene.js").default | null} */
+  currentScene: null,
+
+  _orbitAngle: 0,
+
+  /** @param {Renderer} renderer */
+  async init(renderer) {
+    this.currentScene = await SceneLoader.load("./scene.xaml", renderer);
+  },
+
+  /** @param {number} dt */
+  update(dt) {
+    if (!this.currentScene) return;
+
+    // Animate the sphere node if present
+    const sphere = /** @type {any} */ (this.currentScene.getObjectByName("SphereNode"));
+    if (sphere) {
+      sphere.rotY += dt * 1.2;
+      sphere.rotX += dt * 0.6;
+    }
+
+    // Orbit the 3D camera around the sphere
+    const cam3d = /** @type {any} */ (this.currentScene.getObjectByName("MainCamera3D"));
+    if (cam3d && cam3d.position) {
+      const targetX = sphere?.x ?? 0;
+      const targetY = sphere?.y ?? 0;
+      const targetZ = sphere?.z ?? -6;
+
+      const orbitRadius = 4.5;
+      const orbitHeight = 1.5;
+      const orbitSpeed = 0.6;
+
+      this._orbitAngle += dt * orbitSpeed;
+
+      cam3d.position.x = targetX + Math.cos(this._orbitAngle) * orbitRadius;
+      cam3d.position.z = targetZ + Math.sin(this._orbitAngle) * orbitRadius;
+      cam3d.position.y = targetY + orbitHeight;
+
+      // Keep looking at the ball
+      cam3d.lookAt(new Vector3(targetX, targetY, targetZ));
+    }
+
+    this.currentScene.update(dt);
+  },
+
+  /** @param {Renderer} renderer */
+  draw(renderer) {
+    if (this.currentScene) this.currentScene.draw(renderer);
+  },
+};
+
+new Engine("gameCanvas", game, 1280, 720, true, true, {
+  renderer: {
+    webglVersion: 2,
+    allowFallback: true,
+    renderTargets: { msaaSamples: 4 },
+  },
+});

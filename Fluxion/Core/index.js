@@ -11,6 +11,7 @@ export { default as SplashScreen } from './SplashScreen.js';
 // Rendering
 export { default as Renderer } from './Renderer.js';
 export { default as Camera } from './Camera.js';
+export { default as Camera3D } from './Camera3D.js';
 export { default as Window } from './Window.js';
 
 // Sprites and Animation
@@ -31,6 +32,11 @@ export { default as Transform } from './Transform.js';
 export { default as Math } from './Math.js';
 // Also export other math utilities
 export { Vector2, Matrix3, AABB } from './Math.js';
+
+// 3D groundwork
+export { default as Mesh } from './Mesh.js';
+export { default as MeshNode } from './MeshNode.js';
+export { Vector3, Mat4 } from './Math3D.js';
 
 // Text Rendering
 export { default as Text } from './Text.js';

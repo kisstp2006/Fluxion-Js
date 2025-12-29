@@ -12,9 +12,32 @@ export default class Scene {
         this.name = "Untitled Scene";
         /** @type {Camera | null} */
         this.camera = null;
+        /** @type {import('./Camera3D.js').default | null} */
+        this.camera3D = null;
+        /** @type {Map<string, any>} */
+        this.meshDefinitions = new Map();
         this.audio = [];
         this.disposeOnSceneChange = false;
         this._disposed = false;
+    }
+
+    /**
+     * Register a named mesh definition (used by XAML/XML loading).
+     * @param {string} name
+     * @param {any} definition
+     */
+    registerMesh(name, definition) {
+        if (!name) return;
+        this.meshDefinitions.set(name, definition);
+    }
+
+    /**
+     * @param {string} name
+     * @returns {any | null}
+     */
+    getMeshDefinition(name) {
+        if (!name) return null;
+        return this.meshDefinitions.get(name) || null;
     }
 
     /**
@@ -42,6 +65,11 @@ export default class Scene {
         this.camera = camera;
     }
 
+    /** @param {import('./Camera3D.js').default} camera */
+    setCamera3D(camera) {
+        this.camera3D = camera;
+    }
+
     /**
      * Retrieves an object by its name.
      * @param {string} name - The name of the object to retrieve.
@@ -49,6 +77,7 @@ export default class Scene {
      */
     getObjectByName(name) {
         if (this.camera && this.camera.name === name) return this.camera;
+        if (this.camera3D && this.camera3D.name === name) return this.camera3D;
         
         const findRecursive = (objects) => {
             for (const obj of objects) {
@@ -124,19 +153,44 @@ export default class Scene {
      * @param {Object} renderer - The renderer instance.
      */
     draw(renderer) {
-        // Sort objects by layer before drawing
-        // Cache sorted objects to avoid sorting every frame
+        // Groundwork render layering:
+        // - Render layer 0: 3D (base)
+        // - Render layer 1: 2D (existing sprite pipeline), using obj.layer for sub-layer sorting
+        // Existing content that only uses obj.layer keeps working (defaults to 2D).
+
         if (!this._sortedObjects || this._objectsDirty) {
-            this._sortedObjects = [...this.objects].sort((a, b) => {
-                const layerA = a.layer !== undefined ? a.layer : 0;
-                const layerB = b.layer !== undefined ? b.layer : 0;
-                return layerA - layerB;
-            });
+            const objects = [...this.objects];
+
+            // 3D objects: explicit renderLayer=0 OR implements draw3D()
+            this._sorted3DObjects = objects.filter(o => (o && (o.renderLayer === 0 || typeof o.draw3D === 'function')));
+
+            // 2D objects: everything else
+            this._sortedObjects = objects
+                .filter(o => !(o && (o.renderLayer === 0 || typeof o.draw3D === 'function')))
+                .sort((a, b) => {
+                    const layerA = a?.layer !== undefined ? a.layer : 0;
+                    const layerB = b?.layer !== undefined ? b.layer : 0;
+                    return layerA - layerB;
+                });
+
             this._objectsDirty = false;
         }
 
+        // 3D base pass
+        if (this._sorted3DObjects && this._sorted3DObjects.length > 0) {
+            if (renderer?.begin3D?.(this.camera3D)) {
+                for (const obj of this._sorted3DObjects) {
+                    if (typeof obj.draw3D === 'function') {
+                        obj.draw3D(renderer);
+                    }
+                }
+                renderer.end3D?.();
+            }
+        }
+
+        // 2D pass (existing behavior)
         for (const obj of this._sortedObjects) {
-            if (obj.draw) {
+            if (obj && obj.draw) {
                 obj.draw(renderer);
             }
         }
@@ -167,7 +221,9 @@ export default class Scene {
         this.objects.length = 0;
         this.audio.length = 0;
         this._sortedObjects = null;
+        this._sorted3DObjects = null;
         this._objectsDirty = true;
         this.camera = null;
+        this.camera3D = null;
     }
 }

@@ -1,0 +1,63 @@
+<Scene name="Basic3DXaml">
+    <!-- 2D camera (optional, but consistent with other scenes) -->
+    <Camera name="MainCamera"
+            x="0"
+            y="0"
+            zoom="1.0"/>
+
+    <!-- 3D camera for layer 0 -->
+    <Camera3D name="MainCamera3D"
+            x="0"
+            y="1.5"
+            z="4.5"
+            targetX="0"
+            targetY="0"
+            targetZ="-6"/>
+
+    <!-- Named mesh resources -->
+    <Mesh name="Ground"
+            type="Plane"
+            width="14"
+            depth="14"
+            subdivisions="1"
+            color="80,80,80,255"/>
+    <Mesh name="Ball"
+            type="Sphere"
+            radius="1"
+            radialSegments="24"
+            heightSegments="16"
+            color="#ffcc66ff"/>
+
+    <!-- 3D nodes (renderLayer 0) -->
+    <MeshNode name="GroundNode"
+            source="Ground"
+            y="-1.5"/>
+    <MeshNode name="SphereNode"
+            source="Ball"
+            z="-6"/>
+
+    <!-- 2D overlay (renderLayer 1) -->
+    <Text name="Title"
+            text="XAML 3D: MeshNode + primitives"
+            x="40"
+            y="40"
+            fontSize="28"
+            fontFamily="Inter"
+            color="#ffffff"
+            layer="2"/>
+    <Text name="Hint"
+            text="3D is layer 0, 2D is layer 1"
+            x="40"
+            y="75"
+            fontSize="18"
+            fontFamily="Inter"
+            color="#cfcfcf"
+            layer="2"/>
+    <Sprite name="Logo"
+            imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+            x="40"
+            y="110"
+            width="96"
+            height="96"
+            layer="2"/>
+</Scene>
