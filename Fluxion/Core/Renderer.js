@@ -11,13 +11,33 @@ export default class Renderer {
    * @param {number} [targetHeight=1080] - The target height of the game resolution.
    * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
    * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
+   * @param {{
+   *   webglVersion?: 1|2|'webgl1'|'webgl2'|'auto',
+   *   allowFallback?: boolean,
+   *   contextAttributes?: WebGLContextAttributes
+   * }=} options
    */
-  constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false) {
+  constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
     this.canvas = document.getElementById(canvasId);
-    this.gl = this.canvas.getContext("webgl");
+
+    /** @type {any} */
+    const cfg = (options && typeof options === 'object') ? options : {};
+    const requested = cfg.webglVersion ?? 2;
+    const allowFallback = cfg.allowFallback !== false;
+    const contextAttributes = cfg.contextAttributes;
+
+    this.requestedWebGLVersion = requested;
+    this.allowWebGLFallback = allowFallback;
+    this.contextAttributes = contextAttributes;
+
+    const ctx = this._createGLContext(requested, allowFallback, contextAttributes);
+    this.gl = ctx.gl;
+    this.isWebGL2 = ctx.isWebGL2;
+    this.webglContextName = ctx.contextName;
 
     if (!this.gl) {
-      alert("WebGL not supported!");
+      const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
+      alert(`${wantedLabel} not supported!`);
       return;
     }
 
@@ -90,20 +110,78 @@ export default class Renderer {
     });
 
     this.canvas.addEventListener('webglcontextlost', (e) => {
-    e.preventDefault();
-    alert('WebGL context lost! Please wait...');
+      e.preventDefault();
+      alert('WebGL context lost! Please wait...');
     });
 
-  this.canvas.addEventListener('webglcontextrestored', () => {
-    this.initGL();
-    alert('WebGL context restored!');
-  });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      // Some browsers restore the same context object. Re-acquire defensively.
+      if (!this.gl) {
+        const restored = this._createGLContext(this.requestedWebGLVersion, this.allowWebGLFallback, this.contextAttributes);
+        this.gl = restored.gl;
+        this.isWebGL2 = restored.isWebGL2;
+        this.webglContextName = restored.contextName;
+      }
+      this.initGL();
+      alert('WebGL context restored!');
+    });
 
     // Initialize shaders asynchronously and store the promise
     this.readyPromise = this.initGL().then(() => {
       this.isReady = true;
     });
   } 
+
+  /**
+   * Create a WebGL context with requested version and fallback rules.
+   * @param {1|2|'webgl1'|'webgl2'|'auto'|any} requested
+   * @param {boolean} allowFallback
+   * @param {WebGLContextAttributes=} contextAttributes
+   * @returns {{gl: (WebGLRenderingContext|WebGL2RenderingContext|null), isWebGL2: boolean, contextName: string|null}}
+   */
+  _createGLContext(requested, allowFallback, contextAttributes) {
+    /** @type {string[]} */
+    let tryOrder;
+
+    const req = (requested === 1) ? 'webgl1'
+      : (requested === 2) ? 'webgl2'
+      : (requested === 'webgl1' || requested === 'webgl2' || requested === 'auto') ? requested
+      : 'webgl2';
+
+    if (req === 'webgl1') {
+      tryOrder = ['webgl', 'experimental-webgl'];
+      if (allowFallback) tryOrder.push('webgl2');
+    } else if (req === 'webgl2') {
+      tryOrder = ['webgl2'];
+      if (allowFallback) tryOrder.push('webgl', 'experimental-webgl');
+    } else {
+      // auto
+      tryOrder = ['webgl2', 'webgl', 'experimental-webgl'];
+    }
+
+    /** @type {WebGLRenderingContext|WebGL2RenderingContext|null} */
+    let gl = null;
+    /** @type {string|null} */
+    let contextName = null;
+
+    for (const name of tryOrder) {
+      try {
+        gl = this.canvas.getContext(name, contextAttributes);
+      } catch {
+        gl = null;
+      }
+      if (gl) {
+        contextName = name;
+        break;
+      }
+    }
+
+    return {
+      gl,
+      isWebGL2: contextName === 'webgl2',
+      contextName,
+    };
+  }
 
   /**
    * Returns true if a texture is already cached for a given key.

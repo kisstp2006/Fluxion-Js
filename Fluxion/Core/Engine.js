@@ -16,10 +16,20 @@ export default class Engine {
      * @param {number} [targetHeight=1080] - The target height of the game resolution.
      * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
      * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
+     * @param {{
+     *   renderer?: {
+     *     webglVersion?: 1|2|'webgl1'|'webgl2'|'auto',
+     *     allowFallback?: boolean,
+     *     contextAttributes?: WebGLContextAttributes
+     *   },
+     *   splashScreen?: any,
+     *   input?: any
+     * }=} options
      */
     constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
-        // Initialize Renderer with aspect ratio settings and post-processing
-        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
+        // Initialize Renderer with aspect ratio settings, post-processing, and WebGL version selection.
+        const rendererOptions = (options && typeof options === 'object') ? (options.renderer || {}) : {};
+        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing, rendererOptions);
         this.camera = new Camera();
         this.window = new Window();
         
