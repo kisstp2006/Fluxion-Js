@@ -37,6 +37,10 @@ export default class MeshNode {
     // Optional per-node color (default white). Used when creating primitive meshes.
     this.color = [1, 1, 1, 1];
 
+    // Optional material reference/instance. Can be a string name (resolved by SceneLoader)
+    // or a Material instance (set via setMaterial).
+    this.material = null;
+
     // Optional mesh definition (set by SceneLoader if source matches a named mesh resource).
     this.meshDefinition = null;
 
@@ -108,6 +112,11 @@ export default class MeshNode {
     // Force rebuild
     this._mesh = null;
     this._meshKey = '';
+  }
+
+  /** @param {any} materialDef */
+  setMaterial(materialDef) {
+    this.material = materialDef || null;
   }
 
   /**
@@ -235,7 +244,7 @@ export default class MeshNode {
     this._ensureMesh(renderer);
     if (!this._mesh) return;
 
-    renderer.drawMesh(this._mesh, this._getModelMatrix());
+    renderer.drawMesh(this._mesh, this._getModelMatrix(), this.material);
 
     // Draw child 3D nodes (if any)
     for (const child of this.children) {

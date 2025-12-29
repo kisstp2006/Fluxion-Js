@@ -7,6 +7,7 @@ import Camera3D from './Camera3D.js';
 import ClickableArea from './ClickableArea.js';
 import Text from './Text.js';
 import MeshNode from './MeshNode.js';
+import Material from './Material.js';
 
 /**
  * Utility class for loading scenes from XML files.
@@ -37,17 +38,79 @@ export default class SceneLoader {
 
             const children = Array.from(sceneNode.children);
 
-            // Pass 1: register named mesh resources (top-level <Mesh ... />)
+            // Pass 1: register named mesh resources (top-level <Mesh ... />) and materials
             for (const child of children) {
-                if (child.tagName !== 'Mesh') continue;
+                if (child.tagName === 'Mesh') {
+                    const name = child.getAttribute('name') || '';
+                    const type = child.getAttribute('type') || child.getAttribute('source') || child.getAttribute('mesh') || '';
+                    if (!name || !type) continue;
 
-                const name = child.getAttribute('name') || '';
-                const type = child.getAttribute('type') || child.getAttribute('source') || child.getAttribute('mesh') || '';
-                if (!name || !type) continue;
+                    const color = this._parseColor(child.getAttribute('color'));
+                    const params = this._parseMeshParams(child);
+                    scene.registerMesh(name, { type, color, params });
+                    continue;
+                }
 
-                const color = this._parseColor(child.getAttribute('color'));
-                const params = this._parseMeshParams(child);
-                scene.registerMesh(name, { type, color, params });
+                // Materials: <Material name="..." source="foo.mat" albedoColor="#fff" albedoTexture="..." />
+                if (child.tagName === 'Material') {
+                    const name = child.getAttribute('name') || '';
+                    if (!name) continue;
+
+                    const src = child.getAttribute('source') || child.getAttribute('src') || null;
+                    if (src) {
+                        // Resolve relative to scene URL
+                                                // If url is relative, resolve against window.location or document.baseURI
+                                                let base;
+                                                try {
+                                                    base = new URL('.', url).toString();
+                                                } catch (e) {
+                                                    // fallback: use document.baseURI or window.location.href
+                                                    base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+                                                }
+                                                const matUrl = new URL(src, base).toString();
+                        const p = Material.load(matUrl, renderer);
+                        // Track loading promise on renderer so loading flows can wait
+                        renderer?.trackAssetPromise?.(p);
+                        // Store promise in scene so callers can await when resolving references
+                        scene.registerMaterial(name, p);
+                        continue;
+                    }
+
+                    // Inline material definition (synchronous)
+                    const mat = new Material();
+                    if (child.hasAttribute('albedoColor') || child.hasAttribute('color')) {
+                        const c = child.getAttribute('albedoColor') || child.getAttribute('color');
+                        mat.albedoColor = this._parseColor(c);
+                    }
+                    if (child.hasAttribute('albedoTexture')) {
+                        const tex = child.getAttribute('albedoTexture');
+                        const base = new URL('.', url).toString();
+                        const texUrl = new URL(tex, base).toString();
+                        const p = (async () => {
+                            try {
+                                const img = await new Promise((resolve) => {
+                                    const i = new Image();
+                                    i.crossOrigin = 'anonymous';
+                                    i.onload = () => resolve(i);
+                                    i.onerror = () => resolve(null);
+                                    i.src = texUrl;
+                                });
+                                if (img && renderer) {
+                                    mat.albedoTexture = renderer.createTexture?.(img, texUrl) || null;
+                                }
+                            } catch (e) {
+                                console.warn('Material inline texture load failed', texUrl, e);
+                            }
+                            return mat;
+                        })();
+                        renderer?.trackAssetPromise?.(p);
+                        scene.registerMaterial(name, p);
+                        continue;
+                    }
+
+                    scene.registerMaterial(name, mat);
+                    continue;
+                }
             }
 
             // Pass 2: parse objects (including <Camera3D> and <MeshNode>)
@@ -74,6 +137,24 @@ export default class SceneLoader {
                 if (obj instanceof MeshNode) {
                     const def = scene.getMeshDefinition(obj.source);
                     if (def) obj.setMeshDefinition(def);
+
+                    // Resolve material reference if present
+                    if (obj.material) {
+                        const mdef = scene.getMaterialDefinition(obj.material);
+                        if (mdef) {
+                            // mdef may be a promise
+                            if (typeof mdef.then === 'function') {
+                                try {
+                                    const mat = await mdef;
+                                    if (mat) obj.setMaterial(mat);
+                                } catch (e) {
+                                    console.warn('Failed to resolve material', obj.material, e);
+                                }
+                            } else {
+                                obj.setMaterial(mdef);
+                            }
+                        }
+                    }
                 }
 
                 scene.add(obj);
@@ -401,6 +482,8 @@ export default class SceneLoader {
 
             // Source: primitive name (Sphere/Cube/Plane/etc.) or named mesh definition
             n.source = getString("source", getString("mesh", "Cube"));
+            // Material reference by name: will be resolved by the loader pass.
+            n.material = getString('material', getString('mat', ''));
 
             if (node.hasAttribute('color')) {
                 n.color = this._parseColor(node.getAttribute('color'));

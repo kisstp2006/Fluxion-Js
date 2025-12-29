@@ -37,6 +37,7 @@ export { Vector2, Matrix3, AABB } from './Math.js';
 export { default as Mesh } from './Mesh.js';
 export { default as MeshNode } from './MeshNode.js';
 export { Vector3, Mat4 } from './Math3D.js';
+export { default as Material } from './Material.js';
 
 // Text Rendering
 export { default as Text } from './Text.js';

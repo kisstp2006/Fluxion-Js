@@ -16,6 +16,8 @@ export default class Scene {
         this.camera3D = null;
         /** @type {Map<string, any>} */
         this.meshDefinitions = new Map();
+        /** @type {Map<string, any>} */
+        this.materialDefinitions = new Map();
         this.audio = [];
         this.disposeOnSceneChange = false;
         this._disposed = false;
@@ -32,12 +34,32 @@ export default class Scene {
     }
 
     /**
+     * Register a named material definition or instance.
+     * @param {string} name
+     * @param {any} definition
+     */
+    registerMaterial(name, definition) {
+        if (!name) return;
+        this.materialDefinitions.set(name, definition);
+    }
+
+    /**
      * @param {string} name
      * @returns {any | null}
      */
     getMeshDefinition(name) {
         if (!name) return null;
         return this.meshDefinitions.get(name) || null;
+    }
+
+    /**
+     * Get a registered material by name. May be a Material instance or a Promise that resolves to one.
+     * @param {string} name
+     * @returns {any|null}
+     */
+    getMaterialDefinition(name) {
+        if (!name) return null;
+        return this.materialDefinitions.get(name) || null;
     }
 
     /**

@@ -875,6 +875,9 @@ export default class Renderer {
             this._program3DUniforms = {
               viewProj: this.gl.getUniformLocation(this.program3D, 'u_viewProj'),
               model: this.gl.getUniformLocation(this.program3D, 'u_model'),
+                  albedoColor: this.gl.getUniformLocation(this.program3D, 'u_albedoColor'),
+                  albedoTexture: this.gl.getUniformLocation(this.program3D, 'u_albedoTexture'),
+                  useAlbedoTexture: this.gl.getUniformLocation(this.program3D, 'u_useAlbedoTexture'),
             };
           }
         }
@@ -1293,7 +1296,7 @@ export default class Renderer {
    * @param {import('./Mesh.js').default} mesh
    * @param {Float32Array|null|undefined} modelMatrix
    */
-  drawMesh(mesh, modelMatrix) {
+  drawMesh(mesh, modelMatrix, material) {
     if (!this._in3DPass) {
       // Caller must begin3D() explicitly so we preserve predictable layering.
       return false;
@@ -1320,6 +1323,29 @@ export default class Renderer {
     }
 
     if (this._program3DUniforms?.model) gl.uniformMatrix4fv(this._program3DUniforms.model, false, model);
+    // Material uniforms (optional)
+    if (this._program3DUniforms) {
+      const u = this._program3DUniforms;
+      const col = (material && material.albedoColor) ? material.albedoColor : [1, 1, 1, 1];
+      if (u.albedoColor) gl.uniform4fv(u.albedoColor, col);
+
+      const hasTex = !!(material && material.albedoTexture);
+      if (u.useAlbedoTexture) gl.uniform1i(u.useAlbedoTexture, hasTex ? 1 : 0);
+      if (hasTex && u.albedoTexture) {
+        gl.activeTexture(gl.TEXTURE0);
+        try {
+          gl.bindTexture(gl.TEXTURE_2D, material.albedoTexture);
+          gl.uniform1i(u.albedoTexture, 0);
+        } catch (e) {
+          // ignore binding errors
+        }
+      } else {
+        // Ensure texture unit 0 is not bound to some unrelated texture
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+        if (u.albedoTexture) gl.uniform1i(u.albedoTexture, 0);
+      }
+    }
 
     // Draw call
     mesh.draw();

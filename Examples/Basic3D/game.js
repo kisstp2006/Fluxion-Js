@@ -35,7 +35,7 @@ class Cube3D {
     this.model[13] = 0;
     this.model[14] = -6;
 
-    renderer.drawMesh(this.mesh, this.model);
+    renderer.drawMesh(this.mesh, this.model, null);
   }
 
   dispose() {
