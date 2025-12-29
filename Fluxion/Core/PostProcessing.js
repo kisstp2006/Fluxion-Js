@@ -154,17 +154,22 @@ export default class PostProcessing {
       const texture = this.gl.createTexture();
 
       this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-      this.gl.texImage2D(
-        this.gl.TEXTURE_2D,
-        0,
-        this.gl.RGBA,
-        this.width,
-        this.height,
-        0,
-        this.gl.RGBA,
-        this.gl.UNSIGNED_BYTE,
-        null
-      );
+
+      if (this.isWebGL2 && typeof this.gl.texStorage2D === 'function') {
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA8, this.width, this.height);
+      } else {
+        this.gl.texImage2D(
+          this.gl.TEXTURE_2D,
+          0,
+          this.gl.RGBA,
+          this.width,
+          this.height,
+          0,
+          this.gl.RGBA,
+          this.gl.UNSIGNED_BYTE,
+          null
+        );
+      }
 
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);

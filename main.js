@@ -41,7 +41,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/FontTest/index.html");
+    mainWindow.loadFile("./Examples/PostProcessing/index.html");
   });
 
   // Window Management IPC Handlers

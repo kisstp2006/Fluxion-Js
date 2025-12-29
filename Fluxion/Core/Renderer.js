@@ -14,7 +14,10 @@ export default class Renderer {
    * @param {{
    *   webglVersion?: 1|2|'webgl1'|'webgl2'|'auto',
    *   allowFallback?: boolean,
-   *   contextAttributes?: WebGLContextAttributes
+    *   contextAttributes?: WebGLContextAttributes,
+    *   renderTargets?: {
+    *     msaaSamples?: number
+    *   }
    * }=} options
    */
   constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
@@ -25,6 +28,7 @@ export default class Renderer {
     const requested = cfg.webglVersion ?? 2;
     const allowFallback = cfg.allowFallback !== false;
     const contextAttributes = cfg.contextAttributes;
+    const renderTargets = (cfg.renderTargets && typeof cfg.renderTargets === 'object') ? cfg.renderTargets : {};
 
     this.requestedWebGLVersion = requested;
     this.allowWebGLFallback = allowFallback;
@@ -73,6 +77,13 @@ export default class Renderer {
 
     this.mainScreenFramebuffer = null;
     this.mainScreenTexture = null;
+
+    // WebGL2 render-target improvements (optional)
+    this.mainScreenDepthStencilRbo = null;
+    this.mainScreenMsaaFramebuffer = null;
+    this.mainScreenMsaaColorRbo = null;
+    this.mainScreenMsaaDepthStencilRbo = null;
+    this.mainScreenMsaaSamples = Math.max(0, (renderTargets.msaaSamples ?? 0) | 0);
     
     // Performance optimizations
     // Texture cache entries: cacheKey -> { texture, refCount, bytes, lastUsedFrame }
@@ -460,19 +471,48 @@ export default class Renderer {
    * Ensures that the main screen framebuffer and texture are created and sized correctly.
    */
   ensureMainScreenTargets() {
+    // Main screen targets are only needed when post-processing is enabled.
+    if (!this.enablePostProcessing) return;
+
     const desiredWidth = this.canvas.width;
     const desiredHeight = this.canvas.height;
 
+    const gl = this.gl;
+    const wantMsaa = this.isWebGL2 && this.mainScreenMsaaSamples > 0;
+
+    const sizeChanged =
+      !this.mainScreenTexture ||
+      (this.mainScreenTexture.width !== desiredWidth || this.mainScreenTexture.height !== desiredHeight);
+
+    const msaaStateChanged = wantMsaa ? (!this.mainScreenMsaaFramebuffer) : (!!this.mainScreenMsaaFramebuffer);
+
+    if (sizeChanged || msaaStateChanged) {
+      // Dispose old resources (safe to call with nulls)
+      if (this.mainScreenFramebuffer) gl.deleteFramebuffer(this.mainScreenFramebuffer);
+      if (this.mainScreenTexture) gl.deleteTexture(this.mainScreenTexture);
+      if (this.mainScreenDepthStencilRbo) gl.deleteRenderbuffer(this.mainScreenDepthStencilRbo);
+      if (this.mainScreenMsaaFramebuffer) gl.deleteFramebuffer(this.mainScreenMsaaFramebuffer);
+      if (this.mainScreenMsaaColorRbo) gl.deleteRenderbuffer(this.mainScreenMsaaColorRbo);
+      if (this.mainScreenMsaaDepthStencilRbo) gl.deleteRenderbuffer(this.mainScreenMsaaDepthStencilRbo);
+
+      this.mainScreenFramebuffer = null;
+      this.mainScreenTexture = null;
+      this.mainScreenDepthStencilRbo = null;
+      this.mainScreenMsaaFramebuffer = null;
+      this.mainScreenMsaaColorRbo = null;
+      this.mainScreenMsaaDepthStencilRbo = null;
+    }
+
     if (!this.mainScreenFramebuffer) {
-      this.mainScreenFramebuffer = this.gl.createFramebuffer();
+      this.mainScreenFramebuffer = gl.createFramebuffer();
     }
     if (!this.mainScreenTexture) {
-      this.mainScreenTexture = this.gl.createTexture();
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.mainScreenTexture);
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
-      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+      this.mainScreenTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, this.mainScreenTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
 
     // Check if we need to resize the texture
@@ -481,36 +521,128 @@ export default class Renderer {
       this.mainScreenTexture.width = desiredWidth;
       this.mainScreenTexture.height = desiredHeight;
 
-      this.gl.bindTexture(this.gl.TEXTURE_2D, this.mainScreenTexture);
-      this.gl.texImage2D(
-        this.gl.TEXTURE_2D,
-        0,
-        this.gl.RGBA,
-        desiredWidth,
-        desiredHeight,
-        0,
-        this.gl.RGBA,
-        this.gl.UNSIGNED_BYTE,
-        null
-      );
+      gl.bindTexture(gl.TEXTURE_2D, this.mainScreenTexture);
 
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
-      this.gl.framebufferTexture2D(
-        this.gl.FRAMEBUFFER,
-        this.gl.COLOR_ATTACHMENT0,
-        this.gl.TEXTURE_2D,
+      if (this.isWebGL2 && typeof gl.texStorage2D === 'function') {
+        // WebGL2: immutable storage with a sized internal format
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, desiredWidth, desiredHeight);
+      } else {
+        // WebGL1 fallback
+        gl.texImage2D(
+          gl.TEXTURE_2D,
+          0,
+          gl.RGBA,
+          desiredWidth,
+          desiredHeight,
+          0,
+          gl.RGBA,
+          gl.UNSIGNED_BYTE,
+          null
+        );
+      }
+
+      // Resolve target framebuffer (texture-backed)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.mainScreenFramebuffer);
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
         this.mainScreenTexture,
         0
       );
-      
-      // Check framebuffer status
-      const status = this.gl.checkFramebufferStatus(this.gl.FRAMEBUFFER);
-      if (status !== this.gl.FRAMEBUFFER_COMPLETE) {
-          console.error('Framebuffer is not complete: ' + status);
+
+      // Optional depth-stencil for scene rendering (useful for 3D / depth-aware effects)
+      if (this.isWebGL2) {
+        if (!this.mainScreenDepthStencilRbo) {
+          this.mainScreenDepthStencilRbo = gl.createRenderbuffer();
+        }
+        gl.bindRenderbuffer(gl.RENDERBUFFER, this.mainScreenDepthStencilRbo);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, desiredWidth, desiredHeight);
+        gl.framebufferRenderbuffer(
+          gl.FRAMEBUFFER,
+          gl.DEPTH_STENCIL_ATTACHMENT,
+          gl.RENDERBUFFER,
+          this.mainScreenDepthStencilRbo
+        );
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
       }
 
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+      // Check resolve framebuffer status
+      {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.mainScreenFramebuffer);
+        const resolveStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (resolveStatus !== gl.FRAMEBUFFER_COMPLETE) {
+          console.error('Resolve framebuffer is not complete: ' + resolveStatus);
+        }
+      }
+
+      // Optional MSAA render target (WebGL2 only): render into multisampled renderbuffers, then resolve into texture
+      if (wantMsaa && this.isWebGL2 && typeof gl.renderbufferStorageMultisample === 'function') {
+        this.mainScreenMsaaFramebuffer = gl.createFramebuffer();
+        this.mainScreenMsaaColorRbo = gl.createRenderbuffer();
+        this.mainScreenMsaaDepthStencilRbo = gl.createRenderbuffer();
+
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.mainScreenMsaaFramebuffer);
+
+        gl.bindRenderbuffer(gl.RENDERBUFFER, this.mainScreenMsaaColorRbo);
+        gl.renderbufferStorageMultisample(
+          gl.RENDERBUFFER,
+          this.mainScreenMsaaSamples,
+          gl.RGBA8,
+          desiredWidth,
+          desiredHeight
+        );
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.mainScreenMsaaColorRbo);
+
+        gl.bindRenderbuffer(gl.RENDERBUFFER, this.mainScreenMsaaDepthStencilRbo);
+        gl.renderbufferStorageMultisample(
+          gl.RENDERBUFFER,
+          this.mainScreenMsaaSamples,
+          gl.DEPTH24_STENCIL8,
+          desiredWidth,
+          desiredHeight
+        );
+        gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, this.mainScreenMsaaDepthStencilRbo);
+
+        gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+
+        // Check MSAA framebuffer status
+        const msaaStatus = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+        if (msaaStatus !== gl.FRAMEBUFFER_COMPLETE) {
+          console.error('MSAA framebuffer is not complete: ' + msaaStatus);
+          gl.deleteFramebuffer(this.mainScreenMsaaFramebuffer);
+          gl.deleteRenderbuffer(this.mainScreenMsaaColorRbo);
+          gl.deleteRenderbuffer(this.mainScreenMsaaDepthStencilRbo);
+          this.mainScreenMsaaFramebuffer = null;
+          this.mainScreenMsaaColorRbo = null;
+          this.mainScreenMsaaDepthStencilRbo = null;
+        }
+      }
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.bindTexture(gl.TEXTURE_2D, null);
     }
+  }
+
+  /**
+   * If MSAA is enabled for the main screen target, resolves it into the texture-backed framebuffer.
+   */
+  resolveMainScreenTargetIfNeeded() {
+    if (!this.enablePostProcessing) return;
+    if (!this.isWebGL2) return;
+    if (!this.mainScreenMsaaFramebuffer || !this.mainScreenFramebuffer) return;
+    if (!this.mainScreenTexture) return;
+
+    const gl = this.gl;
+    const w = this.mainScreenTexture.width | 0;
+    const h = this.mainScreenTexture.height | 0;
+    if (w <= 0 || h <= 0) return;
+
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.mainScreenMsaaFramebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.mainScreenFramebuffer);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
   }
 
   /**
@@ -782,11 +914,14 @@ export default class Renderer {
 
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenFramebuffer);
+      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenMsaaFramebuffer || this.mainScreenFramebuffer);
 
       // Clear the entire framebuffer (including black bars area)
       this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      this.gl.clear(this.gl.COLOR_BUFFER_BIT);
+      const clearMask = (this.mainScreenMsaaFramebuffer || this.mainScreenDepthStencilRbo)
+        ? (this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT | this.gl.STENCIL_BUFFER_BIT)
+        : this.gl.COLOR_BUFFER_BIT;
+      this.gl.clear(clearMask);
 
       // Set viewport to the letterboxed area for the game to draw into
       this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
@@ -807,6 +942,9 @@ export default class Renderer {
     this.flush();
 
     if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {
+      // Resolve MSAA render target (if enabled) into the main screen texture before post-processing.
+      this.resolveMainScreenTargetIfNeeded();
+
       // Pass the main screen texture to the post-processing system
       // The output goes to the default framebuffer (null)
       this.postProcessing.render(this.mainScreenTexture, null);

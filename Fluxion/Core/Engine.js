@@ -20,7 +20,10 @@ export default class Engine {
      *   renderer?: {
      *     webglVersion?: 1|2|'webgl1'|'webgl2'|'auto',
      *     allowFallback?: boolean,
-     *     contextAttributes?: WebGLContextAttributes
+    *     contextAttributes?: WebGLContextAttributes,
+    *     renderTargets?: {
+    *       msaaSamples?: number
+    *     }
      *   },
      *   splashScreen?: any,
      *   input?: any

@@ -66,5 +66,13 @@ const game = {
 };
 
 window.addEventListener("load", () => {
-    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, true);
+    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 });

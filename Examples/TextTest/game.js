@@ -93,5 +93,8 @@ new Engine("gameCanvas", game, 1280, 720, true, false, {
     renderer: {
         webglVersion: 2,
         allowFallback: true,
+        renderTargets: {
+            msaaSamples: 4,
+        },
     }
 });
