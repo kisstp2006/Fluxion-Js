@@ -18,6 +18,7 @@ export default class Renderer {
     *   renderTargets?: {
     *     msaaSamples?: number
     *   }
+    *   instancing2D?: boolean
    * }=} options
    */
   constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
@@ -29,6 +30,7 @@ export default class Renderer {
     const allowFallback = cfg.allowFallback !== false;
     const contextAttributes = cfg.contextAttributes;
     const renderTargets = (cfg.renderTargets && typeof cfg.renderTargets === 'object') ? cfg.renderTargets : {};
+    const instancing2D = cfg.instancing2D !== false;
 
     this.requestedWebGLVersion = requested;
     this.allowWebGLFallback = allowFallback;
@@ -39,6 +41,10 @@ export default class Renderer {
     this.isWebGL2 = ctx.isWebGL2;
     this.webglContextName = ctx.contextName;
     this._loggedContextInfo = false;
+
+    // WebGL2-only: use instanced rendering for 2D sprites (default true).
+    // Falls back automatically to the legacy quad-vertex batching path.
+    this.instancing2D = !!instancing2D;
 
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
@@ -786,6 +792,8 @@ export default class Renderer {
       ? '../../Fluxion/Shaders/fragment_300es.glsl'
       : '../../Fluxion/Shaders/fragment.glsl';
 
+    const instancedVertexShaderPath = '../../Fluxion/Shaders/vertex_instanced_300es.glsl';
+
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
 
@@ -797,13 +805,37 @@ export default class Renderer {
     throw new Error("Shader compilation failed. Renderer initialization aborted.");
   }
 
-  this.program = this.createProgram(this.vertexShader, this.fragmentShader);
-  if (!this.program) {
-    throw new Error("Program linking failed. Renderer initialization aborted.");
-  }
-    
-
     this.program = this.createProgram(this.vertexShader, this.fragmentShader);
+    if (!this.program) {
+      throw new Error("Program linking failed. Renderer initialization aborted.");
+    }
+
+    // Optional WebGL2 instanced sprite program
+    this.instancedProgram = null;
+    this.instancedVertexShader = null;
+    this._instancedAttribs = null;
+    this._instancedUniforms = null;
+    this.instancedVao = null;
+    this.instanceBuffer = null;
+    this.baseQuadBuffer = null;
+    this._baseQuadStride = 0;
+    this._instanceStride = 0;
+    this._instanceFloats = 0;
+    this.instanceData = null;
+
+    if (this.isWebGL2 && this.instancing2D) {
+      try {
+        const instancedVertexSource = await this.loadShaderFile(instancedVertexShaderPath);
+        this.instancedVertexShader = this.createShader(this.gl.VERTEX_SHADER, instancedVertexSource);
+        if (this.instancedVertexShader) {
+          this.instancedProgram = this.createProgram(this.instancedVertexShader, this.fragmentShader);
+        }
+      } catch (e) {
+        // If instanced shader fails to load/compile/link, continue with legacy batching.
+        this.instancedProgram = null;
+      }
+    }
+
     this.gl.useProgram(this.program);
 
     // Get attribute and uniform locations
@@ -880,6 +912,80 @@ export default class Renderer {
 
       this.gl.enableVertexAttribArray(this.colorLocation);
       this.gl.vertexAttribPointer(this.colorLocation, 4, this.gl.FLOAT, false, this.STRIDE, 16); // Offset 4 floats (16 bytes)
+    }
+
+    // --- WebGL2 Instanced Sprite Path ---
+    if (this.isWebGL2 && this.instancedProgram) {
+      // Cache locations for the instanced program
+      this._instancedAttribs = {
+        position: this.gl.getAttribLocation(this.instancedProgram, 'a_position'),
+        texcoord: this.gl.getAttribLocation(this.instancedProgram, 'a_texcoord'),
+        iPos: this.gl.getAttribLocation(this.instancedProgram, 'a_i_pos'),
+        iSize: this.gl.getAttribLocation(this.instancedProgram, 'a_i_size'),
+        iUv: this.gl.getAttribLocation(this.instancedProgram, 'a_i_uv'),
+        iColor: this.gl.getAttribLocation(this.instancedProgram, 'a_i_color'),
+      };
+      this._instancedUniforms = {
+        texture: this.gl.getUniformLocation(this.instancedProgram, 'u_texture'),
+        cameraPosition: this.gl.getUniformLocation(this.instancedProgram, 'u_cameraPosition'),
+        cameraZoom: this.gl.getUniformLocation(this.instancedProgram, 'u_cameraZoom'),
+        cameraRotation: this.gl.getUniformLocation(this.instancedProgram, 'u_cameraRotation'),
+        resolution: this.gl.getUniformLocation(this.instancedProgram, 'u_resolution'),
+      };
+
+      // Base quad: (x,y,u,v) for TRIANGLE_STRIP with positions in 0..1
+      const baseQuad = new Float32Array([
+        0, 0, 0, 0, // top-left
+        1, 0, 1, 0, // top-right
+        0, 1, 0, 1, // bottom-left
+        1, 1, 1, 1, // bottom-right
+      ]);
+
+      this._baseQuadStride = 4 * 4; // 4 floats
+      this.baseQuadBuffer = this.gl.createBuffer();
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.baseQuadBuffer);
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, baseQuad, this.gl.STATIC_DRAW);
+
+      // Per-instance layout: pos(2), size(2), uv(4), color(4) = 12 floats
+      this._instanceFloats = 12;
+      this._instanceStride = this._instanceFloats * 4;
+      this.instanceData = new Float32Array(this.MAX_QUADS * this._instanceFloats);
+
+      this.instanceBuffer = this.gl.createBuffer();
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
+      this.gl.bufferData(this.gl.ARRAY_BUFFER, this.instanceData.byteLength, this.gl.DYNAMIC_DRAW);
+
+      // VAO captures base + instance attributes
+      this.instancedVao = this.gl.createVertexArray();
+      this.gl.bindVertexArray(this.instancedVao);
+
+      // Base quad attributes
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.baseQuadBuffer);
+      this.gl.enableVertexAttribArray(this._instancedAttribs.position);
+      this.gl.vertexAttribPointer(this._instancedAttribs.position, 2, this.gl.FLOAT, false, this._baseQuadStride, 0);
+      this.gl.enableVertexAttribArray(this._instancedAttribs.texcoord);
+      this.gl.vertexAttribPointer(this._instancedAttribs.texcoord, 2, this.gl.FLOAT, false, this._baseQuadStride, 8);
+
+      // Instance attributes (divisor = 1)
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
+      this.gl.enableVertexAttribArray(this._instancedAttribs.iPos);
+      this.gl.vertexAttribPointer(this._instancedAttribs.iPos, 2, this.gl.FLOAT, false, this._instanceStride, 0);
+      this.gl.vertexAttribDivisor(this._instancedAttribs.iPos, 1);
+
+      this.gl.enableVertexAttribArray(this._instancedAttribs.iSize);
+      this.gl.vertexAttribPointer(this._instancedAttribs.iSize, 2, this.gl.FLOAT, false, this._instanceStride, 8);
+      this.gl.vertexAttribDivisor(this._instancedAttribs.iSize, 1);
+
+      this.gl.enableVertexAttribArray(this._instancedAttribs.iUv);
+      this.gl.vertexAttribPointer(this._instancedAttribs.iUv, 4, this.gl.FLOAT, false, this._instanceStride, 16);
+      this.gl.vertexAttribDivisor(this._instancedAttribs.iUv, 1);
+
+      this.gl.enableVertexAttribArray(this._instancedAttribs.iColor);
+      this.gl.vertexAttribPointer(this._instancedAttribs.iColor, 4, this.gl.FLOAT, false, this._instanceStride, 32);
+      this.gl.vertexAttribDivisor(this._instancedAttribs.iColor, 1);
+
+      this.gl.bindVertexArray(null);
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
     }
     
     // Initialize post-processing if enabled
@@ -1070,6 +1176,24 @@ export default class Renderer {
   flush() {
     if (this.quadCount === 0) return;
 
+    if (this._isInstancingEnabled()) {
+      this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
+      this.gl.bindVertexArray(this.instancedVao);
+
+      // Upload only the used portion
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.instanceBuffer);
+      const view = this.instanceData.subarray(0, this.quadCount * this._instanceFloats);
+      this.gl.bufferSubData(this.gl.ARRAY_BUFFER, 0, view);
+
+      // Draw instanced quad strip
+      this.gl.drawArraysInstanced(this.gl.TRIANGLE_STRIP, 0, 4, this.quadCount);
+
+      this.gl.bindVertexArray(null);
+      this.drawCallCount++;
+      this.quadCount = 0;
+      return;
+    }
+
     this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
 
     if (this.quadVao) {
@@ -1177,6 +1301,22 @@ export default class Renderer {
     // Flush current batch because camera uniforms are changing
     this.flush();
 
+    if (this._isInstancingEnabled()) {
+      this.gl.useProgram(this.instancedProgram);
+
+      // Ensure sampler uses texture unit 0 for this program as well.
+      if (this._instancedUniforms?.texture) {
+        this.gl.uniform1i(this._instancedUniforms.texture, 0);
+      }
+
+      this.activeCamera = camera;
+      this.gl.uniform2f(this._instancedUniforms.cameraPosition, camera.x, camera.y);
+      this.gl.uniform1f(this._instancedUniforms.cameraZoom, camera.zoom);
+      this.gl.uniform1f(this._instancedUniforms.cameraRotation, camera.rotation);
+      this.gl.uniform2f(this._instancedUniforms.resolution, this.targetWidth, this.targetHeight);
+      return;
+    }
+
     this.gl.useProgram(this.program);
 
     // Store the camera used for rendering so other systems (e.g. input hit-testing)
@@ -1242,6 +1382,25 @@ export default class Renderer {
     const b = finalColor[2] / 255;
     const a = finalColor[3] / 255;
 
+    // WebGL2 instanced path: one instance per sprite (no per-vertex expansion)
+    if (this._isInstancingEnabled()) {
+      let i = this.quadCount * this._instanceFloats;
+      this.instanceData[i++] = x;
+      this.instanceData[i++] = y;
+      this.instanceData[i++] = width;
+      this.instanceData[i++] = height;
+      this.instanceData[i++] = u0;
+      this.instanceData[i++] = v0;
+      this.instanceData[i++] = u1;
+      this.instanceData[i++] = v1;
+      this.instanceData[i++] = r;
+      this.instanceData[i++] = g;
+      this.instanceData[i++] = b;
+      this.instanceData[i++] = a;
+      this.quadCount++;
+      return;
+    }
+
     // Append to vertex data
     let offset = this.quadCount * 4 * this.VERTEX_SIZE;
 
@@ -1287,6 +1446,17 @@ export default class Renderer {
 
     this.quadCount++;
 }
+
+  _isInstancingEnabled() {
+    return !!(
+      this.isWebGL2 &&
+      this.instancing2D &&
+      this.instancedProgram &&
+      this.instancedVao &&
+      this.instanceBuffer &&
+      this.instanceData
+    );
+  }
 
   getStats() {
     return {
