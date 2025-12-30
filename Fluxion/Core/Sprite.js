@@ -250,12 +250,31 @@ export default class Sprite {
                 this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color);
             }
         } else if (!this.useSpriteSheet) {
+            // Handle multi-image animations (AnimatedSprite with image array)
             if (this.images.length > 0 && this.isAnimating && currentTime - this.lastFrameTime > this.animationSpeed) {
                 this.lastFrameTime = currentTime;
                 this.currentFrame = (this.currentFrame + 1) % this.images.length;
             }
-            this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color);
-
+            
+            // If we have images array, use current frame image
+            if (this.images.length > 0) {
+                const currentImage = this.images[this.currentFrame];
+                if (currentImage && this.renderer) {
+                    // Create texture on-the-fly if needed, or use cached one
+                    let frameTexture = this.texture;
+                    if (!frameTexture && currentImage.complete) {
+                        // Image is loaded, create texture
+                        frameTexture = this.renderer.createTexture(currentImage);
+                        this.texture = frameTexture; // Cache for this frame
+                    }
+                    if (frameTexture) {
+                        this.renderer.drawQuad(frameTexture, this.x, this.y, this.width, this.height, this.color);
+                    }
+                }
+            } else if (this.texture) {
+                // Direct texture (used by Text class and other non-sprite-sheet sprites)
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color);
+            }
         }
 
         // Draw children - only sort if needed

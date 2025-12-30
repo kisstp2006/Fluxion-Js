@@ -152,7 +152,7 @@ export default class Scene {
      */
     playAutoplayAudio() {
         for (const audio of this.audio) {
-            if (audio.autoplay && audio.stopOnSceneChange) {
+            if (audio.autoplay) {
                 audio.play(true);
             }
         }
@@ -181,20 +181,41 @@ export default class Scene {
         // Existing content that only uses obj.layer keeps working (defaults to 2D).
 
         if (!this._sortedObjects || this._objectsDirty) {
-            const objects = [...this.objects];
+            // Optimize: only create arrays if we have objects
+            if (this.objects.length === 0) {
+                this._sorted3DObjects = [];
+                this._sortedObjects = [];
+                this._objectsDirty = false;
+                return;
+            }
 
-            // 3D objects: explicit renderLayer=0 OR implements draw3D()
-            this._sorted3DObjects = objects.filter(o => (o && (o.renderLayer === 0 || typeof o.draw3D === 'function')));
+            const objects = this.objects;
+            const sorted3D = [];
+            const sorted2D = [];
 
-            // 2D objects: everything else
-            this._sortedObjects = objects
-                .filter(o => !(o && (o.renderLayer === 0 || typeof o.draw3D === 'function')))
-                .sort((a, b) => {
+            // Single pass: categorize and sort 2D objects
+            for (let i = 0; i < objects.length; i++) {
+                const o = objects[i];
+                if (!o) continue;
+                
+                if (o.renderLayer === 0 || typeof o.draw3D === 'function') {
+                    sorted3D.push(o);
+                } else {
+                    sorted2D.push(o);
+                }
+            }
+
+            // Sort 2D objects by layer
+            if (sorted2D.length > 1) {
+                sorted2D.sort((a, b) => {
                     const layerA = a?.layer !== undefined ? a.layer : 0;
                     const layerB = b?.layer !== undefined ? b.layer : 0;
                     return layerA - layerB;
                 });
+            }
 
+            this._sorted3DObjects = sorted3D;
+            this._sortedObjects = sorted2D;
             this._objectsDirty = false;
         }
 

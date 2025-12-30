@@ -115,8 +115,19 @@ export default class Text extends Sprite {
         this.ctx.fillText(this.textContent, this.padding, this.padding);
 
         // Update WebGL texture - don't use cache for text (dynamic content)
+        // Ensure canvas has valid dimensions before creating texture
+        if (this.canvas.width <= 0 || this.canvas.height <= 0) {
+            // Canvas has no size, create a minimal texture
+            this.canvas.width = 1;
+            this.canvas.height = 1;
+        }
+        
         if (this.texture) {
             this.renderer.gl.deleteTexture(this.texture);
+            // Clean up dimension entry (WeakMap will auto-cleanup, but explicit is better)
+            if (this.renderer._textureDimensions) {
+                // WeakMap doesn't have delete, but the texture is deleted so entry will be GC'd
+            }
         }
         this.texture = this.renderer.createTexture(this.canvas);
         

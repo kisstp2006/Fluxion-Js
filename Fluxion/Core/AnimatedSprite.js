@@ -230,8 +230,10 @@ export default class AnimatedSprite extends Sprite {
                 
                 if (typeof frame === 'number') {
                     // Grid-based calculation
-                    if (this.texture.width > 0 && this.frameWidth > 0) {
-                        const cols = Math.floor(this.texture.width / this.frameWidth);
+                    const dims = this.renderer?._textureDimensions?.get(this.texture);
+                    const texWidth = dims ? dims.width : 0;
+                    if (texWidth > 0 && this.frameWidth > 0) {
+                        const cols = Math.floor(texWidth / this.frameWidth);
                         const col = frame % cols;
                         const row = Math.floor(frame / cols);
                         
@@ -255,8 +257,11 @@ export default class AnimatedSprite extends Sprite {
                      srcW = this.frameWidth;
                      srcH = this.frameHeight;
                  } else {
-                     srcW = this.texture.width;
-                     srcH = this.texture.height;
+                     const dims = this.renderer?._textureDimensions?.get(this.texture);
+                     if (dims) {
+                         srcW = dims.width;
+                         srcH = dims.height;
+                     }
                  }
             }
 

@@ -25,6 +25,9 @@ export default class Renderer {
    */
   constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
     this.canvas = document.getElementById(canvasId);
+    if (!this.canvas) {
+      throw new Error(`Canvas element with id "${canvasId}" not found`);
+    }
 
     /** @type {any} */
     const cfg = (options && typeof options === 'object') ? options : {};
@@ -106,6 +109,8 @@ export default class Renderer {
     // Texture cache entries: cacheKey -> { texture, refCount, bytes, lastUsedFrame }
     this.textureCache = new Map();
     this._textureToCacheKey = new WeakMap();
+    // Store texture dimensions (WebGLTexture doesn't have width/height properties)
+    this._textureDimensions = new WeakMap();
     this._frameId = 0;
     this._cacheLimits = {
       maxTextures: Infinity,
@@ -133,12 +138,13 @@ export default class Renderer {
     this.resizeCanvas();
     
     // Debounce resize events for better performance
-    this.resizeTimeout = null;
-    window.addEventListener("resize", () => {
-      if (this.resizeTimeout) {
-        cancelAnimationFrame(this.resizeTimeout);
+    this._resizeAnimationFrame = null;
+    this._resizeHandler = () => {
+      if (this._resizeAnimationFrame) {
+        cancelAnimationFrame(this._resizeAnimationFrame);
       }
-      this.resizeTimeout = requestAnimationFrame(() => {
+      this._resizeAnimationFrame = requestAnimationFrame(() => {
+        this._resizeAnimationFrame = null;
         this.resizeCanvas();
 
         // Keep post-processing buffers in sync with the canvas size
@@ -146,23 +152,36 @@ export default class Renderer {
             this.postProcessing.resize(this.canvas.width, this.canvas.height);
         }
       });
-    });
+    };
+    window.addEventListener("resize", this._resizeHandler);
 
     this.canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
-      alert('WebGL context lost! Please wait...');
+      console.warn('WebGL context lost! Attempting to restore...');
+      this.isReady = false;
+      // Don't alert - just log, as context restoration is usually automatic
     });
 
-    this.canvas.addEventListener('webglcontextrestored', () => {
+    this.canvas.addEventListener('webglcontextrestored', async () => {
+      console.log('WebGL context restored! Reinitializing...');
       // Some browsers restore the same context object. Re-acquire defensively.
       if (!this.gl) {
         const restored = this._createGLContext(this.requestedWebGLVersion, this.allowWebGLFallback, this.contextAttributes);
+        if (!restored.gl) {
+          console.error('Failed to restore WebGL context');
+          return;
+        }
         this.gl = restored.gl;
         this.isWebGL2 = restored.isWebGL2;
         this.webglContextName = restored.contextName;
       }
-      this.initGL();
-      alert('WebGL context restored!');
+      try {
+        await this.initGL();
+        this.isReady = true;
+        console.log('WebGL context successfully restored');
+      } catch (error) {
+        console.error('Failed to reinitialize WebGL after context restore:', error);
+      }
     });
 
     // Initialize shaders asynchronously and store the promise
@@ -628,10 +647,13 @@ export default class Renderer {
     }
 
     // Check if we need to resize the texture
-    // We can store the current size on the texture object or in the class
-    if (this.mainScreenTexture.width !== desiredWidth || this.mainScreenTexture.height !== desiredHeight) {
-      this.mainScreenTexture.width = desiredWidth;
-      this.mainScreenTexture.height = desiredHeight;
+    // Store dimensions separately (WebGLTexture doesn't have width/height properties)
+    const currentDims = this._textureDimensions.get(this.mainScreenTexture);
+    const currentWidth = currentDims ? currentDims.width : 0;
+    const currentHeight = currentDims ? currentDims.height : 0;
+    
+    if (currentWidth !== desiredWidth || currentHeight !== desiredHeight) {
+      this._textureDimensions.set(this.mainScreenTexture, { width: desiredWidth, height: desiredHeight });
 
       gl.bindTexture(gl.TEXTURE_2D, this.mainScreenTexture);
 
@@ -749,8 +771,10 @@ export default class Renderer {
     if (!this.mainScreenTexture) return;
 
     const gl = this.gl;
-    const w = this.mainScreenTexture.width | 0;
-    const h = this.mainScreenTexture.height | 0;
+    const dims = this._textureDimensions.get(this.mainScreenTexture);
+    if (!dims) return;
+    const w = dims.width | 0;
+    const h = dims.height | 0;
     if (w <= 0 || h <= 0) return;
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.mainScreenMsaaFramebuffer);
@@ -1113,8 +1137,8 @@ export default class Renderer {
     }
 
     const texture = this.gl.createTexture();
-    texture.width = image.width;
-    texture.height = image.height;
+    // Store texture dimensions (WebGLTexture doesn't have width/height properties)
+    this._textureDimensions.set(texture, { width: image.width, height: image.height });
 
     this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
     this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
@@ -1156,7 +1180,8 @@ export default class Renderer {
     
     // Cache texture if key provided
     if (cacheKey) {
-      const bytes = this._estimateTextureBytes(texture.width, texture.height);
+      const dims = this._textureDimensions.get(texture);
+      const bytes = this._estimateTextureBytes(dims ? dims.width : 0, dims ? dims.height : 0);
       this._setCacheEntry(cacheKey, texture, bytes);
       this._evictIfNeeded();
     }
@@ -1250,7 +1275,10 @@ export default class Renderer {
 
       // Pass the main screen texture to the post-processing system
       // The output goes to the default framebuffer (null)
-      this.postProcessing.render(this.mainScreenTexture, null);
+      const dims = this._textureDimensions.get(this.mainScreenTexture);
+      if (dims && dims.width > 0 && dims.height > 0) {
+        this.postProcessing.render(this.mainScreenTexture, null);
+      }
     }
   }
 
@@ -1548,8 +1576,9 @@ export default class Renderer {
     } 
     // Case 2: drawQuad(tex, x, y, w, h, srcX, srcY, srcW, srcH, [color])
     else if (typeof srcX === 'number') {
-        const texW = texture.width || 1;
-        const texH = texture.height || 1;
+        const dims = this._textureDimensions.get(texture);
+        const texW = dims ? dims.width : 1;
+        const texH = dims ? dims.height : 1;
         
         // If srcWidth/Height are 0 (or missing), use full texture dimensions
         const sX = srcX || 0;
@@ -1572,10 +1601,11 @@ export default class Renderer {
         this.currentTexture = texture;
     }
 
-    const r = finalColor[0] / 255;
-    const g = finalColor[1] / 255;
-    const b = finalColor[2] / 255;
-    const a = finalColor[3] / 255;
+    // Normalize color once (optimization: avoid repeated division)
+    const r = finalColor[0] * 0.00392156862745098; // 1/255
+    const g = finalColor[1] * 0.00392156862745098;
+    const b = finalColor[2] * 0.00392156862745098;
+    const a = finalColor[3] * 0.00392156862745098;
 
     // WebGL2 instanced path: one instance per sprite (no per-vertex expansion)
     if (this._isInstancingEnabled()) {

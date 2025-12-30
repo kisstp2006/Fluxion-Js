@@ -308,9 +308,10 @@ export default class Engine {
         const cappedDeltaTime = Math.min(deltaTime, 0.1);
 
         // Automatic scene audio management
-        if (this.game.currentScene && this.game.currentScene !== this.previousScene) {
+        const currentScene = this.game.currentScene;
+        if (currentScene && currentScene !== this.previousScene) {
             // Stop audio from previous scene
-            if (this.previousScene && this.previousScene.stopAudio) {
+            if (this.previousScene && typeof this.previousScene.stopAudio === 'function') {
                 this.previousScene.stopAudio();
             }
             // Optional: dispose previous scene resources (textures, etc.)
@@ -318,10 +319,10 @@ export default class Engine {
                 this.previousScene.dispose();
             }
             // Play audio for new scene
-            if (this.game.currentScene.playAutoplayAudio) {
-                this.game.currentScene.playAutoplayAudio();
+            if (typeof currentScene.playAutoplayAudio === 'function') {
+                currentScene.playAutoplayAudio();
             }
-            this.previousScene = this.game.currentScene;
+            this.previousScene = currentScene;
         }
         
         // Update the game logic
