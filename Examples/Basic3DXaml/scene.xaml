@@ -1,4 +1,7 @@
 <Scene name="Basic3DXaml">
+    <!-- Skybox - solid color for a simple background -->
+    <Skybox color="0.2, 0.3, 0.5" />
+
     <!-- 2D camera (optional, but consistent with other scenes) -->
     <Camera name="MainCamera"
             x="0"

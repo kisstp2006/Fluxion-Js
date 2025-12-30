@@ -59,6 +59,12 @@ export default class Renderer {
     this.program3D = null;
     this._program3DAttribs = null;
     this._program3DUniforms = null;
+    
+    // Skybox support
+    this.skyboxProgram = null;
+    this._skyboxAttribs = null;
+    this._skyboxUniforms = null;
+    this.currentSkybox = null;
 
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
@@ -913,6 +919,29 @@ export default class Renderer {
       } catch {
         this.program3D = null;
       }
+      
+      // Skybox shader program
+      try {
+        const vsSky = await this.loadShaderFile(skyboxVertexShaderPath);
+        const fsSky = await this.loadShaderFile(skyboxFragmentShaderPath);
+        const vsSkyShader = this.createShader(this.gl.VERTEX_SHADER, vsSky);
+        const fsSkyShader = this.createShader(this.gl.FRAGMENT_SHADER, fsSky);
+        if (vsSkyShader && fsSkyShader) {
+          this.skyboxProgram = this.createProgram(vsSkyShader, fsSkyShader);
+          if (this.skyboxProgram) {
+            this._skyboxAttribs = {
+              position: this.gl.getAttribLocation(this.skyboxProgram, 'a_position'),
+            };
+            this._skyboxUniforms = {
+              viewProj: this.gl.getUniformLocation(this.skyboxProgram, 'u_viewProj'),
+              skybox: this.gl.getUniformLocation(this.skyboxProgram, 'u_skybox'),
+            };
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to load skybox shaders:', e);
+        this.skyboxProgram = null;
+      }
     }
 
     this.gl.useProgram(this.program);
@@ -1318,6 +1347,11 @@ export default class Renderer {
       : 1;
     cam.setPerspective(cam.fovY, aspect, cam.near, cam.far);
 
+    // Render skybox first (if available) - before depth testing
+    if (this.currentSkybox && this.currentSkybox.isLoaded() && this.skyboxProgram) {
+      this._renderSkybox(cam);
+    }
+
     gl.useProgram(this.program3D);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -1332,6 +1366,88 @@ export default class Renderer {
 
     this._in3DPass = true;
     return true;
+  }
+
+  /**
+   * Renders the skybox.
+   * @private
+   */
+  _renderSkybox(camera3D) {
+    if (!this.skyboxProgram || !this.currentSkybox || !this.currentSkybox.isLoaded()) return;
+    
+    const gl = this.gl;
+    const skybox = this.currentSkybox;
+    
+    // Save current state
+    const prevDepthFunc = gl.getParameter(gl.DEPTH_FUNC);
+    const prevDepthMask = gl.getParameter(gl.DEPTH_WRITEMASK);
+    
+    // Setup skybox rendering state
+    gl.useProgram(this.skyboxProgram);
+    gl.depthFunc(gl.LEQUAL); // Draw at far plane
+    gl.depthMask(false); // Don't write to depth buffer
+    gl.disable(gl.BLEND);
+    
+    // Get view matrix without translation (skybox always centered)
+    const viewMatrix = camera3D.getViewMatrix();
+    // Remove translation from view matrix
+    const viewNoTranslation = new Float32Array(viewMatrix);
+    viewNoTranslation[12] = 0;
+    viewNoTranslation[13] = 0;
+    viewNoTranslation[14] = 0;
+    
+    // Combine with projection
+    const projMatrix = camera3D.getProjectionMatrix();
+    const viewProj = Mat4.multiply(projMatrix, viewNoTranslation);
+    
+    // Set uniforms
+    if (this._skyboxUniforms?.viewProj) {
+      gl.uniformMatrix4fv(this._skyboxUniforms.viewProj, false, viewProj);
+    }
+    
+    // Bind cubemap texture
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, skybox.cubemapTexture);
+    if (this._skyboxUniforms?.skybox) {
+      gl.uniform1i(this._skyboxUniforms.skybox, 0);
+    }
+    
+    // Draw skybox mesh
+    const mesh = skybox._mesh;
+    if (mesh && mesh.vbo) {
+      // Manually set up attributes for skybox (only position, no color)
+      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
+      if (mesh.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
+      
+      const stride = 7 * 4; // position(3) + color(4) - mesh has color but we ignore it
+      gl.enableVertexAttribArray(this._skyboxAttribs.position);
+      gl.vertexAttribPointer(this._skyboxAttribs.position, 3, gl.FLOAT, false, stride, 0);
+      
+      // Disable color attribute if it was enabled
+      const colorLoc = this._program3DAttribs?.color;
+      if (colorLoc !== undefined && colorLoc >= 0) {
+        gl.disableVertexAttribArray(colorLoc);
+      }
+      
+      // Draw
+      if (mesh.ibo && mesh.indices) {
+        gl.drawElements(gl.TRIANGLES, mesh.indexCount, mesh.indexType, 0);
+      } else {
+        gl.drawArrays(gl.TRIANGLES, 0, mesh.vertexCount);
+      }
+    }
+    
+    // Restore state
+    gl.depthFunc(prevDepthFunc);
+    gl.depthMask(prevDepthMask);
+  }
+
+  /**
+   * Sets the skybox for 3D rendering.
+   * @param {import('./Skybox.js').default|null} skybox - The skybox instance, or null to disable.
+   */
+  setSkybox(skybox) {
+    this.currentSkybox = skybox;
   }
 
   /**

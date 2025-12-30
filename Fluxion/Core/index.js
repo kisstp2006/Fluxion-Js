@@ -38,6 +38,7 @@ export { default as Mesh } from './Mesh.js';
 export { default as MeshNode } from './MeshNode.js';
 export { Vector3, Mat4 } from './Math3D.js';
 export { default as Material } from './Material.js';
+export { default as Skybox } from './Skybox.js';
 
 // Text Rendering
 export { default as Text } from './Text.js';

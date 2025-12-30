@@ -8,6 +8,7 @@ import ClickableArea from './ClickableArea.js';
 import Text from './Text.js';
 import MeshNode from './MeshNode.js';
 import Material from './Material.js';
+import Skybox from './Skybox.js';
 
 /**
  * Utility class for loading scenes from XML files.
@@ -113,9 +114,19 @@ export default class SceneLoader {
                 }
             }
 
-            // Pass 2: parse objects (including <Camera3D> and <MeshNode>)
+            // Pass 2: parse objects (including <Camera3D>, <MeshNode>, and <Skybox>)
             for (const child of children) {
                 if (child.tagName === 'Mesh') continue;
+                if (child.tagName === 'Material') continue;
+
+                // Handle Skybox separately (needs renderer reference)
+                if (child.tagName === 'Skybox') {
+                    const skybox = await this.parseSkybox(child, renderer, url);
+                    if (skybox && renderer) {
+                        renderer.setSkybox(skybox);
+                    }
+                    continue;
+                }
 
                 const obj = await this.parseObject(child, renderer);
                 if (!obj) continue;
@@ -544,5 +555,79 @@ export default class SceneLoader {
         }
 
         return obj;
+    }
+
+    /**
+     * Parses a Skybox element from XAML.
+     * Supports:
+     * - Solid color: <Skybox color="#RRGGBB" /> or <Skybox color="r,g,b" />
+     * - Cubemap: <Skybox right="..." left="..." top="..." bottom="..." front="..." back="..." />
+     * - Equirectangular: <Skybox source="..." equirectangular="true" />
+     * @param {Element} node - The XML element.
+     * @param {Object} renderer - The renderer instance.
+     * @param {string} baseUrl - Base URL for resolving relative paths.
+     * @returns {Promise<Skybox|null>} The parsed skybox, or null if invalid.
+     */
+    static async parseSkybox(node, renderer, baseUrl) {
+        if (!renderer || !renderer.gl) {
+            console.warn('Skybox requires a renderer with WebGL context');
+            return null;
+        }
+
+        const getString = (name, def = "") => node.getAttribute(name) || def;
+        const getBool = (name, def = false) => node.getAttribute(name) === "true";
+
+        // Check for solid color
+        const colorAttr = getString("color");
+        if (colorAttr) {
+            const color = this._parseColor(colorAttr);
+            return new Skybox(renderer.gl, color);
+        }
+
+        // Check for equirectangular
+        const isEquirectangular = getBool("equirectangular", false);
+        const source = getString("source");
+        if (source) {
+            // Resolve relative to scene URL
+            let base;
+            try {
+                base = new URL('.', baseUrl).toString();
+            } catch (e) {
+                base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+            }
+            const sourceUrl = new URL(source, base).toString();
+            return new Skybox(renderer.gl, sourceUrl, isEquirectangular);
+        }
+
+        // Check for cubemap (6 separate face images)
+        const right = getString("right");
+        const left = getString("left");
+        const top = getString("top");
+        const bottom = getString("bottom");
+        const front = getString("front");
+        const back = getString("back");
+
+        if (right && left && top && bottom && front && back) {
+            // Resolve relative to scene URL
+            let base;
+            try {
+                base = new URL('.', baseUrl).toString();
+            } catch (e) {
+                base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+            }
+
+            const faces = [right, left, top, bottom, front, back].map(face => {
+                try {
+                    return new URL(face, base).toString();
+                } catch (e) {
+                    return face; // Return as-is if URL parsing fails
+                }
+            });
+
+            return new Skybox(renderer.gl, faces);
+        }
+
+        console.warn('Skybox element missing required attributes. Use color, source, or all 6 face attributes (right, left, top, bottom, front, back).');
+        return null;
     }
 }
