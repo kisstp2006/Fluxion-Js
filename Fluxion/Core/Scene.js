@@ -19,6 +19,8 @@ export default class Scene {
         /** @type {Map<string, any>} */
         this.materialDefinitions = new Map();
         this.audio = [];
+        /** @type {any[]} */
+        this.lights = [];
         this.disposeOnSceneChange = false;
         this._disposed = false;
     }
@@ -80,6 +82,24 @@ export default class Scene {
     }
 
     /**
+     * Adds a light to the scene (used by the PBR renderer).
+     * @param {any} light
+     */
+    addLight(light) {
+        if (!light) return;
+        this.lights.push(light);
+    }
+
+    /**
+     * Removes a light from the scene.
+     * @param {any} light
+     */
+    removeLight(light) {
+        const idx = this.lights.indexOf(light);
+        if (idx >= 0) this.lights.splice(idx, 1);
+    }
+
+    /**
      * Sets the camera for the scene.
      * @param {Camera} camera - The camera object.
      */
@@ -100,6 +120,10 @@ export default class Scene {
     getObjectByName(name) {
         if (this.camera && this.camera.name === name) return this.camera;
         if (this.camera3D && this.camera3D.name === name) return this.camera3D;
+
+        for (const l of this.lights) {
+            if (l && l.name === name) return l;
+        }
         
         const findRecursive = (objects) => {
             for (const obj of objects) {
@@ -221,6 +245,10 @@ export default class Scene {
 
         // 3D base pass
         if (this._sorted3DObjects && this._sorted3DObjects.length > 0) {
+            // Push scene lights into the renderer before beginning the 3D pass.
+            if (renderer?.setLights) {
+                renderer.setLights(this.lights);
+            }
             if (renderer?.begin3D?.(this.camera3D)) {
                 for (const obj of this._sorted3DObjects) {
                     if (typeof obj.draw3D === 'function') {
@@ -263,6 +291,7 @@ export default class Scene {
         // Clear references.
         this.objects.length = 0;
         this.audio.length = 0;
+        this.lights.length = 0;
         this._sortedObjects = null;
         this._sorted3DObjects = null;
         this._objectsDirty = true;

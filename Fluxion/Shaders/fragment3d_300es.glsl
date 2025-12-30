@@ -5,10 +5,20 @@ in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in vec2 v_uv;
 
-// Lighting (minimal default: one directional + ambient)
 uniform vec3 u_cameraPos;
-uniform vec3 u_lightDirection; // direction the light rays travel (world space)
-uniform vec3 u_lightColor;     // linear RGB
+
+// Real-time lights (accumulated)
+// Light types:
+// 0 = Directional (sun-like)
+// 1 = Point (inverse-square attenuation)
+// 2 = Spot (inverse-square + cone falloff)
+#define MAX_LIGHTS 8
+uniform int u_lightCount;
+uniform vec4 u_lightPosType[MAX_LIGHTS];        // xyz = position (point/spot), w = type
+uniform vec4 u_lightDirInner[MAX_LIGHTS];       // xyz = direction rays travel (dir/spot), w = innerCos (spot)
+uniform vec4 u_lightColorIntensity[MAX_LIGHTS]; // rgb = linear color, w = intensity scalar
+uniform vec4 u_lightParams[MAX_LIGHTS];         // x = range (0=infinite), y = outerCos (spot), z/w unused
+
 uniform vec3 u_ambientColor;   // linear RGB (indirect only)
 
 // Metallic–roughness material inputs
@@ -125,34 +135,80 @@ void main() {
   mat3 TBN = computeTBN(N, v_worldPos, v_uv);
   N = normalize(TBN * nTex);
 
-  // --- Lighting vectors ---
   vec3 V = normalize(u_cameraPos - v_worldPos);
-  vec3 L = normalize(-u_lightDirection);
-  vec3 H = normalize(V + L);
-
-  float NdotL = max(dot(N, L), 0.0);
   float NdotV = max(dot(N, V), 0.0);
-  float NdotH = max(dot(N, H), 0.0);
-  float VdotH = max(dot(V, H), 0.0);
 
-  // --- Cook–Torrance BRDF (energy-conserving) ---
+  // --- Cook–Torrance BRDF inputs ---
   vec3 F0 = mix(vec3(0.04), baseColor, metallic);
-  vec3 F = F_Schlick(VdotH, F0);
-  float D = D_GGX(NdotH, roughness);
-  float G = G_Smith(NdotV, NdotL, roughness);
 
-  vec3 numerator = D * G * F;
-  float denom = max(4.0 * NdotV * NdotL, 1e-4);
-  vec3 specular = numerator / denom;
+  vec3 Lo = vec3(0.0);
 
-  // kS = specular energy, kD = diffuse energy (metals have no diffuse)
-  vec3 kS = F;
-  vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+  for (int i = 0; i < MAX_LIGHTS; i++) {
+    if (i >= u_lightCount) break;
 
-  vec3 diffuse = (kD * baseColor) / PI;
+    vec4 posType = u_lightPosType[i];
+    int type = int(posType.w + 0.5);
 
-  vec3 radiance = u_lightColor;
-  vec3 Lo = (diffuse + specular) * radiance * NdotL;
+    vec3 radiance = u_lightColorIntensity[i].rgb * u_lightColorIntensity[i].a;
+
+    vec3 L = vec3(0.0);
+    float attenuation = 1.0;
+
+    if (type == 0) {
+      // Directional: direction is direction rays travel; L is from surface to light
+      vec3 dir = normalize(u_lightDirInner[i].xyz);
+      L = normalize(-dir);
+    } else {
+      // Point/Spot: position is light position
+      vec3 toLight = posType.xyz - v_worldPos;
+      float distSq = max(dot(toLight, toLight), 1e-4);
+      float dist = sqrt(distSq);
+      L = toLight / dist;
+
+      // Inverse-square attenuation (physically-inspired)
+      attenuation = 1.0 / distSq;
+
+      // Optional soft range cutoff
+      float range = u_lightParams[i].x;
+      if (range > 0.0) {
+        float f = clamp(1.0 - (dist / range), 0.0, 1.0);
+        attenuation *= f * f;
+      }
+
+      if (type == 2) {
+        // Spot: cone falloff
+        vec3 dir = normalize(u_lightDirInner[i].xyz); // rays travel direction
+        float innerCos = u_lightDirInner[i].w;
+        float outerCos = u_lightParams[i].y;
+        vec3 lightToFrag = normalize(v_worldPos - posType.xyz);
+        float cosTheta = dot(dir, lightToFrag);
+        float spot = smoothstep(outerCos, innerCos, cosTheta);
+        attenuation *= spot;
+      }
+    }
+
+    float NdotL = max(dot(N, L), 0.0);
+    if (NdotL <= 0.0) continue;
+
+    vec3 H = normalize(V + L);
+    float NdotH = max(dot(N, H), 0.0);
+    float VdotH = max(dot(V, H), 0.0);
+
+    vec3 F = F_Schlick(VdotH, F0);
+    float D = D_GGX(NdotH, roughness);
+    float G = G_Smith(NdotV, NdotL, roughness);
+
+    vec3 numerator = D * G * F;
+    float denom = max(4.0 * NdotV * NdotL, 1e-4);
+    vec3 specular = numerator / denom;
+
+    // kS = specular energy, kD = diffuse energy (metals have no diffuse)
+    vec3 kS = F;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+    vec3 diffuse = (kD * baseColor) / PI;
+
+    Lo += (diffuse + specular) * radiance * NdotL * attenuation;
+  }
 
   // Indirect lighting (simple ambient term; AO affects indirect only)
   vec3 ambient = u_ambientColor * baseColor * (1.0 - metallic) * ao;

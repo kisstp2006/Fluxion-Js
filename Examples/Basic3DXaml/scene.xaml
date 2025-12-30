@@ -2,6 +2,28 @@
     <!-- Skybox - solid color for a simple background -->
     <Skybox color="0.2, 0.3, 0.5" />
 
+    <!-- Real-time lights (PBR) -->
+    <!-- Direction is the direction light rays travel -->
+    <DirectionalLight name="Sun"
+                      direction="0.35, -1.0, 0.25"
+                      color="#ffffff"
+                      intensity="1.2" />
+    <!-- Warm point light near the scene -->
+    <PointLight name="Lamp"
+                x="2.5" y="1.5" z="-2.5"
+                color="#ffd2a6"
+                intensity="120"
+                range="20" />
+    <!-- Optional spotlight for extra highlights -->
+    <SpotLight name="Spot"
+               x="-2.5" y="2.0" z="0.0"
+               direction="0.35, -0.8, -0.45"
+               color="#a6c8ff"
+               intensity="180"
+               range="25"
+               innerAngleDeg="14"
+               outerAngleDeg="24" />
+
     <!-- 2D camera (optional, but consistent with other scenes) -->
     <Camera name="MainCamera"
             x="0"

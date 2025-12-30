@@ -9,6 +9,7 @@ import Text from './Text.js';
 import MeshNode from './MeshNode.js';
 import Material from './Material.js';
 import Skybox from './Skybox.js';
+import { DirectionalLight, PointLight, SpotLight } from './Lights.js';
 
 /**
  * Utility class for loading scenes from XML files.
@@ -197,6 +198,11 @@ export default class SceneLoader {
                 }
                 if (obj instanceof Audio) {
                     scene.addAudio(obj);
+                    continue;
+                }
+                // Lights are stored separately from drawable scene objects
+                if (obj && obj.isLight) {
+                    scene.addLight(obj);
                     continue;
                 }
 
@@ -563,6 +569,95 @@ export default class SceneLoader {
             }
 
             obj = n;
+        }
+
+        else if (tagName === "DirectionalLight") {
+            const name = getString("name", "DirectionalLight");
+            const intensity = getFloatAny(["intensity"], 1.0);
+            const colorAttr = getString("color", "#ffffff");
+            const c = this._parseColor(colorAttr);
+
+            // direction="x,y,z" or dirX/dirY/dirZ
+            const dirStr = node.getAttribute("direction");
+            let dir = null;
+            if (dirStr && dirStr.includes(",")) {
+                const parts = dirStr.split(",").map(s => parseFloat(s.trim())).filter(v => !Number.isNaN(v));
+                if (parts.length >= 3) dir = [parts[0], parts[1], parts[2]];
+            }
+            if (!dir) {
+                const dx = getFloatAny(["dirX", "directionX", "dx"], 0.5);
+                const dy = getFloatAny(["dirY", "directionY", "dy"], -1.0);
+                const dz = getFloatAny(["dirZ", "directionZ", "dz"], 0.3);
+                dir = [dx, dy, dz];
+            }
+
+            const light = new DirectionalLight({
+                name,
+                direction: dir,
+                color: [c[0], c[1], c[2]],
+                intensity,
+            });
+            obj = light;
+        }
+
+        else if (tagName === "PointLight") {
+            const name = getString("name", "PointLight");
+            const intensity = getFloatAny(["intensity"], 50.0);
+            const range = getFloatAny(["range"], 0.0);
+            const colorAttr = getString("color", "#ffffff");
+            const c = this._parseColor(colorAttr);
+
+            const px = getFloatAny(["x", "posX"], 0.0);
+            const py = getFloatAny(["y", "posY"], 2.0);
+            const pz = getFloatAny(["z", "posZ"], 0.0);
+
+            const light = new PointLight({
+                name,
+                position: [px, py, pz],
+                color: [c[0], c[1], c[2]],
+                intensity,
+                range,
+            });
+            obj = light;
+        }
+
+        else if (tagName === "SpotLight") {
+            const name = getString("name", "SpotLight");
+            const intensity = getFloatAny(["intensity"], 80.0);
+            const range = getFloatAny(["range"], 0.0);
+            const innerAngleDeg = getFloatAny(["innerAngle", "innerAngleDeg"], 18.0);
+            const outerAngleDeg = getFloatAny(["outerAngle", "outerAngleDeg"], 28.0);
+            const colorAttr = getString("color", "#ffffff");
+            const c = this._parseColor(colorAttr);
+
+            const px = getFloatAny(["x", "posX"], 0.0);
+            const py = getFloatAny(["y", "posY"], 2.0);
+            const pz = getFloatAny(["z", "posZ"], 0.0);
+
+            const dirStr = node.getAttribute("direction");
+            let dir = null;
+            if (dirStr && dirStr.includes(",")) {
+                const parts = dirStr.split(",").map(s => parseFloat(s.trim())).filter(v => !Number.isNaN(v));
+                if (parts.length >= 3) dir = [parts[0], parts[1], parts[2]];
+            }
+            if (!dir) {
+                const dx = getFloatAny(["dirX", "directionX", "dx"], 0.0);
+                const dy = getFloatAny(["dirY", "directionY", "dy"], -1.0);
+                const dz = getFloatAny(["dirZ", "directionZ", "dz"], 0.0);
+                dir = [dx, dy, dz];
+            }
+
+            const light = new SpotLight({
+                name,
+                position: [px, py, pz],
+                direction: dir,
+                color: [c[0], c[1], c[2]],
+                intensity,
+                range,
+                innerAngleDeg,
+                outerAngleDeg,
+            });
+            obj = light;
         }
 
         // Common properties

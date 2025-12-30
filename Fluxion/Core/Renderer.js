@@ -2,6 +2,7 @@ import PostProcessing from './PostProcessing.js';
 import Camera3D from './Camera3D.js';
 import { Mat4 } from './Math3D.js';
 import DebugRenderer from './DebugRenderer.js';
+import { LightType } from './Lights.js';
 
 /**
  * Handles WebGL rendering, including shader management, resizing, and post-processing.
@@ -67,15 +68,26 @@ export default class Renderer {
     this.currentSkybox = null;
 
     // PBR lighting defaults (can be overridden by game code)
-    // Direction is the direction the light rays travel (world space).
+    // Direction is the direction light rays travel (world space).
     this.pbrLightDirection = [0.5, -1.0, 0.3];
     this.pbrLightColor = [1.0, 1.0, 1.0];
     this.pbrAmbientColor = [0.03, 0.03, 0.03];
+
+    // Real-time lights (PBR): use fixed-size uniform arrays for speed.
+    this.maxPbrLights = 8;
+    /** @type {any[]} */
+    this.lights = [];
 
     // Scratch buffers to avoid per-draw allocations
     this._tmpInvModel = new Float32Array(16);
     this._tmpInvModelT = new Float32Array(16);
     this._normalMatrix3 = new Float32Array(9);
+
+    // Scratch arrays for uploading light uniforms
+    this._lightPosTypeData = null;
+    this._lightDirInnerData = null;
+    this._lightColorIntensityData = null;
+    this._lightParamsData = null;
 
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
@@ -936,8 +948,12 @@ export default class Renderer {
               normalMatrix: this.gl.getUniformLocation(this.program3D, 'u_normalMatrix'),
 
               cameraPos: this.gl.getUniformLocation(this.program3D, 'u_cameraPos'),
-              lightDirection: this.gl.getUniformLocation(this.program3D, 'u_lightDirection'),
-              lightColor: this.gl.getUniformLocation(this.program3D, 'u_lightColor'),
+              // Light arrays
+              lightCount: this.gl.getUniformLocation(this.program3D, 'u_lightCount'),
+              lightPosType: this.gl.getUniformLocation(this.program3D, 'u_lightPosType[0]'),
+              lightDirInner: this.gl.getUniformLocation(this.program3D, 'u_lightDirInner[0]'),
+              lightColorIntensity: this.gl.getUniformLocation(this.program3D, 'u_lightColorIntensity[0]'),
+              lightParams: this.gl.getUniformLocation(this.program3D, 'u_lightParams[0]'),
               ambientColor: this.gl.getUniformLocation(this.program3D, 'u_ambientColor'),
 
               baseColorFactor: this.gl.getUniformLocation(this.program3D, 'u_baseColorFactor'),
@@ -1450,22 +1466,136 @@ export default class Renderer {
     const u = this._program3DUniforms;
     if (u?.cameraPos) gl.uniform3f(u.cameraPos, cam.position.x, cam.position.y, cam.position.z);
 
-    // Normalize light direction defensively
-    const ld = this.pbrLightDirection || [0.5, -1.0, 0.3];
-    const lx = Number(ld[0] ?? 0.5);
-    const ly = Number(ld[1] ?? -1.0);
-    const lz = Number(ld[2] ?? 0.3);
-    const llen = Math.hypot(lx, ly, lz) || 1;
-    if (u?.lightDirection) gl.uniform3f(u.lightDirection, lx / llen, ly / llen, lz / llen);
-
-    const lc = this.pbrLightColor || [1, 1, 1];
-    if (u?.lightColor) gl.uniform3f(u.lightColor, Number(lc[0] ?? 1), Number(lc[1] ?? 1), Number(lc[2] ?? 1));
-
     const ac = this.pbrAmbientColor || [0.03, 0.03, 0.03];
     if (u?.ambientColor) gl.uniform3f(u.ambientColor, Number(ac[0] ?? 0.03), Number(ac[1] ?? 0.03), Number(ac[2] ?? 0.03));
 
+    // Upload real-time lights (directional/point/spot)
+    this._uploadPbrLights();
+
     this._in3DPass = true;
     return true;
+  }
+
+  /**
+   * Set active PBR lights for subsequent 3D draws.
+   * @param {any[] | null | undefined} lights
+   */
+  setLights(lights) {
+    if (!Array.isArray(lights)) {
+      this.lights = [];
+      return;
+    }
+    this.lights = lights;
+  }
+
+  _uploadPbrLights() {
+    const u = this._program3DUniforms;
+    if (!u) return;
+
+    const max = Math.max(1, this.maxPbrLights | 0);
+    const total = max * 4;
+
+    if (!this._lightPosTypeData || this._lightPosTypeData.length !== total) this._lightPosTypeData = new Float32Array(total);
+    if (!this._lightDirInnerData || this._lightDirInnerData.length !== total) this._lightDirInnerData = new Float32Array(total);
+    if (!this._lightColorIntensityData || this._lightColorIntensityData.length !== total) this._lightColorIntensityData = new Float32Array(total);
+    if (!this._lightParamsData || this._lightParamsData.length !== total) this._lightParamsData = new Float32Array(total);
+
+    const posType = this._lightPosTypeData;
+    const dirInner = this._lightDirInnerData;
+    const colInt = this._lightColorIntensityData;
+    const params = this._lightParamsData;
+
+    posType.fill(0);
+    dirInner.fill(0);
+    colInt.fill(0);
+    params.fill(0);
+
+    // If the scene did not set any lights, use a default sun light.
+    const activeLights = (this.lights && this.lights.length > 0)
+      ? this.lights
+      : [{
+          type: LightType.Directional,
+          direction: this.pbrLightDirection,
+          color: this.pbrLightColor,
+          intensity: 1.0,
+        }];
+
+    let count = 0;
+    for (let i = 0; i < activeLights.length && count < max; i++) {
+      const L = activeLights[i];
+      if (!L) continue;
+
+      const type = (typeof L.type === 'number')
+        ? (L.type | 0)
+        : (String(L.type || '').toLowerCase() === 'point')
+          ? LightType.Point
+          : (String(L.type || '').toLowerCase() === 'spot')
+            ? LightType.Spot
+            : LightType.Directional;
+
+      const base = count * 4;
+
+      // Color + intensity (linear)
+      const c = Array.isArray(L.color) ? L.color : [1, 1, 1];
+      colInt[base + 0] = Number(c[0] ?? 1);
+      colInt[base + 1] = Number(c[1] ?? 1);
+      colInt[base + 2] = Number(c[2] ?? 1);
+      colInt[base + 3] = Number.isFinite(L.intensity) ? L.intensity : 1.0;
+
+      // Common params
+      params[base + 0] = Number.isFinite(L.range) ? L.range : 0.0; // range
+
+      if (type === LightType.Directional) {
+        const d = Array.isArray(L.direction) ? L.direction : this.pbrLightDirection;
+        const dx = Number(d[0] ?? 0.5), dy = Number(d[1] ?? -1.0), dz = Number(d[2] ?? 0.3);
+        const len = Math.hypot(dx, dy, dz) || 1;
+        dirInner[base + 0] = dx / len;
+        dirInner[base + 1] = dy / len;
+        dirInner[base + 2] = dz / len;
+        dirInner[base + 3] = 1.0;
+        posType[base + 3] = LightType.Directional;
+      } else {
+        const p = Array.isArray(L.position) ? L.position : [0, 0, 0];
+        posType[base + 0] = Number(p[0] ?? 0);
+        posType[base + 1] = Number(p[1] ?? 0);
+        posType[base + 2] = Number(p[2] ?? 0);
+        posType[base + 3] = type;
+
+        if (type === LightType.Spot) {
+          const d = Array.isArray(L.direction) ? L.direction : [0, -1, 0];
+          const dx = Number(d[0] ?? 0), dy = Number(d[1] ?? -1), dz = Number(d[2] ?? 0);
+          const len = Math.hypot(dx, dy, dz) || 1;
+          dirInner[base + 0] = dx / len;
+          dirInner[base + 1] = dy / len;
+          dirInner[base + 2] = dz / len;
+
+          const innerCos = Number.isFinite(L.innerCos)
+            ? L.innerCos
+            : Number.isFinite(L.innerAngleDeg)
+              ? Math.cos((L.innerAngleDeg * Math.PI) / 180)
+              : 0.95;
+          const outerCos = Number.isFinite(L.outerCos)
+            ? L.outerCos
+            : Number.isFinite(L.outerAngleDeg)
+              ? Math.cos((L.outerAngleDeg * Math.PI) / 180)
+              : 0.85;
+
+          dirInner[base + 3] = innerCos;
+          params[base + 1] = outerCos;
+        } else {
+          // Point light
+          dirInner[base + 3] = 1.0;
+        }
+      }
+
+      count++;
+    }
+
+    if (u.lightCount) this.gl.uniform1i(u.lightCount, count);
+    if (u.lightPosType) this.gl.uniform4fv(u.lightPosType, posType);
+    if (u.lightDirInner) this.gl.uniform4fv(u.lightDirInner, dirInner);
+    if (u.lightColorIntensity) this.gl.uniform4fv(u.lightColorIntensity, colInt);
+    if (u.lightParams) this.gl.uniform4fv(u.lightParams, params);
   }
 
   /**
