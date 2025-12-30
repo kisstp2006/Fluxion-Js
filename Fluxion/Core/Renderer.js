@@ -76,7 +76,9 @@ export default class Renderer {
     // Real-time lights (PBR): use fixed-size uniform arrays for speed.
     this.maxPbrLights = 8;
     /** @type {any[]} */
-    this.lights = [];
+    this._sceneLights = [];
+    /** @type {any[] | null} */
+    this._overrideLights = null;
 
     // Scratch buffers to avoid per-draw allocations
     this._tmpInvModel = new Float32Array(16);
@@ -1477,15 +1479,29 @@ export default class Renderer {
   }
 
   /**
-   * Set active PBR lights for subsequent 3D draws.
+   * Set active PBR lights for subsequent 3D draws (CODE OVERRIDE).
+   * If set, these override any scene/XAML lights until cleared.
    * @param {any[] | null | undefined} lights
    */
   setLights(lights) {
     if (!Array.isArray(lights)) {
-      this.lights = [];
+      this._overrideLights = null;
       return;
     }
-    this.lights = lights;
+    this._overrideLights = lights;
+  }
+
+  /**
+   * Set lights coming from the scene (XML/XAML or code that adds to `scene.lights`).
+   * This is called by Scene.draw automatically.
+   * @param {any[] | null | undefined} lights
+   */
+  setSceneLights(lights) {
+    this._sceneLights = Array.isArray(lights) ? lights : [];
+  }
+
+  clearLightsOverride() {
+    this._overrideLights = null;
   }
 
   _uploadPbrLights() {
@@ -1510,9 +1526,14 @@ export default class Renderer {
     colInt.fill(0);
     params.fill(0);
 
-    // If the scene did not set any lights, use a default sun light.
-    const activeLights = (this.lights && this.lights.length > 0)
-      ? this.lights
+    // Choose active lights: override (code) > scene (XAML/XML) > default sun.
+    const srcLights = (this._overrideLights && this._overrideLights.length > 0)
+      ? this._overrideLights
+      : this._sceneLights;
+
+    // If nothing is provided, use a default sun light.
+    const activeLights = (srcLights && srcLights.length > 0)
+      ? srcLights
       : [{
           type: LightType.Directional,
           direction: this.pbrLightDirection,

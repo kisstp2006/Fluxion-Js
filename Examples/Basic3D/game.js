@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3, Material } from "../../Fluxion/index.js";
+import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3, Material, DirectionalLight, PointLight } from "../../Fluxion/index.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
@@ -62,6 +62,21 @@ const game = {
     cam3d.position = new Vector3(0, 0, 2.5);
     cam3d.lookAt(new Vector3(0, 0, -6));
     scene.setCamera3D(cam3d);
+
+    // --- Code-only real-time lights (no XAML) ---
+    scene.addLight(new DirectionalLight({
+      name: 'Sun',
+      direction: [0.35, -1.0, 0.25],
+      color: [1, 1, 1],
+      intensity: 1.2,
+    }));
+    scene.addLight(new PointLight({
+      name: 'Lamp',
+      position: [2.5, 1.5, -2.5],
+      color: [1.0, 0.82, 0.65],
+      intensity: 120,
+      range: 20,
+    }));
 
     // 3D object
     const cube = new Cube3D(renderer);

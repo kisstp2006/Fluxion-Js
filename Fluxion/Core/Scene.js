@@ -246,9 +246,8 @@ export default class Scene {
         // 3D base pass
         if (this._sorted3DObjects && this._sorted3DObjects.length > 0) {
             // Push scene lights into the renderer before beginning the 3D pass.
-            if (renderer?.setLights) {
-                renderer.setLights(this.lights);
-            }
+            if (renderer?.setSceneLights) renderer.setSceneLights(this.lights);
+            else if (renderer?.setLights) renderer.setLights(this.lights);
             if (renderer?.begin3D?.(this.camera3D)) {
                 for (const obj of this._sorted3DObjects) {
                     if (typeof obj.draw3D === 'function') {
