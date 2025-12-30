@@ -5,6 +5,7 @@
 
 import Mesh from './Mesh.js';
 import { Mat4 } from './Math3D.js';
+import Material from './Material.js';
 
 export default class MeshNode {
   constructor() {
@@ -40,6 +41,10 @@ export default class MeshNode {
     // Optional material reference/instance. Can be a string name (resolved by SceneLoader)
     // or a Material instance (set via setMaterial).
     this.material = null;
+
+    // If no explicit material is provided, we render with this node-local default.
+    // (Its base color is kept in sync with `this.color` / mesh resource color.)
+    this._defaultMaterial = new Material();
 
     // Optional mesh definition (set by SceneLoader if source matches a named mesh resource).
     this.meshDefinition = null;
@@ -156,9 +161,9 @@ export default class MeshNode {
     const def = this.meshDefinition;
     const type = (def?.type || def?.source || this.source || 'Cube');
     const params = def?.params || null;
-    const color = def?.color || this.color || [1, 1, 1, 1];
 
-    const key = JSON.stringify({ type, params, color });
+    // Cache meshes by geometry only (materials/colors should not create new meshes).
+    const key = JSON.stringify({ type, params });
     if (this._mesh && this._meshKey === key) return;
 
     const cache = MeshNode._getCache(gl);
@@ -169,7 +174,7 @@ export default class MeshNode {
       return;
     }
 
-    const mesh = MeshNode._createMeshFromType(gl, type, params, color);
+    const mesh = MeshNode._createMeshFromType(gl, type, params);
     if (mesh) {
       cache.set(key, mesh);
       this._mesh = mesh;
@@ -181,32 +186,31 @@ export default class MeshNode {
    * @param {WebGLRenderingContext|WebGL2RenderingContext} gl
    * @param {string} type
    * @param {any | null} params
-   * @param {[number,number,number,number]} color
    */
-  static _createMeshFromType(gl, type, params, color) {
+  static _createMeshFromType(gl, type, params) {
     const t = String(type || '').toLowerCase();
     const p = params || {};
 
     if (t === 'quad') {
-      return Mesh.createQuad(gl, p.width ?? 1, p.height ?? 1, color);
+      return Mesh.createQuad(gl, p.width ?? 1, p.height ?? 1);
     }
     if (t === 'triangle') {
-      return Mesh.createTriangle(gl, p.size ?? 1, color);
+      return Mesh.createTriangle(gl, p.size ?? 1);
     }
     if (t === 'plane') {
-      return Mesh.createPlane(gl, p.width ?? 10, p.depth ?? 10, p.subdivisions ?? 1, color);
+      return Mesh.createPlane(gl, p.width ?? 10, p.depth ?? 10, p.subdivisions ?? 1);
     }
     if (t === 'cube' || t === 'box') {
-      return Mesh.createCube(gl, p.width ?? 2, p.height ?? 2, p.depth ?? 2, color);
+      return Mesh.createCube(gl, p.width ?? 2, p.height ?? 2, p.depth ?? 2);
     }
     if (t === 'sphere') {
-      return Mesh.createSphere(gl, p.radius ?? 1, p.radialSegments ?? 24, p.heightSegments ?? 16, color);
+      return Mesh.createSphere(gl, p.radius ?? 1, p.radialSegments ?? 24, p.heightSegments ?? 16);
     }
     if (t === 'cone') {
-      return Mesh.createCone(gl, p.radius ?? 1, p.height ?? 2, p.radialSegments ?? 24, color);
+      return Mesh.createCone(gl, p.radius ?? 1, p.height ?? 2, p.radialSegments ?? 24);
     }
     if (t === 'capsule') {
-      return Mesh.createCapsule(gl, p.radius ?? 0.5, p.height ?? 2, p.radialSegments ?? 24, p.capSegments ?? 8, color);
+      return Mesh.createCapsule(gl, p.radius ?? 0.5, p.height ?? 2, p.radialSegments ?? 24, p.capSegments ?? 8);
     }
 
     // Back-compat default
@@ -215,7 +219,7 @@ export default class MeshNode {
     }
 
     // Unknown type: fallback to cube
-    return Mesh.createCube(gl, 2, 2, 2, color);
+    return Mesh.createCube(gl, 2, 2, 2);
   }
 
   /** @returns {Float32Array} */
@@ -244,7 +248,17 @@ export default class MeshNode {
     this._ensureMesh(renderer);
     if (!this._mesh) return;
 
-    renderer.drawMesh(this._mesh, this._getModelMatrix(), this.material);
+    // Prefer an explicit material if one is assigned, otherwise fall back to node color.
+    let matToUse = this.material;
+    if (!matToUse) {
+      const defCol = this.meshDefinition?.color;
+      const col = defCol || this.color || [1, 1, 1, 1];
+      // Back-compat: current Material uses albedoColor; PBR upgrade adds baseColorFactor alias.
+      this._defaultMaterial.albedoColor = col;
+      matToUse = this._defaultMaterial;
+    }
+
+    renderer.drawMesh(this._mesh, this._getModelMatrix(), matToUse);
 
     // Draw child 3D nodes (if any)
     for (const child of this.children) {

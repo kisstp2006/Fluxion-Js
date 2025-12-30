@@ -41,7 +41,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/DebugTest/index.html");
+    mainWindow.loadFile("./Examples/Basic3DXaml/index.html");
   });
 
   // Window Management IPC Handlers

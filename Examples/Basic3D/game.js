@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3 } from "../../Fluxion/index.js";
+import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3, Material } from "../../Fluxion/index.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
@@ -20,6 +20,12 @@ class Cube3D {
     this.model = Mat4.identity();
 
     this.rotation = 0;
+
+    // PBR material (metallic-roughness)
+    this.material = new Material();
+    this.material.baseColorFactor = [1.0, 0.7, 0.2, 1.0];
+    this.material.metallicFactor = 0.0;
+    this.material.roughnessFactor = 0.35;
   }
 
   /** @param {number} dt */
@@ -35,7 +41,7 @@ class Cube3D {
     this.model[13] = 0;
     this.model[14] = -6;
 
-    renderer.drawMesh(this.mesh, this.model, null);
+    renderer.drawMesh(this.mesh, this.model, this.material);
   }
 
   dispose() {

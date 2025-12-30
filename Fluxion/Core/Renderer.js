@@ -66,6 +66,17 @@ export default class Renderer {
     this._skyboxUniforms = null;
     this.currentSkybox = null;
 
+    // PBR lighting defaults (can be overridden by game code)
+    // Direction is the direction the light rays travel (world space).
+    this.pbrLightDirection = [0.5, -1.0, 0.3];
+    this.pbrLightColor = [1.0, 1.0, 1.0];
+    this.pbrAmbientColor = [0.03, 0.03, 0.03];
+
+    // Scratch buffers to avoid per-draw allocations
+    this._tmpInvModel = new Float32Array(16);
+    this._tmpInvModelT = new Float32Array(16);
+    this._normalMatrix3 = new Float32Array(9);
+
     if (!this.gl) {
       const wantedLabel = (requested === 1 || requested === 'webgl1') ? 'WebGL 1' : (requested === 2 || requested === 'webgl2') ? 'WebGL 2' : 'WebGL';
       alert(`${wantedLabel} not supported!`);
@@ -620,9 +631,15 @@ export default class Renderer {
 
     const wantMsaa = this.isWebGL2 && requestedSamples > 0;
 
+    // WebGLTexture objects do not expose width/height. Track dimensions ourselves.
+    // (Use unique variable names here; the function later declares currentDims/currentWidth/currentHeight.)
+    const _msDims = this.mainScreenTexture ? this._textureDimensions.get(this.mainScreenTexture) : null;
+    const _msW = _msDims ? (_msDims.width | 0) : 0;
+    const _msH = _msDims ? (_msDims.height | 0) : 0;
+
     const sizeChanged =
       !this.mainScreenTexture ||
-      (this.mainScreenTexture.width !== desiredWidth || this.mainScreenTexture.height !== desiredHeight);
+      (_msW !== (desiredWidth | 0) || _msH !== (desiredHeight | 0));
 
     const msaaStateChanged = wantMsaa ? (!this.mainScreenMsaaFramebuffer) : (!!this.mainScreenMsaaFramebuffer);
     const msaaSamplesChanged = wantMsaa && (this._activeMainScreenMsaaSamples !== requestedSamples);
@@ -850,6 +867,8 @@ export default class Renderer {
     const instancedVertexShaderPath = '../../Fluxion/Shaders/vertex_instanced_300es.glsl';
     const vertex3DShaderPath = '../../Fluxion/Shaders/vertex3d_300es.glsl';
     const fragment3DShaderPath = '../../Fluxion/Shaders/fragment3d_300es.glsl';
+    const skyboxVertexShaderPath = '../../Fluxion/Shaders/skybox_vertex_300es.glsl';
+    const skyboxFragmentShaderPath = '../../Fluxion/Shaders/skybox_fragment_300es.glsl';
 
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
@@ -903,17 +922,52 @@ export default class Renderer {
         if (vs3 && fs3) {
           this.program3D = this.createProgram(vs3, fs3);
           if (this.program3D) {
+            // PBR attribute layout (see Shaders/vertex3d_300es.glsl)
             this._program3DAttribs = {
               position: this.gl.getAttribLocation(this.program3D, 'a_position'),
-              color: this.gl.getAttribLocation(this.program3D, 'a_color'),
+              normal: this.gl.getAttribLocation(this.program3D, 'a_normal'),
+              uv: this.gl.getAttribLocation(this.program3D, 'a_uv'),
             };
+
+            // PBR uniforms
             this._program3DUniforms = {
               viewProj: this.gl.getUniformLocation(this.program3D, 'u_viewProj'),
               model: this.gl.getUniformLocation(this.program3D, 'u_model'),
-                  albedoColor: this.gl.getUniformLocation(this.program3D, 'u_albedoColor'),
-                  albedoTexture: this.gl.getUniformLocation(this.program3D, 'u_albedoTexture'),
-                  useAlbedoTexture: this.gl.getUniformLocation(this.program3D, 'u_useAlbedoTexture'),
+              normalMatrix: this.gl.getUniformLocation(this.program3D, 'u_normalMatrix'),
+
+              cameraPos: this.gl.getUniformLocation(this.program3D, 'u_cameraPos'),
+              lightDirection: this.gl.getUniformLocation(this.program3D, 'u_lightDirection'),
+              lightColor: this.gl.getUniformLocation(this.program3D, 'u_lightColor'),
+              ambientColor: this.gl.getUniformLocation(this.program3D, 'u_ambientColor'),
+
+              baseColorFactor: this.gl.getUniformLocation(this.program3D, 'u_baseColorFactor'),
+              metallicFactor: this.gl.getUniformLocation(this.program3D, 'u_metallicFactor'),
+              roughnessFactor: this.gl.getUniformLocation(this.program3D, 'u_roughnessFactor'),
+              normalScale: this.gl.getUniformLocation(this.program3D, 'u_normalScale'),
+              aoStrength: this.gl.getUniformLocation(this.program3D, 'u_aoStrength'),
+              emissiveFactor: this.gl.getUniformLocation(this.program3D, 'u_emissiveFactor'),
+
+              alphaMode: this.gl.getUniformLocation(this.program3D, 'u_alphaMode'),
+              alphaCutoff: this.gl.getUniformLocation(this.program3D, 'u_alphaCutoff'),
+
+              baseColorMap: this.gl.getUniformLocation(this.program3D, 'u_baseColorMap'),
+              metallicMap: this.gl.getUniformLocation(this.program3D, 'u_metallicMap'),
+              roughnessMap: this.gl.getUniformLocation(this.program3D, 'u_roughnessMap'),
+              normalMap: this.gl.getUniformLocation(this.program3D, 'u_normalMap'),
+              aoMap: this.gl.getUniformLocation(this.program3D, 'u_aoMap'),
+              emissiveMap: this.gl.getUniformLocation(this.program3D, 'u_emissiveMap'),
+              alphaMap: this.gl.getUniformLocation(this.program3D, 'u_alphaMap'),
             };
+
+            // Bind sampler units once
+            this.gl.useProgram(this.program3D);
+            if (this._program3DUniforms.baseColorMap) this.gl.uniform1i(this._program3DUniforms.baseColorMap, 0);
+            if (this._program3DUniforms.metallicMap) this.gl.uniform1i(this._program3DUniforms.metallicMap, 1);
+            if (this._program3DUniforms.roughnessMap) this.gl.uniform1i(this._program3DUniforms.roughnessMap, 2);
+            if (this._program3DUniforms.normalMap) this.gl.uniform1i(this._program3DUniforms.normalMap, 3);
+            if (this._program3DUniforms.aoMap) this.gl.uniform1i(this._program3DUniforms.aoMap, 4);
+            if (this._program3DUniforms.emissiveMap) this.gl.uniform1i(this._program3DUniforms.emissiveMap, 5);
+            if (this._program3DUniforms.alphaMap) this.gl.uniform1i(this._program3DUniforms.alphaMap, 6);
           }
         }
       } catch {
@@ -943,6 +997,34 @@ export default class Renderer {
         this.skyboxProgram = null;
       }
     }
+
+    // --- PBR default textures (1x1) ---
+    // These let the shader always sample all maps without branching.
+    // (All textures are linear except baseColor/emissive which are decoded as sRGB in the shader.)
+    const make1x1 = (r, g, b, a = 255) => {
+      const t = this.gl.createTexture();
+      this.gl.bindTexture(this.gl.TEXTURE_2D, t);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.NEAREST);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.NEAREST);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_S, this.gl.CLAMP_TO_EDGE);
+      this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_WRAP_T, this.gl.CLAMP_TO_EDGE);
+      const data = new Uint8Array([r, g, b, a]);
+      this.gl.texImage2D(this.gl.TEXTURE_2D, 0, this.gl.RGBA, 1, 1, 0, this.gl.RGBA, this.gl.UNSIGNED_BYTE, data);
+      this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+      // Track dimensions for any code that relies on it (e.g., UV calculations).
+      if (this._textureDimensions) this._textureDimensions.set(t, { width: 1, height: 1 });
+      return t;
+    };
+
+    this._defaultPbrTextures = {
+      baseColor: make1x1(255, 255, 255, 255),
+      metallic: make1x1(0, 0, 0, 255),
+      roughness: make1x1(255, 255, 255, 255),
+      normal: make1x1(128, 128, 255, 255),
+      ao: make1x1(255, 255, 255, 255),
+      emissive: make1x1(0, 0, 0, 255),
+      alpha: make1x1(255, 255, 255, 255),
+    };
 
     this.gl.useProgram(this.program);
 
@@ -1364,6 +1446,24 @@ export default class Renderer {
     const vp = cam.getViewProjectionMatrix();
     if (this._program3DUniforms?.viewProj) gl.uniformMatrix4fv(this._program3DUniforms.viewProj, false, vp);
 
+    // Global lighting uniforms (per-frame)
+    const u = this._program3DUniforms;
+    if (u?.cameraPos) gl.uniform3f(u.cameraPos, cam.position.x, cam.position.y, cam.position.z);
+
+    // Normalize light direction defensively
+    const ld = this.pbrLightDirection || [0.5, -1.0, 0.3];
+    const lx = Number(ld[0] ?? 0.5);
+    const ly = Number(ld[1] ?? -1.0);
+    const lz = Number(ld[2] ?? 0.3);
+    const llen = Math.hypot(lx, ly, lz) || 1;
+    if (u?.lightDirection) gl.uniform3f(u.lightDirection, lx / llen, ly / llen, lz / llen);
+
+    const lc = this.pbrLightColor || [1, 1, 1];
+    if (u?.lightColor) gl.uniform3f(u.lightColor, Number(lc[0] ?? 1), Number(lc[1] ?? 1), Number(lc[2] ?? 1));
+
+    const ac = this.pbrAmbientColor || [0.03, 0.03, 0.03];
+    if (u?.ambientColor) gl.uniform3f(u.ambientColor, Number(ac[0] ?? 0.03), Number(ac[1] ?? 0.03), Number(ac[2] ?? 0.03));
+
     this._in3DPass = true;
     return true;
   }
@@ -1419,15 +1519,15 @@ export default class Renderer {
       gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
       if (mesh.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
       
-      const stride = 7 * 4; // position(3) + color(4) - mesh has color but we ignore it
+      const stride = 8 * 4; // position(3) + normal(3) + uv(2) - we only use position
       gl.enableVertexAttribArray(this._skyboxAttribs.position);
       gl.vertexAttribPointer(this._skyboxAttribs.position, 3, gl.FLOAT, false, stride, 0);
       
-      // Disable color attribute if it was enabled
-      const colorLoc = this._program3DAttribs?.color;
-      if (colorLoc !== undefined && colorLoc >= 0) {
-        gl.disableVertexAttribArray(colorLoc);
-      }
+      // Ensure PBR-only attributes don't interfere when using the default VAO
+      const normalLoc = this._program3DAttribs?.normal;
+      const uvLoc = this._program3DAttribs?.uv;
+      if (normalLoc !== undefined && normalLoc >= 0) gl.disableVertexAttribArray(normalLoc);
+      if (uvLoc !== undefined && uvLoc >= 0) gl.disableVertexAttribArray(uvLoc);
       
       // Draw
       if (mesh.ibo && mesh.indices) {
@@ -1466,7 +1566,7 @@ export default class Renderer {
     const model = modelMatrix || this._identityModel3D;
 
     // Bind mesh VAO/layout (cached on mesh side)
-    mesh.bindLayout(this._program3DAttribs.position, this._program3DAttribs.color);
+    mesh.bindLayout(this._program3DAttribs.position, this._program3DAttribs.normal, this._program3DAttribs.uv);
 
     if (mesh.vao && typeof gl.bindVertexArray === 'function') {
       gl.bindVertexArray(mesh.vao);
@@ -1474,37 +1574,87 @@ export default class Renderer {
       // WebGL1/compat fallback: set attrib pointers each draw
       gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
       if (mesh.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
-      const stride = 7 * 4;
+      const stride = 8 * 4;
       gl.enableVertexAttribArray(this._program3DAttribs.position);
       gl.vertexAttribPointer(this._program3DAttribs.position, 3, gl.FLOAT, false, stride, 0);
-      gl.enableVertexAttribArray(this._program3DAttribs.color);
-      gl.vertexAttribPointer(this._program3DAttribs.color, 4, gl.FLOAT, false, stride, 12);
+      gl.enableVertexAttribArray(this._program3DAttribs.normal);
+      gl.vertexAttribPointer(this._program3DAttribs.normal, 3, gl.FLOAT, false, stride, 12);
+      gl.enableVertexAttribArray(this._program3DAttribs.uv);
+      gl.vertexAttribPointer(this._program3DAttribs.uv, 2, gl.FLOAT, false, stride, 24);
     }
 
-    if (this._program3DUniforms?.model) gl.uniformMatrix4fv(this._program3DUniforms.model, false, model);
-    // Material uniforms (optional)
-    if (this._program3DUniforms) {
-      const u = this._program3DUniforms;
-      const col = (material && material.albedoColor) ? material.albedoColor : [1, 1, 1, 1];
-      if (u.albedoColor) gl.uniform4fv(u.albedoColor, col);
+    const u = this._program3DUniforms;
 
-      const hasTex = !!(material && material.albedoTexture);
-      if (u.useAlbedoTexture) gl.uniform1i(u.useAlbedoTexture, hasTex ? 1 : 0);
-      if (hasTex && u.albedoTexture) {
-        gl.activeTexture(gl.TEXTURE0);
-        try {
-          gl.bindTexture(gl.TEXTURE_2D, material.albedoTexture);
-          gl.uniform1i(u.albedoTexture, 0);
-        } catch (e) {
-          // ignore binding errors
-        }
-      } else {
-        // Ensure texture unit 0 is not bound to some unrelated texture
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, null);
-        if (u.albedoTexture) gl.uniform1i(u.albedoTexture, 0);
-      }
+    // Model + normal matrix
+    if (u?.model) gl.uniformMatrix4fv(u.model, false, model);
+    if (u?.normalMatrix) {
+      // normalMatrix = transpose(inverse(model)) upper-left 3x3
+      const inv = Mat4.invert(model, this._tmpInvModel);
+      const src = inv ? Mat4.transpose(inv, this._tmpInvModelT) : model;
+      const nm = this._normalMatrix3;
+      nm[0] = src[0];  nm[1] = src[1];  nm[2] = src[2];
+      nm[3] = src[4];  nm[4] = src[5];  nm[5] = src[6];
+      nm[6] = src[8];  nm[7] = src[9];  nm[8] = src[10];
+      gl.uniformMatrix3fv(u.normalMatrix, false, nm);
     }
+
+    // --- Material params (PBR metallic-roughness) ---
+    const m = material || {};
+
+    // Factors (prefer PBR naming, but accept legacy albedoColor)
+    const baseFactor = m.baseColorFactor || m.albedoColor || [1, 1, 1, 1];
+    if (u?.baseColorFactor) gl.uniform4fv(u.baseColorFactor, baseFactor);
+
+    const metallicFactor = Number.isFinite(m.metallicFactor) ? m.metallicFactor : 0.0;
+    if (u?.metallicFactor) gl.uniform1f(u.metallicFactor, metallicFactor);
+
+    const roughnessFactor = Number.isFinite(m.roughnessFactor) ? m.roughnessFactor : 1.0;
+    if (u?.roughnessFactor) gl.uniform1f(u.roughnessFactor, roughnessFactor);
+
+    const normalScale = Number.isFinite(m.normalScale) ? m.normalScale : 1.0;
+    if (u?.normalScale) gl.uniform1f(u.normalScale, normalScale);
+
+    const aoStrength = Number.isFinite(m.aoStrength) ? m.aoStrength : 1.0;
+    if (u?.aoStrength) gl.uniform1f(u.aoStrength, aoStrength);
+
+    const emissiveFactor = m.emissiveFactor || [0, 0, 0];
+    if (u?.emissiveFactor) gl.uniform3fv(u.emissiveFactor, emissiveFactor);
+
+    // Alpha mode: 0 OPAQUE, 1 MASK, 2 BLEND
+    const alphaMode = (m.alphaMode || 'OPAQUE');
+    const alphaModeInt = (alphaMode === 'MASK') ? 1 : (alphaMode === 'BLEND') ? 2 : 0;
+    const alphaCutoff = Number.isFinite(m.alphaCutoff) ? m.alphaCutoff : 0.5;
+    if (u?.alphaMode) gl.uniform1i(u.alphaMode, alphaModeInt);
+    if (u?.alphaCutoff) gl.uniform1f(u.alphaCutoff, alphaCutoff);
+
+    // Blend state (basic)
+    if (alphaModeInt === 2) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
+    } else {
+      gl.disable(gl.BLEND);
+      gl.depthMask(true);
+    }
+
+    // Textures (bind defaults if missing)
+    const d = this._defaultPbrTextures || {};
+
+    const baseTex = m.baseColorTexture || m.albedoTexture || d.baseColor;
+    const metallicTex = m.metallicTexture || d.metallic;
+    const roughnessTex = m.roughnessTexture || d.roughness;
+    const normalTex = m.normalTexture || d.normal;
+    const aoTex = m.aoTexture || d.ao;
+    const emissiveTex = m.emissiveTexture || d.emissive;
+    const alphaTex = m.alphaTexture || d.alpha;
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, baseTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, metallicTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, roughnessTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, normalTex);
+    gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, aoTex);
+    gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, emissiveTex);
+    gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, alphaTex);
 
     // Draw call
     mesh.draw();
@@ -1531,6 +1681,9 @@ export default class Renderer {
     if (this.quadCount === 0) return;
 
     if (this._isInstancingEnabled()) {
+      // 2D sprite shader samples from texture unit 0.
+      // PBR may leave the active unit at 1..6, so force it back to 0 here.
+      this.gl.activeTexture(this.gl.TEXTURE0);
       this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
       this.gl.bindVertexArray(this.instancedVao);
 
@@ -1549,6 +1702,8 @@ export default class Renderer {
       return;
     }
 
+    // 2D sprite shader samples from texture unit 0.
+    this.gl.activeTexture(this.gl.TEXTURE0);
     this.gl.bindTexture(this.gl.TEXTURE_2D, this.currentTexture);
 
     if (this.quadVao) {

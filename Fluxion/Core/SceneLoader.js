@@ -79,16 +79,66 @@ export default class SceneLoader {
 
                     // Inline material definition (synchronous)
                     const mat = new Material();
-                    if (child.hasAttribute('albedoColor') || child.hasAttribute('color')) {
-                        const c = child.getAttribute('albedoColor') || child.getAttribute('color');
-                        mat.albedoColor = this._parseColor(c);
+                    // Factors (back-compat: albedoColor/color)
+                    const baseColorAttr = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color');
+                    if (baseColorAttr) mat.albedoColor = this._parseColor(baseColorAttr);
+
+                    // Metallic/Roughness factors
+                    if (child.hasAttribute('metallicFactor') || child.hasAttribute('metallic')) {
+                        mat.metallicFactor = parseFloat(child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '0');
                     }
-                    if (child.hasAttribute('albedoTexture')) {
-                        const tex = child.getAttribute('albedoTexture');
-                        const base = new URL('.', url).toString();
-                        const texUrl = new URL(tex, base).toString();
+                    if (child.hasAttribute('roughnessFactor') || child.hasAttribute('roughness')) {
+                        mat.roughnessFactor = parseFloat(child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '1');
+                    }
+
+                    // Normal/AO
+                    if (child.hasAttribute('normalScale')) {
+                        mat.normalScale = parseFloat(child.getAttribute('normalScale') || '1');
+                    }
+                    if (child.hasAttribute('aoStrength')) {
+                        mat.aoStrength = parseFloat(child.getAttribute('aoStrength') || '1');
+                    }
+
+                    // Emissive
+                    const emissiveAttr = child.getAttribute('emissiveFactor') || child.getAttribute('emissive');
+                    if (emissiveAttr) {
+                        const c = this._parseColor(emissiveAttr);
+                        mat.emissiveFactor = [c[0], c[1], c[2]];
+                    }
+
+                    // Alpha
+                    if (child.hasAttribute('alphaMode')) {
+                        mat.alphaMode = String(child.getAttribute('alphaMode') || 'OPAQUE').toUpperCase();
+                    }
+                    if (child.hasAttribute('alphaCutoff')) {
+                        mat.alphaCutoff = parseFloat(child.getAttribute('alphaCutoff') || '0.5');
+                    }
+
+                    // Textures (optional). If any are present, load asynchronously and register a promise.
+                    const base = new URL('.', url).toString();
+                    const getTexUrl = (attr) => {
+                        const p = child.getAttribute(attr);
+                        if (!p) return null;
+                        try { return new URL(p, base).toString(); } catch { return p; }
+                    };
+
+                    const texBaseColor = getTexUrl('baseColorTexture') || getTexUrl('albedoTexture');
+                    const texMetallic = getTexUrl('metallicTexture');
+                    const texRoughness = getTexUrl('roughnessTexture');
+                    const texNormal = getTexUrl('normalTexture');
+                    const texAo = getTexUrl('aoTexture') || getTexUrl('occlusionTexture');
+                    const texEmissive = getTexUrl('emissiveTexture');
+                    const texAlpha = getTexUrl('alphaTexture');
+
+                    const anyTex = !!(texBaseColor || texMetallic || texRoughness || texNormal || texAo || texEmissive || texAlpha);
+                    if (anyTex) {
                         const p = (async () => {
-                            try {
+                            const load = async (texUrl) => {
+                                if (!texUrl || !renderer) return null;
+                                // Cache-aware: acquire if already cached
+                                if (renderer.hasCachedTexture?.(texUrl)) {
+                                    return renderer.acquireTexture?.(texUrl) || renderer.getCachedTexture?.(texUrl);
+                                }
                                 const img = await new Promise((resolve) => {
                                     const i = new Image();
                                     i.crossOrigin = 'anonymous';
@@ -96,14 +146,20 @@ export default class SceneLoader {
                                     i.onerror = () => resolve(null);
                                     i.src = texUrl;
                                 });
-                                if (img && renderer) {
-                                    mat.albedoTexture = renderer.createTexture?.(img, texUrl) || null;
-                                }
-                            } catch (e) {
-                                console.warn('Material inline texture load failed', texUrl, e);
-                            }
+                                if (!img) return null;
+                                return renderer.createAndAcquireTexture?.(img, texUrl) || renderer.createTexture?.(img, texUrl) || null;
+                            };
+
+                            mat.baseColorTexture = await load(texBaseColor);
+                            mat.metallicTexture = await load(texMetallic);
+                            mat.roughnessTexture = await load(texRoughness);
+                            mat.normalTexture = await load(texNormal);
+                            mat.aoTexture = await load(texAo);
+                            mat.emissiveTexture = await load(texEmissive);
+                            mat.alphaTexture = await load(texAlpha);
                             return mat;
                         })();
+
                         renderer?.trackAssetPromise?.(p);
                         scene.registerMaterial(name, p);
                         continue;

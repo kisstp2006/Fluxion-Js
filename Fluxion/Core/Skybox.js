@@ -40,53 +40,9 @@ export default class Skybox {
    * @private
    */
   _createSkyboxMesh() {
-    // Create a large cube (will be scaled to cover entire scene)
-    // Vertices for a cube centered at origin
-    const size = 1.0;
-    const vertices = new Float32Array([
-      // Front face
-      -size, -size,  size,  1, 1, 1, 1,
-       size, -size,  size,  1, 1, 1, 1,
-       size,  size,  size,  1, 1, 1, 1,
-      -size,  size,  size,  1, 1, 1, 1,
-      // Back face
-      -size, -size, -size,  1, 1, 1, 1,
-      -size,  size, -size,  1, 1, 1, 1,
-       size,  size, -size,  1, 1, 1, 1,
-       size, -size, -size,  1, 1, 1, 1,
-      // Top face
-      -size,  size, -size,  1, 1, 1, 1,
-      -size,  size,  size,  1, 1, 1, 1,
-       size,  size,  size,  1, 1, 1, 1,
-       size,  size, -size,  1, 1, 1, 1,
-      // Bottom face
-      -size, -size, -size,  1, 1, 1, 1,
-       size, -size, -size,  1, 1, 1, 1,
-       size, -size,  size,  1, 1, 1, 1,
-      -size, -size,  size,  1, 1, 1, 1,
-      // Right face
-       size, -size, -size,  1, 1, 1, 1,
-       size,  size, -size,  1, 1, 1, 1,
-       size,  size,  size,  1, 1, 1, 1,
-       size, -size,  size,  1, 1, 1, 1,
-      // Left face
-      -size, -size, -size,  1, 1, 1, 1,
-      -size, -size,  size,  1, 1, 1, 1,
-      -size,  size,  size,  1, 1, 1, 1,
-      -size,  size, -size,  1, 1, 1, 1,
-    ]);
-
-    // Indices for cube (two triangles per face)
-    const indices = new Uint16Array([
-      0,  1,  2,    0,  2,  3,    // front
-      4,  5,  6,    4,  6,  7,    // back
-      8,  9,  10,   8,  10, 11,   // top
-      12, 13, 14,   12, 14, 15,   // bottom
-      16, 17, 18,   16, 18, 19,   // right
-      20, 21, 22,   20, 22, 23,   // left
-    ]);
-
-    this._mesh = new Mesh(this.gl, vertices, indices);
+    // Cube centered at origin. We only use position in the skybox shader,
+    // but the engine's Mesh layout is PBR (pos+normal+uv), so we reuse createCube.
+    this._mesh = Mesh.createCube(this.gl, 2, 2, 2);
   }
 
   /**
