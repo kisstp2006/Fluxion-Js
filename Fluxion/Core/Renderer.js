@@ -1,6 +1,7 @@
 import PostProcessing from './PostProcessing.js';
 import Camera3D from './Camera3D.js';
 import { Mat4 } from './Math3D.js';
+import DebugRenderer from './DebugRenderer.js';
 
 /**
  * Handles WebGL rendering, including shader management, resizing, and post-processing.
@@ -135,6 +136,10 @@ export default class Renderer {
     
     this.isReady = false; // Track initialization state
     this.readyPromise = null; // Store the initialization promise
+    
+    // Debug renderer for drawing lines, shapes, and debug text
+    this.debug = new DebugRenderer(this);
+    
     this.resizeCanvas();
     
     // Debounce resize events for better performance
@@ -1194,6 +1199,11 @@ export default class Renderer {
 
     this._frameId++;
 
+    // Clear debug renderer commands for new frame
+    if (this.debug) {
+      this.debug.clear();
+    }
+
     // Reset batch state
     this.quadCount = 0;
     this.currentTexture = null;
@@ -1267,6 +1277,11 @@ export default class Renderer {
     // Ensure we exit any 3D pass before post-processing.
     if (this._in3DPass) {
       this.end3D();
+    }
+
+    // Render debug overlay (before post-processing so it's included)
+    if (this.debug) {
+      this.debug.render();
     }
 
     if (this.enablePostProcessing && this.postProcessing && this.mainScreenTexture) {

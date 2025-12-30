@@ -49,3 +49,6 @@ export { default as Audio } from './Audio.js';
 
 // Post Processing (Optional - can be in extras if preferred)
 export { default as PostProcessing } from './PostProcessing.js';
+
+// Debug Rendering
+export { default as DebugRenderer } from './DebugRenderer.js';
