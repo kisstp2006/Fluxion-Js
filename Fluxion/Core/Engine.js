@@ -96,6 +96,36 @@ export default class Engine {
                     console.warn('Material debug view not available on this renderer.');
                 }
             }
+            // Shadow filter toggle: F11 cycles PS2 (hard) -> PCF3 -> PCF5
+            if (e.key === 'F11') {
+                const r = this.renderer;
+                if (r && typeof r.setShadowFilter === 'function') {
+                    const cur = (r.shadowPcfKernel | 0) || 3;
+                    const next = (cur === 1) ? 3 : (cur === 3) ? 5 : 1;
+                    r.setShadowFilter(next);
+                    const name = (next === 1) ? 'PS2 (hard)' : (next === 5) ? 'PCF 5x5' : 'PCF 3x3';
+                    console.log(`Shadow filter: ${name}`);
+                }
+            }
+            // Indirect shadowing toggle: F12 switches whether shadows affect ambient+diffuse IBL too.
+            if (e.key === 'F12') {
+                const r = this.renderer;
+                if (r && typeof r.setShadowAffectsIndirect === 'function') {
+                    const next = !r.shadowAffectsIndirect;
+                    r.setShadowAffectsIndirect(next);
+                    console.log(`Shadows affect indirect diffuse: ${next ? 'ON' : 'OFF'}`);
+                }
+            }
+            // Shadow resolution toggle: Shift+F11 cycles 1024 <-> 2048
+            if (e.key === 'F11' && e.shiftKey) {
+                const r = this.renderer;
+                if (r && typeof r.setShadowMapResolution === 'function') {
+                    const cur = (r.shadowMapSize | 0) || 1024;
+                    const next = (cur >= 2048) ? 1024 : 2048;
+                    const ok = r.setShadowMapResolution(next);
+                    console.log(`Shadow map resolution: ${next} (${ok ? 'OK' : 'FAILED'})`);
+                }
+            }
         });
 
         // Boot sequence (async): load fonts/version, wait renderer ready, init game, wait assets, then start loop.

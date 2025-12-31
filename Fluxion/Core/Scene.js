@@ -248,6 +248,20 @@ export default class Scene {
             // Push scene lights into the renderer before beginning the 3D pass.
             if (renderer?.setSceneLights) renderer.setSceneLights(this.lights);
             else if (renderer?.setLights) renderer.setLights(this.lights);
+
+            // Shadow pass (directional light depth map) - must run before the main 3D shading pass.
+            const drawCasters = () => {
+                for (const obj of this._sorted3DObjects) {
+                    if (obj && typeof obj.drawShadow === 'function') obj.drawShadow(renderer);
+                }
+            };
+            if (typeof renderer?.renderShadowMaps === 'function') {
+                renderer.renderShadowMaps(this.camera3D, this.lights, drawCasters);
+            } else if (renderer?.beginShadowPass?.(this.camera3D, this.lights)) {
+                drawCasters();
+                renderer.endShadowPass?.();
+            }
+
             if (renderer?.begin3D?.(this.camera3D)) {
                 for (const obj of this._sorted3DObjects) {
                     if (typeof obj.draw3D === 'function') {

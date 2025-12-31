@@ -265,4 +265,22 @@ export default class MeshNode {
       if (child && typeof child.draw3D === 'function') child.draw3D(renderer);
     }
   }
+
+  /**
+   * Draw this node into the directional shadow map (depth-only pass).
+   * @param {import('./Renderer.js').default} renderer
+   */
+  drawShadow(renderer) {
+    if (!this.active) return;
+    if (!renderer?.drawMeshShadow) return;
+
+    this._ensureMesh(renderer);
+    if (!this._mesh) return;
+
+    renderer.drawMeshShadow(this._mesh, this._getModelMatrix());
+
+    for (const child of this.children) {
+      if (child && typeof child.drawShadow === 'function') child.drawShadow(renderer);
+    }
+  }
 }

@@ -9,6 +9,7 @@ const game = {
   currentScene: null,
 
   _orbitAngle: 0,
+  _sunAngle: 0,
 
   /** @param {Renderer} renderer */
   async init(renderer) {
@@ -18,6 +19,17 @@ const game = {
   /** @param {number} dt */
   update(dt) {
     if (!this.currentScene) return;
+
+    // Animate directional light so shadows clearly move (debugging).
+    const sun = /** @type {any} */ (this.currentScene.getObjectByName("Sun"));
+    if (sun && Array.isArray(sun.direction)) {
+      // Keep Y negative so the light points downwards; rotate around Y axis.
+      this._sunAngle += dt * 0.35;
+      const r = 0.6;
+      sun.direction[0] = Math.cos(this._sunAngle) * r;
+      sun.direction[1] = -1.0;
+      sun.direction[2] = Math.sin(this._sunAngle) * r;
+    }
 
     // Animate the sphere node if present
     const sphere = /** @type {any} */ (this.currentScene.getObjectByName("SphereNode"));

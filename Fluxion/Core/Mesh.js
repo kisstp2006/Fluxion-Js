@@ -18,6 +18,8 @@ export default class Mesh {
 
     this.vao = null;
     this._vaoKey = '';
+    /** @type {Map<string, WebGLVertexArrayObject>} */
+    this._vaoByKey = new Map();
     this.indexType = null;
     this.indexCount = 0;
     this.vertexCount = 0;
@@ -57,15 +59,18 @@ export default class Mesh {
 
     if (typeof gl.createVertexArray === 'function') {
       const key = `${positionLoc},${normalLoc},${uvLoc}`;
-      if (this.vao && this._vaoKey === key) return;
-
-      if (this.vao && typeof gl.deleteVertexArray === 'function') {
-        gl.deleteVertexArray(this.vao);
+      const cachedVao = this._vaoByKey.get(key) || null;
+      if (cachedVao) {
+        this.vao = cachedVao;
+        this._vaoKey = key;
+        return;
       }
 
-      this.vao = gl.createVertexArray();
+      const vao = gl.createVertexArray();
+      this.vao = vao;
       this._vaoKey = key;
-      gl.bindVertexArray(this.vao);
+      this._vaoByKey.set(key, vao);
+      gl.bindVertexArray(vao);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
       if (this.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
@@ -73,16 +78,22 @@ export default class Mesh {
       const stride = 8 * 4;
 
       // position (vec3)
-      gl.enableVertexAttribArray(positionLoc);
-      gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, stride, 0);
+      if (positionLoc >= 0) {
+        gl.enableVertexAttribArray(positionLoc);
+        gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, stride, 0);
+      }
 
       // normal (vec3)
-      gl.enableVertexAttribArray(normalLoc);
-      gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, stride, 12);
+      if (normalLoc >= 0) {
+        gl.enableVertexAttribArray(normalLoc);
+        gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, stride, 12);
+      }
 
       // uv (vec2)
-      gl.enableVertexAttribArray(uvLoc);
-      gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 24);
+      if (uvLoc >= 0) {
+        gl.enableVertexAttribArray(uvLoc);
+        gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 24);
+      }
 
       gl.bindVertexArray(null);
     }
@@ -111,12 +122,17 @@ export default class Mesh {
 
   dispose() {
     const gl = this.gl;
-    if (this.vao && typeof gl.deleteVertexArray === 'function') gl.deleteVertexArray(this.vao);
+    if (typeof gl.deleteVertexArray === 'function') {
+      for (const vao of this._vaoByKey.values()) {
+        if (vao) gl.deleteVertexArray(vao);
+      }
+    }
     if (this.ibo) gl.deleteBuffer(this.ibo);
     if (this.vbo) gl.deleteBuffer(this.vbo);
     this.vao = null;
     this.ibo = null;
     this.vbo = null;
+    this._vaoByKey.clear();
   }
 
   /**

@@ -1,5 +1,6 @@
 #version 300 es
 precision highp float;
+precision highp sampler2DArray;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -40,6 +41,34 @@ uniform float u_exposure;          // HDR exposure multiplier (linear)
 // 4 = Normal (final world-space normal, mapped to 0..1)
 // 5 = Ambient Occlusion (after strength applied)
 uniform int u_materialDebugView;
+
+// Cascaded Shadow Maps (CSM) for the main directional light.
+// We use a depth texture array so all cascades share one sampler binding.
+#define MAX_CASCADES 4
+uniform sampler2DArray u_csmShadowMap;
+uniform mat4 u_csmLightViewProj[MAX_CASCADES];
+// End distance for each cascade in VIEW space (linear units), length MAX_CASCADES.
+uniform float u_csmSplits[MAX_CASCADES];
+uniform int u_csmCount;      // 1..MAX_CASCADES
+uniform float u_cameraNear;  // camera near plane
+uniform float u_cameraFar;   // camera far plane
+uniform float u_csmBlend;    // 0..1 fraction of cascade length used for blending near boundaries
+
+uniform float u_shadowBias;
+uniform int u_hasShadowMap;
+// Shadow filtering
+// - u_shadowPcfKernel: 1 = hard (PS2 style), 3 or 5 = PCF kernel size
+// - u_shadowPcfRadius: sample radius in *texels* (kept uniform across scene)
+// - u_shadowFadeStart/End: fade shadows out with camera distance (world units)
+uniform int u_shadowPcfKernel;
+uniform float u_shadowPcfRadius;
+uniform float u_shadowFadeStart;
+uniform float u_shadowFadeEnd;
+// 0 = shadows affect direct lighting only
+// 1 = shadows also affect INDIRECT diffuse (ambient + diffuse IBL), but NOT specular IBL and NOT emissive
+uniform int u_shadowAffectsIndirect;
+// 0..1 shadow strength (0 = disabled, 1 = full)
+uniform float u_shadowStrength;
 
 // Environment (IBL)
 uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
@@ -145,6 +174,92 @@ mat3 computeTBN(vec3 N, vec3 pos, vec2 uv) {
   return mat3(T * invMax, B * invMax, N);
 }
 
+float _shadowTap(int layer, vec2 uv, float currentDepth, float bias) {
+  float closest = texture(u_csmShadowMap, vec3(uv, float(layer))).r;
+  return (currentDepth - bias > closest) ? 0.0 : 1.0;
+}
+
+float _linearizeDepth(float depth01, float near, float far) {
+  // depth01 is gl_FragCoord.z in [0..1]
+  float z = depth01 * 2.0 - 1.0; // NDC
+  return (2.0 * near * far) / max((far + near) - z * (far - near), 1e-6);
+}
+
+float _shadowForCascade(int cascadeIdx, vec3 worldPos, float bias) {
+  vec4 lightClip = u_csmLightViewProj[cascadeIdx] * vec4(worldPos, 1.0);
+  float invW = 1.0 / max(lightClip.w, 1e-6);
+  vec3 ndc = lightClip.xyz * invW;          // -1..1
+  vec3 uvz = ndc * 0.5 + 0.5;               //  0..1
+
+  // Outside the shadow frustum: treat as lit.
+  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) {
+    return 1.0;
+  }
+
+  int k = u_shadowPcfKernel;
+  // Clamp to supported kernel sizes: 1 (hard), 3, 5
+  if (k != 1 && k != 3 && k != 5) k = 3;
+  int halfK = (k - 1) / 2;
+
+  // Convert radius from texels -> UV
+  vec2 texDim = vec2(textureSize(u_csmShadowMap, 0).xy);
+  vec2 texel = 1.0 / max(texDim, vec2(1.0));
+  vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
+
+  // Hard shadow (PS2 style): single tap
+  if (k == 1) {
+    return _shadowTap(cascadeIdx, uvz.xy, uvz.z, bias);
+  }
+
+  // PCF: fixed loop bounds (5x5 max) with dynamic kernel selection
+  float sum = 0.0;
+  float count = 0.0;
+  for (int y = -2; y <= 2; y++) {
+    for (int x = -2; x <= 2; x++) {
+      if (abs(x) > halfK || abs(y) > halfK) continue;
+      vec2 uv = uvz.xy + vec2(float(x), float(y)) * stepUv;
+      sum += _shadowTap(cascadeIdx, uv, uvz.z, bias);
+      count += 1.0;
+    }
+  }
+  return (count > 0.0) ? (sum / count) : 1.0;
+}
+
+float computeDirectionalShadow(vec3 worldPos, float bias) {
+  if (u_hasShadowMap != 1) return 1.0;
+  int c = clamp(u_csmCount, 1, MAX_CASCADES);
+
+  // Use view-space depth to select cascade.
+  float near = max(u_cameraNear, 1e-4);
+  float far = max(u_cameraFar, near + 1e-3);
+  float viewDepth = _linearizeDepth(gl_FragCoord.z, near, far);
+
+  int idx = 0;
+  for (int i = 0; i < MAX_CASCADES; i++) {
+    if (i >= c) break;
+    if (viewDepth <= u_csmSplits[i]) { idx = i; break; }
+    idx = i;
+  }
+
+  // Blend between cascades to avoid hard seams.
+  float start = (idx == 0) ? near : u_csmSplits[idx - 1];
+  float end = u_csmSplits[idx];
+  float len = max(end - start, 1e-3);
+  float blendFrac = clamp(u_csmBlend, 0.0, 0.5);
+  float blendDist = len * blendFrac;
+
+  float s0 = _shadowForCascade(idx, worldPos, bias);
+  if (idx < (c - 1) && blendDist > 0.0) {
+    float blendStart = end - blendDist;
+    if (viewDepth > blendStart) {
+      float t = clamp((viewDepth - blendStart) / max(end - blendStart, 1e-6), 0.0, 1.0);
+      float s1 = _shadowForCascade(idx + 1, worldPos, bias);
+      return mix(s0, s1, t);
+    }
+  }
+  return s0;
+}
+
 void main() {
   // --- Material sampling ---
   vec4 baseTex = texture(u_baseColorMap, v_uv);
@@ -203,6 +318,18 @@ void main() {
 
   vec3 V = normalize(u_cameraPos - v_worldPos);
   float NdotV = max(dot(N, V), 0.0);
+
+  // Soft/hard shadow visibility for the (first) directional light.
+  // 1 = lit, 0 = shadowed
+  float dirShadow = computeDirectionalShadow(v_worldPos, u_shadowBias);
+  // Fade shadows out with camera distance (reduces distant shimmering + hard borders).
+  float camDist = length(v_worldPos - u_cameraPos);
+  float fadeT = smoothstep(u_shadowFadeStart, u_shadowFadeEnd, camDist);
+  dirShadow = mix(dirShadow, 1.0, fadeT);
+  float shadowStrength = clamp(u_shadowStrength, 0.0, 1.0);
+  // Apply strength by blending between "no shadow" (1.0) and computed visibility.
+  float dirVisibility = mix(1.0, dirShadow, shadowStrength);
+  float indirectShadowMul = (u_shadowAffectsIndirect == 1) ? dirVisibility : 1.0;
 
   // --- Specular anti-aliasing (prevents "tight white dots" on rough dielectrics) ---
   // Increase effective roughness based on how quickly the normal changes across the pixel.
@@ -283,7 +410,8 @@ void main() {
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     vec3 diffuse = (kD * baseColor) / PI;
 
-    Lo += (diffuse + specular) * radiance * NdotL * attenuation;
+    float shadow = (type == 0) ? dirVisibility : 1.0;
+    Lo += (diffuse + specular) * radiance * NdotL * attenuation * shadow;
   }
 
   // Indirect lighting:
@@ -291,6 +419,8 @@ void main() {
   // - Specular term uses GGX prefilter + split-sum BRDF LUT
   vec3 ambient = u_ambientColor * baseColor * (1.0 - metallic);
   ambient *= ao;
+  // Optional: allow shadowing to affect INDIRECT diffuse only (not specular IBL).
+  ambient *= indirectShadowMul;
 
   if (u_envIntensity > 0.0) {
     vec3 R = reflect(-V, N);
@@ -311,7 +441,7 @@ void main() {
       vec3 specIBL = prefiltered * (Fenv * brdf.x + brdf.y);
 
       // AO affects indirect diffuse only; do NOT occlude specular reflections/highlights.
-      ambient += diffuseIBL * ao;
+      ambient += diffuseIBL * ao * indirectShadowMul;
       ambient += specIBL;
     } else {
       // Fallback: sample the skybox cubemap directly (roughness-driven mip LOD).
@@ -323,7 +453,7 @@ void main() {
       vec3 diffuseIBL = envDiffuse * baseColor * kD;
       vec3 specIBL = envSpec * kS;
 
-      ambient += diffuseIBL * ao;
+      ambient += diffuseIBL * ao * indirectShadowMul;
       ambient += specIBL;
     }
   }

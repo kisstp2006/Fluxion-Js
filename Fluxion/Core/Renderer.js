@@ -3,6 +3,7 @@ import Camera3D from './Camera3D.js';
 import { Mat4 } from './Math3D.js';
 import DebugRenderer from './DebugRenderer.js';
 import { LightType } from './Lights.js';
+import { Vector3 } from './Math3D.js';
 
 /**
  * Handles WebGL rendering, including shader management, resizing, and post-processing.
@@ -66,6 +67,71 @@ export default class Renderer {
     this._skyboxAttribs = null;
     this._skyboxUniforms = null;
     this.currentSkybox = null;
+
+    // --- Directional shadow mapping (WebGL2) ---
+    this.shadowsEnabled = true;
+    this.shadowMapSize = 1024;
+    this.shadowBias = 0.0025;
+    this.shadowOrthoSize = 25.0;
+    this.shadowNear = 0.1;
+    this.shadowFar = 80.0;
+    // Cascaded Shadow Maps (CSM)
+    this.csmEnabled = true;
+    this.csmCascadeCount = 4; // 1..4
+    this.csmSplitLambda = 0.6; // 0 = linear, 1 = logarithmic
+    this.csmBlend = 0.15; // 0..0.5 (fraction of cascade length)
+    this.csmMaxDistance = 0.0; // 0 = use camera far; otherwise clamp CSM range
+    // Shadow filtering / quality
+    // 1 = hard (PS2 style), 3 or 5 = PCF kernel size
+    this.shadowPcfKernel = 3;
+    // Radius in texels for PCF taps (uniform softness across scene)
+    this.shadowPcfRadius = 1.25;
+    // Fade shadows out with camera distance (world units)
+    this.shadowFadeStart = 35.0;
+    this.shadowFadeEnd = 90.0;
+    // If true, shadows also darken INDIRECT diffuse (ambient + diffuse IBL). Emissive is never affected.
+    this.shadowAffectsIndirect = true;
+    // Shadow strength (0..1). 0 disables shadowing without disabling the shadow pass.
+    this.shadowStrength = 1.0;
+
+    this.shadowProgram = null;
+    this._shadowAttribs = null;
+    this._shadowUniforms = null;
+    this.shadowFramebuffer = null;
+    this.shadowDepthTexture = null;
+    this._shadowLightViewProj = Mat4.identity();
+    this._shadowReady = false;
+    this._inShadowPass = false;
+    this._shadowPrevFb = null;
+    this._shadowPrevVp = null;
+
+    // Scratch vectors/matrices for shadow computations
+    this._shadowLightPos = new Vector3();
+    this._shadowTarget = new Vector3();
+    this._shadowUp = new Vector3(0, 1, 0);
+    this._shadowView = Mat4.identity();
+    this._shadowProj = Mat4.identity();
+
+    // CSM data (packed for uniform upload)
+    this._csmLightViewProjData = new Float32Array(16 * 4);
+    this._csmSplitsData = new Float32Array(4);
+    this._csmNearUsed = 0.1;
+    this._csmFarUsed = 100.0;
+    // Scratch for frustum corner computation
+    this._csmCorners = [
+      new Vector3(), new Vector3(), new Vector3(), new Vector3(),
+      new Vector3(), new Vector3(), new Vector3(), new Vector3(),
+    ];
+    this._csmTmp = {
+      forward: new Vector3(),
+      right: new Vector3(),
+      up: new Vector3(),
+      centerNear: new Vector3(),
+      centerFar: new Vector3(),
+      center: new Vector3(),
+      lightPos: new Vector3(),
+      tmpP: new Vector3(),
+    };
 
     // PBR lighting defaults (can be overridden by game code)
     // Direction is the direction light rays travel (world space).
@@ -892,6 +958,8 @@ export default class Renderer {
     const fragment3DShaderPath = '../../Fluxion/Shaders/fragment3d_300es.glsl';
     const skyboxVertexShaderPath = '../../Fluxion/Shaders/skybox_vertex_300es.glsl';
     const skyboxFragmentShaderPath = '../../Fluxion/Shaders/skybox_fragment_300es.glsl';
+    const shadowVertexShaderPath = '../../Fluxion/Shaders/shadow_depth_vertex_300es.glsl';
+    const shadowFragmentShaderPath = '../../Fluxion/Shaders/shadow_depth_fragment_300es.glsl';
 
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
@@ -999,6 +1067,24 @@ export default class Renderer {
 
               // Material debug visualization
               materialDebugView: this.gl.getUniformLocation(this.program3D, 'u_materialDebugView'),
+
+              // Shadow mapping (directional)
+              shadowBias: this.gl.getUniformLocation(this.program3D, 'u_shadowBias'),
+              hasShadowMap: this.gl.getUniformLocation(this.program3D, 'u_hasShadowMap'),
+              shadowPcfKernel: this.gl.getUniformLocation(this.program3D, 'u_shadowPcfKernel'),
+              shadowPcfRadius: this.gl.getUniformLocation(this.program3D, 'u_shadowPcfRadius'),
+              shadowFadeStart: this.gl.getUniformLocation(this.program3D, 'u_shadowFadeStart'),
+              shadowFadeEnd: this.gl.getUniformLocation(this.program3D, 'u_shadowFadeEnd'),
+              shadowAffectsIndirect: this.gl.getUniformLocation(this.program3D, 'u_shadowAffectsIndirect'),
+              shadowStrength: this.gl.getUniformLocation(this.program3D, 'u_shadowStrength'),
+              // CSM
+              csmShadowMap: this.gl.getUniformLocation(this.program3D, 'u_csmShadowMap'),
+              csmLightViewProj: this.gl.getUniformLocation(this.program3D, 'u_csmLightViewProj[0]'),
+              csmSplits: this.gl.getUniformLocation(this.program3D, 'u_csmSplits[0]'),
+              csmCount: this.gl.getUniformLocation(this.program3D, 'u_csmCount'),
+              cameraNear: this.gl.getUniformLocation(this.program3D, 'u_cameraNear'),
+              cameraFar: this.gl.getUniformLocation(this.program3D, 'u_cameraFar'),
+              csmBlend: this.gl.getUniformLocation(this.program3D, 'u_csmBlend'),
             };
 
             // Bind sampler units once
@@ -1017,12 +1103,40 @@ export default class Renderer {
             // Raw environment cubemap (skybox) for fallback sampling
             if (this._program3DUniforms.envMap) this.gl.uniform1i(this._program3DUniforms.envMap, 10);
 
+            // CSM shadow map sampler (depth texture array)
+            if (this._program3DUniforms.csmShadowMap) this.gl.uniform1i(this._program3DUniforms.csmShadowMap, 11);
+
             // Material debug visualization (default OFF)
             if (this._program3DUniforms.materialDebugView) this.gl.uniform1i(this._program3DUniforms.materialDebugView, 0);
           }
         }
       } catch {
         this.program3D = null;
+      }
+
+      // Shadow depth program (WebGL2 only)
+      try {
+        const vsS = await this.loadShaderFile(shadowVertexShaderPath);
+        const fsS = await this.loadShaderFile(shadowFragmentShaderPath);
+        const shVS = this.createShader(this.gl.VERTEX_SHADER, vsS);
+        const shFS = this.createShader(this.gl.FRAGMENT_SHADER, fsS);
+        if (shVS && shFS) {
+          this.shadowProgram = this.createProgram(shVS, shFS);
+          if (this.shadowProgram) {
+            this._shadowAttribs = {
+              position: this.gl.getAttribLocation(this.shadowProgram, 'a_position'),
+              normal: this.gl.getAttribLocation(this.shadowProgram, 'a_normal'),
+              uv: this.gl.getAttribLocation(this.shadowProgram, 'a_uv'),
+            };
+            this._shadowUniforms = {
+              model: this.gl.getUniformLocation(this.shadowProgram, 'u_model'),
+              lightViewProj: this.gl.getUniformLocation(this.shadowProgram, 'u_lightViewProj'),
+            };
+            this._initShadowMapResources();
+          }
+        }
+      } catch (e) {
+        this.shadowProgram = null;
       }
       
       // Skybox shader program
@@ -1584,9 +1698,46 @@ export default class Renderer {
     if (u?.exposure) gl.uniform1f(u.exposure, Number.isFinite(this.pbrExposure) ? this.pbrExposure : 1.0);
     if (u?.materialDebugView) gl.uniform1i(u.materialDebugView, (this.materialDebugView | 0));
 
+    // Shadow map uniforms (per-frame)
+    const csmCount = this.csmEnabled ? Math.max(1, Math.min(4, this.csmCascadeCount | 0)) : 1;
+    if (u?.hasShadowMap) gl.uniform1i(u.hasShadowMap, (this._shadowReady && this.shadowDepthTexture && this.shadowsEnabled) ? 1 : 0);
+    if (u?.shadowBias) gl.uniform1f(u.shadowBias, Number.isFinite(this.shadowBias) ? this.shadowBias : 0.0025);
+    if (u?.shadowPcfKernel) gl.uniform1i(u.shadowPcfKernel, (this.shadowPcfKernel | 0) || 1);
+    if (u?.shadowPcfRadius) gl.uniform1f(u.shadowPcfRadius, Number.isFinite(this.shadowPcfRadius) ? this.shadowPcfRadius : 1.25);
+    if (u?.shadowFadeStart) gl.uniform1f(u.shadowFadeStart, Number.isFinite(this.shadowFadeStart) ? this.shadowFadeStart : 35.0);
+    if (u?.shadowFadeEnd) gl.uniform1f(u.shadowFadeEnd, Number.isFinite(this.shadowFadeEnd) ? this.shadowFadeEnd : 90.0);
+    if (u?.shadowAffectsIndirect) gl.uniform1i(u.shadowAffectsIndirect, this.shadowAffectsIndirect ? 1 : 0);
+    if (u?.shadowStrength) gl.uniform1f(u.shadowStrength, Number.isFinite(this.shadowStrength) ? this.shadowStrength : 1.0);
+
+    // CSM uniforms (updated by renderShadowMaps() each frame)
+    if (u?.csmCount) gl.uniform1i(u.csmCount, csmCount);
+    // Use the same near/far that were used to compute cascade splits (CSM range may be clamped).
+    if (u?.cameraNear) gl.uniform1f(u.cameraNear, this._csmNearUsed || cam.near);
+    if (u?.cameraFar) gl.uniform1f(u.cameraFar, this._csmFarUsed || cam.far);
+    if (u?.csmBlend) gl.uniform1f(u.csmBlend, Number.isFinite(this.csmBlend) ? this.csmBlend : 0.15);
+    if (u?.csmSplits) gl.uniform1fv(u.csmSplits, this._csmSplitsData);
+    if (u?.csmLightViewProj) gl.uniformMatrix4fv(u.csmLightViewProj, false, this._csmLightViewProjData);
+
+    if (u?.csmShadowMap) {
+      gl.activeTexture(gl.TEXTURE11);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, (this._shadowReady && this.shadowsEnabled) ? this.shadowDepthTexture : null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
     // IBL (split-sum): irradiance cubemap + GGX prefilter cubemap + BRDF LUT
     // Kick off generation if needed; we’ll fall back to a dim ambient until ready.
+    //
+    // NOTE: IBL generation uses its own programs/FBO/viewport. It runs synchronously (async fn with no awaits),
+    // so we MUST restore GL state afterwards or subsequent uniform uploads/draws will fail.
+    const _prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const _prevVp = gl.getParameter(gl.VIEWPORT);
+    const _prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+    const _prevActiveTex = gl.getParameter(gl.ACTIVE_TEXTURE);
     this.ensureIblForCurrentSkybox?.();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, _prevFb);
+    gl.viewport(_prevVp[0], _prevVp[1], _prevVp[2], _prevVp[3]);
+    gl.useProgram(this.program3D);
+    gl.activeTexture(_prevActiveTex);
 
     const hasEnv = !!(this.currentSkybox && this.currentSkybox.isLoaded && this.currentSkybox.isLoaded() && this.currentSkybox.cubemapTexture);
     const envIntensity = hasEnv ? (Number.isFinite(this.pbrEnvIntensity) ? this.pbrEnvIntensity : 1.0) : 0.0;
@@ -1879,6 +2030,21 @@ export default class Renderer {
     const gl = this.gl;
     if (!gl || !this._ibl?.ready) return null;
 
+    // IMPORTANT: IBL generation runs as an async function (even if it contains no awaits),
+    // and it mutates GL state heavily (programs, FBOs, viewport, VAOs, active texture).
+    // We MUST restore state so the main render loop doesn't break with "uniform location not from associated program"
+    // or framebuffer completeness errors.
+    const _prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+    const _prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const _prevRb = gl.getParameter(gl.RENDERBUFFER_BINDING);
+    const _prevVp = gl.getParameter(gl.VIEWPORT);
+    const _prevActiveTex = gl.getParameter(gl.ACTIVE_TEXTURE);
+    const _prevTex2D = gl.getParameter(gl.TEXTURE_BINDING_2D);
+    const _prevTexCube = gl.getParameter(gl.TEXTURE_BINDING_CUBE_MAP);
+    const _prevVao = (typeof gl.getParameter === 'function' && gl.VERTEX_ARRAY_BINDING !== undefined)
+      ? gl.getParameter(gl.VERTEX_ARRAY_BINDING)
+      : null;
+
     // Try to use float render targets when supported for best quality.
     gl.getExtension('EXT_color_buffer_float');
 
@@ -1916,91 +2082,104 @@ export default class Renderer {
       return tex;
     };
 
-    const fbo = gl.createFramebuffer();
-    const rbo = gl.createRenderbuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, 512, 512);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rbo);
-
-    // Use the skybox cube mesh as capture geometry.
-    const cubeMesh = skybox?._mesh;
-    if (!cubeMesh) return null;
-
-    // Bind env cubemap to unit 0 for all IBL generation shaders.
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_CUBE_MAP, envCubemap);
-
-    // 1) Irradiance map (diffuse)
-    const irrSize = 32;
-    const irr = createCubemap(irrSize, false);
-    gl.viewport(0, 0, irrSize, irrSize);
-    gl.useProgram(this._ibl.progIrradiance);
-    if (this._ibl.uIrr.proj) gl.uniformMatrix4fv(this._ibl.uIrr.proj, false, this._ibl.captureProj);
-
-    // Bind cube vertex layout for capture shader (position only at offset 0)
-    cubeMesh.bindLayout?.(0, 1, 2); // ensure VAO exists (layout locations don't matter for capture shader since we use location=0)
-    if (cubeMesh.vao) gl.bindVertexArray(cubeMesh.vao);
-    else gl.bindBuffer(gl.ARRAY_BUFFER, cubeMesh.vbo);
-
-    for (let face = 0; face < 6; face++) {
-      if (this._ibl.uIrr.view) gl.uniformMatrix4fv(this._ibl.uIrr.view, false, this._ibl.captureViews[face]);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, irr.tex, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      cubeMesh.draw();
-    }
-
-    // 2) Prefiltered env map (specular) with mip chain
-    const preSize = 128;
-    const pre = createCubemap(preSize, true);
-    gl.useProgram(this._ibl.progPrefilter);
-    if (this._ibl.uPre.proj) gl.uniformMatrix4fv(this._ibl.uPre.proj, false, this._ibl.captureProj);
-
-    for (let mip = 0; mip < pre.levels; mip++) {
-      const w = Math.max(1, preSize >> mip);
-      const h = Math.max(1, preSize >> mip);
-      gl.viewport(0, 0, w, h);
-      // Resize depth buffer
+    let fbo = null;
+    let rbo = null;
+    try {
+      fbo = gl.createFramebuffer();
+      rbo = gl.createRenderbuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
       gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
-      const roughness = (pre.levels <= 1) ? 0.0 : (mip / (pre.levels - 1));
-      if (this._ibl.uPre.roughness) gl.uniform1f(this._ibl.uPre.roughness, roughness);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rbo);
+
+      // Use the skybox cube mesh as capture geometry.
+      const cubeMesh = skybox?._mesh;
+      if (!cubeMesh) return null;
+
+      // Bind env cubemap to unit 0 for all IBL generation shaders.
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, envCubemap);
+
+      // 1) Irradiance map (diffuse)
+      const irrSize = 32;
+      const irr = createCubemap(irrSize, false);
+      gl.viewport(0, 0, irrSize, irrSize);
+      // Depth attachment must match the color attachment size.
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, irrSize, irrSize);
+      gl.useProgram(this._ibl.progIrradiance);
+      if (this._ibl.uIrr.proj) gl.uniformMatrix4fv(this._ibl.uIrr.proj, false, this._ibl.captureProj);
+
+      // Bind cube vertex layout for capture shader (position only at offset 0)
+      cubeMesh.bindLayout?.(0, 1, 2);
+      if (cubeMesh.vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(cubeMesh.vao);
+      else gl.bindBuffer(gl.ARRAY_BUFFER, cubeMesh.vbo);
 
       for (let face = 0; face < 6; face++) {
-        if (this._ibl.uPre.view) gl.uniformMatrix4fv(this._ibl.uPre.view, false, this._ibl.captureViews[face]);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, pre.tex, mip);
+        if (this._ibl.uIrr.view) gl.uniformMatrix4fv(this._ibl.uIrr.view, false, this._ibl.captureViews[face]);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, irr.tex, 0);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
         cubeMesh.draw();
       }
+
+      // 2) Prefiltered env map (specular) with mip chain
+      const preSize = 128;
+      const pre = createCubemap(preSize, true);
+      gl.useProgram(this._ibl.progPrefilter);
+      if (this._ibl.uPre.proj) gl.uniformMatrix4fv(this._ibl.uPre.proj, false, this._ibl.captureProj);
+
+      for (let mip = 0; mip < pre.levels; mip++) {
+        const w = Math.max(1, preSize >> mip);
+        const h = Math.max(1, preSize >> mip);
+        gl.viewport(0, 0, w, h);
+        // Resize depth buffer
+        gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+        gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+        const roughness = (pre.levels <= 1) ? 0.0 : (mip / (pre.levels - 1));
+        if (this._ibl.uPre.roughness) gl.uniform1f(this._ibl.uPre.roughness, roughness);
+
+        for (let face = 0; face < 6; face++) {
+          if (this._ibl.uPre.view) gl.uniformMatrix4fv(this._ibl.uPre.view, false, this._ibl.captureViews[face]);
+          gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, pre.tex, mip);
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          cubeMesh.draw();
+        }
+      }
+
+      // 3) BRDF LUT (2D)
+      const brdfSize = 256;
+      const brdfTex = create2D(brdfSize, brdfSize);
+      gl.viewport(0, 0, brdfSize, brdfSize);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, brdfSize, brdfSize);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, brdfTex, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(this._ibl.progBrdf);
+      if (typeof gl.bindVertexArray === 'function') gl.bindVertexArray(null);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+      const record = {
+        irradianceMap: irr.tex,
+        prefilterMap: pre.tex,
+        prefilterMaxLod: pre.levels - 1,
+        brdfLut: brdfTex,
+      };
+      this._ibl.cache.set(envCubemap, record);
+      return record;
+    } finally {
+      // Cleanup our temporary capture targets (objects are kept alive via textures cached above).
+      if (typeof gl.bindVertexArray === 'function') gl.bindVertexArray(_prevVao);
+      gl.useProgram(_prevProg);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, _prevFb);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, _prevRb);
+      gl.viewport(_prevVp[0], _prevVp[1], _prevVp[2], _prevVp[3]);
+      gl.activeTexture(_prevActiveTex);
+      gl.bindTexture(gl.TEXTURE_2D, _prevTex2D);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, _prevTexCube);
+
+      // Detach and release temporary GPU objects.
+      if (fbo) gl.deleteFramebuffer(fbo);
+      if (rbo) gl.deleteRenderbuffer(rbo);
     }
-
-    // 3) BRDF LUT (2D)
-    const brdfSize = 256;
-    const brdfTex = create2D(brdfSize, brdfSize);
-    gl.viewport(0, 0, brdfSize, brdfSize);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, brdfSize, brdfSize);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, brdfTex, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.useProgram(this._ibl.progBrdf);
-    gl.bindVertexArray(null);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    // Cleanup
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-
-    // Cache
-    const record = {
-      irradianceMap: irr.tex,
-      prefilterMap: pre.tex,
-      prefilterMaxLod: pre.levels - 1,
-      brdfLut: brdfTex,
-    };
-    this._ibl.cache.set(envCubemap, record);
-    return record;
   }
 
   /**
@@ -2016,6 +2195,8 @@ export default class Renderer {
     if (!mesh) return false;
 
     const gl = this.gl;
+    // Defensive: ensure the correct program is bound (other subsystems like IBL generation may change it).
+    if (this.program3D) gl.useProgram(this.program3D);
     const model = modelMatrix || this._identityModel3D;
 
     // Bind mesh VAO/layout (cached on mesh side)
@@ -2114,6 +2295,496 @@ export default class Renderer {
     // Draw call
     mesh.draw();
     return true;
+  }
+
+  // --- Shadow mapping (directional light) ---
+  _initShadowMapResources() {
+    const gl = this.gl;
+    if (!this.isWebGL2) return;
+    const size = Math.max(64, (this.shadowMapSize | 0) || 1024);
+    this.shadowMapSize = size;
+    const layers = this.csmEnabled ? Math.max(1, Math.min(4, this.csmCascadeCount | 0)) : 1;
+
+    // Recreate the depth texture if missing (or if previous was 2D).
+    if (!this.shadowDepthTexture) this.shadowDepthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.shadowDepthTexture);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Manual depth compare in shader, so keep compare mode disabled.
+    gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_COMPARE_MODE, gl.NONE);
+    // Use DEPTH_COMPONENT16 for broad WebGL2 compatibility (some drivers are picky with DEPTH_COMPONENT24 for TEXTURE_2D_ARRAY).
+    gl.texImage3D(
+      gl.TEXTURE_2D_ARRAY,
+      0,
+      gl.DEPTH_COMPONENT16,
+      size,
+      size,
+      layers,
+      0,
+      gl.DEPTH_COMPONENT,
+      gl.UNSIGNED_SHORT,
+      null
+    );
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, null);
+
+    if (!this.shadowFramebuffer) this.shadowFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFramebuffer);
+    // Attach layer 0 for completeness check; rendering will attach per-layer.
+    gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.shadowDepthTexture, 0, 0);
+    // Depth-only FBO: no color attachments
+    gl.drawBuffers([gl.NONE]);
+    gl.readBuffer(gl.NONE);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._shadowReady = (status === gl.FRAMEBUFFER_COMPLETE);
+    if (!this._shadowReady) {
+      console.warn('Shadow framebuffer incomplete:', status, '(try lowering resolution or disabling CSM)');
+    }
+  }
+
+  // Shadow tuning / options
+  static ShadowFilter = Object.freeze({
+    PS2: 1,   // hard, 1 tap
+    PCF3: 3,  // 3x3
+    PCF5: 5,  // 5x5
+  });
+
+  /**
+   * Set shadow filter mode.
+   * @param {number|string} mode - 1|'ps2'|'hard' or 3|'pcf3' or 5|'pcf5'
+   */
+  setShadowFilter(mode) {
+    let k = 3;
+    if (typeof mode === 'number' && Number.isFinite(mode)) {
+      k = mode | 0;
+    } else {
+      const s = String(mode || '').toLowerCase().replace(/[\s_-]/g, '');
+      if (s === 'ps2' || s === 'hard' || s === 'nearest') k = 1;
+      else if (s === 'pcf5') k = 5;
+      else k = 3;
+    }
+    if (k !== 1 && k !== 3 && k !== 5) k = 3;
+    this.shadowPcfKernel = k;
+    // Keep depth textures NEAREST-filtered for broad WebGL compatibility.
+    // Softness is controlled by PCF taps + radius instead.
+  }
+
+  /** @param {number} texels */
+  setShadowSoftness(texels) {
+    this.shadowPcfRadius = Math.max(0.0, Number(texels) || 0.0);
+  }
+
+  /** @param {number} start @param {number} end */
+  setShadowFade(start, end) {
+    this.shadowFadeStart = Number(start) || 0.0;
+    this.shadowFadeEnd = Number(end) || 0.0;
+  }
+
+  /** @param {boolean} enabled */
+  setShadowAffectsIndirect(enabled) {
+    this.shadowAffectsIndirect = !!enabled;
+  }
+
+  /** @param {number} strength 0..1 */
+  setShadowStrength(strength) {
+    const s = Number(strength);
+    this.shadowStrength = Number.isFinite(s) ? Math.max(0.0, Math.min(1.0, s)) : 1.0;
+  }
+
+  /** @param {number} count 1..4 */
+  setCsmCascadeCount(count) {
+    const c = Math.max(1, Math.min(4, (Number(count) || 0) | 0));
+    this.csmCascadeCount = c;
+    this._initShadowMapResources();
+  }
+
+  /** @param {number} lambda 0..1 */
+  setCsmSplitLambda(lambda) {
+    const l = Number(lambda);
+    this.csmSplitLambda = Number.isFinite(l) ? Math.max(0.0, Math.min(1.0, l)) : 0.6;
+  }
+
+  /** @param {number} blend 0..0.5 (fraction of cascade length) */
+  setCsmBlend(blend) {
+    const b = Number(blend);
+    this.csmBlend = Number.isFinite(b) ? Math.max(0.0, Math.min(0.5, b)) : 0.15;
+  }
+
+  /** @param {number} maxDistance 0 = use camera far */
+  setCsmMaxDistance(maxDistance) {
+    const d = Number(maxDistance);
+    this.csmMaxDistance = Number.isFinite(d) ? Math.max(0.0, d) : 0.0;
+  }
+
+  /**
+   * Reallocate the shadow map depth texture to a new resolution.
+   * @param {number} size e.g. 512, 1024, 2048
+   * @returns {boolean}
+   */
+  setShadowMapResolution(size) {
+    const s = Math.max(64, (Number(size) || 0) | 0);
+    // Round to power-of-two-ish values helps tooling and predictability.
+    const snapped = (s <= 64) ? 64 : (s <= 128) ? 128 : (s <= 256) ? 256 : (s <= 512) ? 512 : (s <= 1024) ? 1024 : (s <= 2048) ? 2048 : s;
+    this.shadowMapSize = snapped;
+    if (!this.isWebGL2) return false;
+    // Re-init resources to apply new size.
+    this._initShadowMapResources();
+    return !!this._shadowReady;
+  }
+
+  /** @returns {{resolution:number,kernel:number,radius:number,strength:number}} */
+  getShadowQuality() {
+    return {
+      resolution: this.shadowMapSize | 0,
+      kernel: (this.shadowPcfKernel | 0) || 1,
+      radius: Number(this.shadowPcfRadius) || 0,
+      strength: Number(this.shadowStrength) || 0,
+    };
+  }
+
+  // --- Cascaded Shadow Maps (CSM) ---
+  _getMainDirectionalLightDir(lights) {
+    // Pick a directional light direction (fallback to renderer default).
+    let dirArr = this.pbrLightDirection;
+    if (Array.isArray(lights)) {
+      for (const L of lights) {
+        if (!L) continue;
+        const type = (typeof L.type === 'number') ? (L.type | 0)
+          : (String(L.type || '').toLowerCase() === 'directional') ? LightType.Directional
+            : (String(L.type || '').toLowerCase() === 'sun') ? LightType.Directional
+              : null;
+        if (type === LightType.Directional) {
+          if (Array.isArray(L.direction)) dirArr = L.direction;
+          break;
+        }
+      }
+    }
+    const dx = Number(dirArr[0] ?? 0.5);
+    const dy = Number(dirArr[1] ?? -1.0);
+    const dz = Number(dirArr[2] ?? 0.3);
+    const len = Math.hypot(dx, dy, dz) || 1;
+    return [dx / len, dy / len, dz / len];
+  }
+
+  _computeCsmForCamera(camera3D, lights) {
+    const cam = camera3D || this._defaultCamera3D;
+    const count = this.csmEnabled ? Math.max(1, Math.min(4, this.csmCascadeCount | 0)) : 1;
+
+    const near = Math.max(1e-4, Number(cam.near) || 0.1);
+    const farRaw = Math.max(near + 1e-3, Number(cam.far) || 100.0);
+    const far = (Number.isFinite(this.csmMaxDistance) && this.csmMaxDistance > 0)
+      ? Math.min(farRaw, this.csmMaxDistance)
+      : farRaw;
+
+    this._csmNearUsed = near;
+    this._csmFarUsed = far;
+
+    const lambda = Math.max(0.0, Math.min(1.0, Number(this.csmSplitLambda) || 0.6));
+
+    // Split ends (view space)
+    for (let i = 0; i < 4; i++) this._csmSplitsData[i] = far;
+    for (let i = 1; i <= count; i++) {
+      const p = i / count;
+      const log = near * Math.pow(far / near, p);
+      const lin = near + (far - near) * p;
+      this._csmSplitsData[i - 1] = log * lambda + lin * (1.0 - lambda);
+    }
+
+    // Camera basis
+    const tmp = this._csmTmp;
+    tmp.forward.set(cam.target.x - cam.position.x, cam.target.y - cam.position.y, cam.target.z - cam.position.z).normalize();
+    tmp.up.set(cam.up.x, cam.up.y, cam.up.z).normalize();
+    // right = cross(forward, up)
+    tmp.right.set(
+      (tmp.forward.y * tmp.up.z - tmp.forward.z * tmp.up.y),
+      (tmp.forward.z * tmp.up.x - tmp.forward.x * tmp.up.z),
+      (tmp.forward.x * tmp.up.y - tmp.forward.y * tmp.up.x),
+    ).normalize();
+    // up = cross(right, forward) (re-orthonormalize)
+    tmp.up.set(
+      (tmp.right.y * tmp.forward.z - tmp.right.z * tmp.forward.y),
+      (tmp.right.z * tmp.forward.x - tmp.right.x * tmp.forward.z),
+      (tmp.right.x * tmp.forward.y - tmp.right.y * tmp.forward.x),
+    ).normalize();
+
+    const aspect = (this.targetWidth > 0 && this.targetHeight > 0) ? (this.targetWidth / this.targetHeight) : 1.0;
+    const tanFov = Math.tan((Number(cam.fovY) || (Math.PI / 3)) * 0.5);
+
+    const [lx, ly, lz] = this._getMainDirectionalLightDir(lights);
+    // Avoid degenerate up vector when light is near vertical.
+    if (Math.abs(ly) > 0.99) this._shadowUp.set(0, 0, 1);
+    else this._shadowUp.set(0, 1, 0);
+
+    let prev = near;
+    for (let cIdx = 0; cIdx < count; cIdx++) {
+      const splitEnd = this._csmSplitsData[cIdx];
+      const splitStart = prev;
+      prev = splitEnd;
+
+      const hn = tanFov * splitStart;
+      const wn = hn * aspect;
+      const hf = tanFov * splitEnd;
+      const wf = hf * aspect;
+
+      // centers
+      tmp.centerNear.set(
+        cam.position.x + tmp.forward.x * splitStart,
+        cam.position.y + tmp.forward.y * splitStart,
+        cam.position.z + tmp.forward.z * splitStart,
+      );
+      tmp.centerFar.set(
+        cam.position.x + tmp.forward.x * splitEnd,
+        cam.position.y + tmp.forward.y * splitEnd,
+        cam.position.z + tmp.forward.z * splitEnd,
+      );
+
+      const corners = this._csmCorners;
+      // Near plane
+      corners[0].set(tmp.centerNear.x + tmp.up.x * hn - tmp.right.x * wn, tmp.centerNear.y + tmp.up.y * hn - tmp.right.y * wn, tmp.centerNear.z + tmp.up.z * hn - tmp.right.z * wn);
+      corners[1].set(tmp.centerNear.x + tmp.up.x * hn + tmp.right.x * wn, tmp.centerNear.y + tmp.up.y * hn + tmp.right.y * wn, tmp.centerNear.z + tmp.up.z * hn + tmp.right.z * wn);
+      corners[2].set(tmp.centerNear.x - tmp.up.x * hn + tmp.right.x * wn, tmp.centerNear.y - tmp.up.y * hn + tmp.right.y * wn, tmp.centerNear.z - tmp.up.z * hn + tmp.right.z * wn);
+      corners[3].set(tmp.centerNear.x - tmp.up.x * hn - tmp.right.x * wn, tmp.centerNear.y - tmp.up.y * hn - tmp.right.y * wn, tmp.centerNear.z - tmp.up.z * hn - tmp.right.z * wn);
+      // Far plane
+      corners[4].set(tmp.centerFar.x + tmp.up.x * hf - tmp.right.x * wf, tmp.centerFar.y + tmp.up.y * hf - tmp.right.y * wf, tmp.centerFar.z + tmp.up.z * hf - tmp.right.z * wf);
+      corners[5].set(tmp.centerFar.x + tmp.up.x * hf + tmp.right.x * wf, tmp.centerFar.y + tmp.up.y * hf + tmp.right.y * wf, tmp.centerFar.z + tmp.up.z * hf + tmp.right.z * wf);
+      corners[6].set(tmp.centerFar.x - tmp.up.x * hf + tmp.right.x * wf, tmp.centerFar.y - tmp.up.y * hf + tmp.right.y * wf, tmp.centerFar.z - tmp.up.z * hf + tmp.right.z * wf);
+      corners[7].set(tmp.centerFar.x - tmp.up.x * hf - tmp.right.x * wf, tmp.centerFar.y - tmp.up.y * hf - tmp.right.y * wf, tmp.centerFar.z - tmp.up.z * hf - tmp.right.z * wf);
+
+      // cascade center
+      tmp.center.set(0, 0, 0);
+      for (let i = 0; i < 8; i++) tmp.center.add(corners[i]);
+      tmp.center.scale(1 / 8);
+
+      // light view (position doesn't affect an ortho shadow much; just keep it stable)
+      const dist = Math.max(10.0, (Number(this.shadowFar) || 80) * 0.5);
+      tmp.lightPos.set(tmp.center.x - lx * dist, tmp.center.y - ly * dist, tmp.center.z - lz * dist);
+      Mat4.lookAt(tmp.lightPos, tmp.center, this._shadowUp, this._shadowView);
+
+      // bounds in light space
+      let minX = Infinity, minY = Infinity, minZ = Infinity;
+      let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+      for (let i = 0; i < 8; i++) {
+        Mat4.transformPoint(this._shadowView, corners[i], tmp.tmpP);
+        const x = tmp.tmpP.x, y = tmp.tmpP.y, z = tmp.tmpP.z;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+
+      // Stabilize: square extents + snap to texel grid to reduce shimmering.
+      const extent = Math.max(maxX - minX, maxY - minY);
+      let cx = (minX + maxX) * 0.5;
+      let cy = (minY + maxY) * 0.5;
+      const texels = Math.max(1, this.shadowMapSize | 0);
+      const unitsPerTexel = extent / texels;
+      if (unitsPerTexel > 0) {
+        cx = Math.floor(cx / unitsPerTexel) * unitsPerTexel;
+        cy = Math.floor(cy / unitsPerTexel) * unitsPerTexel;
+      }
+      minX = cx - extent * 0.5;
+      maxX = cx + extent * 0.5;
+      minY = cy - extent * 0.5;
+      maxY = cy + extent * 0.5;
+
+      const zPad = 10.0;
+      // Mat4.ortho in this engine expects near/far as POSITIVE distances along -Z (OpenGL convention),
+      // while our light-view Z values for points in front are typically NEGATIVE.
+      // Convert the light-space Z bounds into positive near/far distances so depth testing stores the nearest surface.
+      const nearDist = Math.max(0.1, (-maxZ) - zPad);
+      const farDist = Math.max(nearDist + 1.0, (-minZ) + zPad);
+      Mat4.ortho(minX, maxX, minY, maxY, nearDist, farDist, this._shadowProj);
+      Mat4.multiply(this._shadowProj, this._shadowView, this._shadowLightViewProj);
+      this._csmLightViewProjData.set(this._shadowLightViewProj, cIdx * 16);
+    }
+
+    // Fill remaining matrices with identity (stable uniform upload)
+    for (let i = count; i < 4; i++) this._csmLightViewProjData.set(Mat4.identity(), i * 16);
+    return count;
+  }
+
+  /**
+   * Render all shadow maps for the main directional light.
+   * For CSM this renders multiple cascades into a depth texture array.
+   *
+   * @param {import('./Camera3D.js').default|null|undefined} camera3D
+   * @param {any[]|null|undefined} lights
+   * @param {() => void} drawCasters
+   * @returns {boolean}
+   */
+  renderShadowMaps(camera3D, lights, drawCasters) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.shadowsEnabled) return false;
+    if (!this.shadowProgram || !this.shadowFramebuffer || !this.shadowDepthTexture) return false;
+    if (!this._shadowReady) return false;
+    if (typeof drawCasters !== 'function') return false;
+
+    const gl = this.gl;
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const prevVp = gl.getParameter(gl.VIEWPORT);
+    const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+    const prevPolyOffset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
+
+    const cascadeCount = this._computeCsmForCamera(camera3D || this._defaultCamera3D, lights);
+
+    try {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFramebuffer);
+      gl.viewport(0, 0, this.shadowMapSize, this.shadowMapSize);
+      gl.useProgram(this.shadowProgram);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(2.0, 4.0);
+
+      this._inShadowPass = true;
+
+      for (let cIdx = 0; cIdx < cascadeCount; cIdx++) {
+        gl.framebufferTextureLayer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, this.shadowDepthTexture, 0, cIdx);
+        gl.clearDepth(1.0);
+        gl.clear(gl.DEPTH_BUFFER_BIT);
+
+        if (this._shadowUniforms?.lightViewProj) {
+          gl.uniformMatrix4fv(
+            this._shadowUniforms.lightViewProj,
+            false,
+            this._csmLightViewProjData.subarray(cIdx * 16, cIdx * 16 + 16)
+          );
+        }
+
+        drawCasters();
+      }
+      return true;
+    } finally {
+      this._inShadowPass = false;
+      if (!prevPolyOffset) gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.useProgram(prevProg);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+    }
+  }
+
+  /**
+   * Begin the directional shadow depth pass. Call `drawMeshShadow` for each caster, then `endShadowPass`.
+   * @param {import('./Camera3D.js').default|null|undefined} camera3D
+   * @param {any[]|null|undefined} lights - scene/override lights
+   */
+  beginShadowPass(camera3D, lights) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.shadowsEnabled) return false;
+    if (!this.shadowProgram || !this.shadowFramebuffer || !this.shadowDepthTexture) return false;
+    if (!this._shadowReady) return false;
+
+    const gl = this.gl;
+    const cam = camera3D || this._defaultCamera3D;
+
+    // Save state so we can restore the active render target + viewport for the main pass.
+    this._shadowPrevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const vp = gl.getParameter(gl.VIEWPORT);
+    this._shadowPrevVp = new Int32Array(vp); // copy
+
+    // Pick a directional light direction (fallback to renderer default).
+    let dirArr = this.pbrLightDirection;
+    if (Array.isArray(lights)) {
+      for (const L of lights) {
+        if (!L) continue;
+        const type = (typeof L.type === 'number') ? (L.type | 0)
+          : (String(L.type || '').toLowerCase() === 'directional') ? LightType.Directional
+            : (String(L.type || '').toLowerCase() === 'sun') ? LightType.Directional
+              : null;
+        if (type === LightType.Directional) {
+          if (Array.isArray(L.direction)) dirArr = L.direction;
+          break;
+        }
+      }
+    }
+
+    const dx = Number(dirArr[0] ?? 0.5);
+    const dy = Number(dirArr[1] ?? -1.0);
+    const dz = Number(dirArr[2] ?? 0.3);
+    const len = Math.hypot(dx, dy, dz) || 1;
+    const lx = dx / len, ly = dy / len, lz = dz / len;
+
+    // Shadow target: focus around the camera target (simple + stable).
+    this._shadowTarget.set(cam.target.x, cam.target.y, cam.target.z);
+
+    // Light position: move backward along light direction so the ortho frustum covers the scene.
+    const dist = Math.max(1.0, (this.shadowFar * 0.5));
+    this._shadowLightPos.set(
+      this._shadowTarget.x - lx * dist,
+      this._shadowTarget.y - ly * dist,
+      this._shadowTarget.z - lz * dist
+    );
+
+    // Avoid degenerate up vector when light is near vertical.
+    if (Math.abs(ly) > 0.99) this._shadowUp.set(0, 0, 1);
+    else this._shadowUp.set(0, 1, 0);
+
+    Mat4.lookAt(this._shadowLightPos, this._shadowTarget, this._shadowUp, this._shadowView);
+    const s = Number.isFinite(this.shadowOrthoSize) ? this.shadowOrthoSize : 25.0;
+    Mat4.ortho(-s, s, -s, s, this.shadowNear, this.shadowFar, this._shadowProj);
+    Mat4.multiply(this._shadowProj, this._shadowView, this._shadowLightViewProj);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFramebuffer);
+    gl.viewport(0, 0, this.shadowMapSize, this.shadowMapSize);
+    gl.clearDepth(1.0);
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    gl.useProgram(this.shadowProgram);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.depthMask(true);
+    gl.disable(gl.BLEND);
+
+    // Optional rasterization bias helps reduce acne in addition to shader bias.
+    gl.enable(gl.POLYGON_OFFSET_FILL);
+    gl.polygonOffset(2.0, 4.0);
+
+    if (this._shadowUniforms?.lightViewProj) gl.uniformMatrix4fv(this._shadowUniforms.lightViewProj, false, this._shadowLightViewProj);
+
+    this._inShadowPass = true;
+    return true;
+  }
+
+  drawMeshShadow(mesh, modelMatrix) {
+    if (!this._inShadowPass) return false;
+    if (!mesh) return false;
+
+    const gl = this.gl;
+    const model = modelMatrix || this._identityModel3D;
+
+    // Bind mesh VAO/layout for the shadow program.
+    const a = this._shadowAttribs || {};
+    mesh.bindLayout(a.position ?? 0, a.normal ?? -1, a.uv ?? -1);
+
+    if (mesh.vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(mesh.vao);
+    else {
+      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
+      if (mesh.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
+      const stride = 8 * 4;
+      if ((a.position ?? -1) >= 0) {
+        gl.enableVertexAttribArray(a.position);
+        gl.vertexAttribPointer(a.position, 3, gl.FLOAT, false, stride, 0);
+      }
+    }
+
+    if (this._shadowUniforms?.model) gl.uniformMatrix4fv(this._shadowUniforms.model, false, model);
+
+    mesh.draw();
+    return true;
+  }
+
+  endShadowPass() {
+    if (!this._inShadowPass) return;
+    const gl = this.gl;
+    gl.disable(gl.POLYGON_OFFSET_FILL);
+    // Restore the framebuffer + viewport that were active before the shadow pass.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._shadowPrevFb);
+    const vp = this._shadowPrevVp;
+    if (vp && vp.length >= 4) gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+    this._inShadowPass = false;
   }
 
   /** End 3D rendering and restore 2D state. */
