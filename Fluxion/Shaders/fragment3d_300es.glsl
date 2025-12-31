@@ -1,6 +1,5 @@
 #version 300 es
 precision highp float;
-precision highp sampler2DArray;
 precision highp sampler2D;
 
 in vec3 v_worldPos;
@@ -45,17 +44,21 @@ uniform float u_exposure;          // HDR exposure multiplier (linear)
 // 5 = Ambient Occlusion (after strength applied)
 uniform int u_materialDebugView;
 
+// Shadow Atlas (single depth texture)
+uniform sampler2D u_shadowAtlas;
+uniform vec2 u_shadowAtlasSize; // in pixels
+
 // Cascaded Shadow Maps (CSM) for the main directional light.
-// We use a depth texture array so all cascades share one sampler binding.
 #define MAX_CASCADES 4
-uniform sampler2DArray u_csmShadowMap;
 uniform mat4 u_csmLightViewProj[MAX_CASCADES];
+// Atlas rect per cascade: offset.xy, scale.zw (UV)
+uniform vec4 u_csmRects[MAX_CASCADES];
 // End distance for each cascade in VIEW space (linear units), length MAX_CASCADES.
 uniform float u_csmSplits[MAX_CASCADES];
 uniform int u_csmCount;      // 1..MAX_CASCADES
 uniform float u_cameraNear;  // camera near plane
 uniform float u_cameraFar;   // camera far plane
-uniform float u_csmBlend;    // 0..1 fraction of cascade length used for blending near boundaries
+uniform float u_csmBlend;    // 0..0.5 fraction of cascade length used for blending near boundaries
 
 uniform float u_shadowBias;
 uniform int u_hasShadowMap;
@@ -80,6 +83,14 @@ uniform float u_contactShadowStrength;     // 0..1
 uniform float u_contactShadowMaxDistance;  // world units
 uniform int u_contactShadowSteps;          // e.g. 8..16
 uniform float u_contactShadowThickness;    // depth thickness in 0..1 clip depth units
+
+// Atlas shadows for spot + point lights
+uniform int u_spotHasShadow[MAX_LIGHTS];
+uniform mat4 u_spotShadowMat[MAX_LIGHTS];
+uniform vec4 u_spotShadowRect[MAX_LIGHTS];   // offset.xy, scale.zw
+uniform int u_pointShadowBase[MAX_LIGHTS];    // base index into face arrays, -1 if none
+uniform mat4 u_pointShadowMat[MAX_LIGHTS * 6];
+uniform vec4 u_pointShadowRect[MAX_LIGHTS * 6];
 
 // Environment (IBL)
 uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
@@ -185,8 +196,8 @@ mat3 computeTBN(vec3 N, vec3 pos, vec2 uv) {
   return mat3(T * invMax, B * invMax, N);
 }
 
-float _shadowTap(int layer, vec2 uv, float currentDepth, float bias) {
-  float closest = texture(u_csmShadowMap, vec3(uv, float(layer))).r;
+float _shadowTapAtlas(vec2 uv, float currentDepth, float bias) {
+  float closest = texture(u_shadowAtlas, uv).r;
   return (currentDepth - bias > closest) ? 0.0 : 1.0;
 }
 
@@ -212,14 +223,17 @@ float _shadowForCascade(int cascadeIdx, vec3 worldPos, float bias) {
   if (k != 1 && k != 3 && k != 5) k = 3;
   int halfK = (k - 1) / 2;
 
-  // Convert radius from texels -> UV
-  vec2 texDim = vec2(textureSize(u_csmShadowMap, 0).xy);
-  vec2 texel = 1.0 / max(texDim, vec2(1.0));
+  // Remap into atlas
+  vec4 rect = u_csmRects[cascadeIdx]; // offset.xy, scale.zw
+  vec2 uvAtlas = rect.xy + uvz.xy * rect.zw;
+
+  // Convert radius from texels -> UV (atlas texels)
+  vec2 texel = 1.0 / max(u_shadowAtlasSize, vec2(1.0));
   vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
 
   // Hard shadow (PS2 style): single tap
   if (k == 1) {
-    return _shadowTap(cascadeIdx, uvz.xy, uvz.z, bias);
+    return _shadowTapAtlas(uvAtlas, uvz.z, bias);
   }
 
   // PCF: fixed loop bounds (5x5 max) with dynamic kernel selection
@@ -228,8 +242,8 @@ float _shadowForCascade(int cascadeIdx, vec3 worldPos, float bias) {
   for (int y = -2; y <= 2; y++) {
     for (int x = -2; x <= 2; x++) {
       if (abs(x) > halfK || abs(y) > halfK) continue;
-      vec2 uv = uvz.xy + vec2(float(x), float(y)) * stepUv;
-      sum += _shadowTap(cascadeIdx, uv, uvz.z, bias);
+      vec2 uv = uvAtlas + vec2(float(x), float(y)) * stepUv;
+      sum += _shadowTapAtlas(uv, uvz.z, bias);
       count += 1.0;
     }
   }
@@ -269,6 +283,57 @@ float computeDirectionalShadow(vec3 worldPos, float bias) {
     }
   }
   return s0;
+}
+
+float sampleAtlasShadow(vec4 rect, vec4 clip, float bias) {
+  float invW = 1.0 / max(clip.w, 1e-6);
+  vec3 ndc = clip.xyz * invW;
+  vec3 uvz = ndc * 0.5 + 0.5;
+  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) return 1.0;
+
+  vec2 uvAtlas = rect.xy + uvz.xy * rect.zw;
+  int k = u_shadowPcfKernel;
+  if (k != 1 && k != 3 && k != 5) k = 3;
+  int halfK = (k - 1) / 2;
+  vec2 texel = 1.0 / max(u_shadowAtlasSize, vec2(1.0));
+  vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
+
+  if (k == 1) {
+    return _shadowTapAtlas(uvAtlas, uvz.z, bias);
+  }
+  float sum = 0.0;
+  float count = 0.0;
+  for (int y = -2; y <= 2; y++) {
+    for (int x = -2; x <= 2; x++) {
+      if (abs(x) > halfK || abs(y) > halfK) continue;
+      sum += _shadowTapAtlas(uvAtlas + vec2(float(x), float(y)) * stepUv, uvz.z, bias);
+      count += 1.0;
+    }
+  }
+  return (count > 0.0) ? (sum / count) : 1.0;
+}
+
+float computeSpotShadow(int lightIndex, vec3 worldPos, float bias) {
+  if (u_spotHasShadow[lightIndex] != 1) return 1.0;
+  vec4 clip = u_spotShadowMat[lightIndex] * vec4(worldPos, 1.0);
+  return sampleAtlasShadow(u_spotShadowRect[lightIndex], clip, bias);
+}
+
+int _cubeFaceIndex(vec3 v) {
+  vec3 a = abs(v);
+  if (a.x >= a.y && a.x >= a.z) return (v.x >= 0.0) ? 0 : 1;
+  if (a.y >= a.x && a.y >= a.z) return (v.y >= 0.0) ? 2 : 3;
+  return (v.z >= 0.0) ? 4 : 5;
+}
+
+float computePointShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float bias) {
+  int base = u_pointShadowBase[lightIndex];
+  if (base < 0) return 1.0;
+  vec3 toFrag = worldPos - lightPos;
+  int face = _cubeFaceIndex(toFrag);
+  int idx = base + face;
+  vec4 clip = u_pointShadowMat[idx] * vec4(worldPos, 1.0);
+  return sampleAtlasShadow(u_pointShadowRect[idx], clip, bias);
 }
 
 float computeContactShadow(vec3 worldPos, vec3 dirToLight) {
@@ -463,7 +528,20 @@ void main() {
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
     vec3 diffuse = (kD * baseColor) / PI;
 
-    float shadow = (type == 0) ? dirVisibility : 1.0;
+    float shadow = 1.0;
+    if (type == 0) {
+      shadow = dirVisibility;
+    } else if (type == 2) {
+      shadow = computeSpotShadow(i, v_worldPos, u_shadowBias);
+    } else if (type == 1) {
+      // Point light shadowing (optional, atlas-packed cubemap faces)
+      vec3 lightPos = u_lightPosType[i].xyz;
+      shadow = computePointShadow(i, v_worldPos, lightPos, u_shadowBias);
+    }
+
+    // Apply strength consistently
+    shadow = mix(1.0, shadow, clamp(u_shadowStrength, 0.0, 1.0));
+
     Lo += (diffuse + specular) * radiance * NdotL * attenuation * shadow;
   }
 

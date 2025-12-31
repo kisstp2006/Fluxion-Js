@@ -14,6 +14,16 @@ const game = {
   /** @param {Renderer} renderer */
   async init(renderer) {
     this.currentScene = await SceneLoader.load("./scene.xaml", renderer);
+
+    // Enable screen-space shadows (post-process) to enhance small-scale detail.
+    // This complements shadow maps / CSM and helps prevent "floating" objects.
+    if (renderer?.setScreenSpaceShadowsEnabled) {
+      renderer.setScreenSpaceShadowsEnabled(true);
+      renderer.setScreenSpaceShadowStrength?.(0.25);
+      renderer.setScreenSpaceShadowMaxDistance?.(0.8);
+      renderer.setScreenSpaceShadowSteps?.(16);
+      renderer.setScreenSpaceShadowEdgeFade?.(0.06);
+    }
   },
 
   /** @param {number} dt */

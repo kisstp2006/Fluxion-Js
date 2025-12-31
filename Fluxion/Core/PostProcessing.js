@@ -93,6 +93,21 @@ export default class PostProcessing {
       this.loadEffect('blur', effect('blur'), {
         resolution: { type: '2f', value: [width, height] }
       }, { priority: 10 }),
+      // WebGL2-only: screen-space shadows (requires depth + normal buffers provided by Renderer)
+      ...(this.isWebGL2 ? [
+        this.loadEffect('ss_shadows', effect('screen_space_shadows'), {
+          depth: { type: 'tex2D', value: null, unit: 1 },
+          normals: { type: 'tex2D', value: null, unit: 2 },
+          proj: { type: 'mat4', value: new Float32Array(16) },
+          invProj: { type: 'mat4', value: new Float32Array(16) },
+          lightDir: { type: '3f', value: [0, 0, -1] },
+          strength: { type: '1f', value: 0.25 },
+          maxDistance: { type: '1f', value: 0.8 },
+          steps: { type: '1i', value: 16 },
+          thickness: { type: '1f', value: 0.002 },
+          edgeFade: { type: '1f', value: 0.06 },
+        }, { priority: 15 })
+      ] : []),
       this.loadEffect('grayscale', effect('grayscale'), {}, { priority: 20 }),
       this.loadEffect('crt', effect('crt'), {
         time: { type: '1f', value: 0 }
@@ -354,6 +369,20 @@ export default class PostProcessing {
             this.gl.uniform1f(location, uniform.value);
           } else if (uniform.type === '2f') {
             this.gl.uniform2f(location, uniform.value[0], uniform.value[1]);
+          } else if (uniform.type === '3f') {
+            this.gl.uniform3f(location, uniform.value[0], uniform.value[1], uniform.value[2]);
+          } else if (uniform.type === '1i') {
+            this.gl.uniform1i(location, uniform.value | 0);
+          } else if (uniform.type === 'mat4') {
+            this.gl.uniformMatrix4fv(location, false, uniform.value);
+          } else if (uniform.type === 'tex2D') {
+            const unit = (uniform.unit !== undefined) ? (uniform.unit | 0)
+              : (uniform.value && uniform.value.unit !== undefined) ? (uniform.value.unit | 0)
+                : 1;
+            const tex = (uniform.value && uniform.value.texture) ? uniform.value.texture : uniform.value;
+            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, tex);
+            this.gl.uniform1i(location, unit);
           }
         }
       }

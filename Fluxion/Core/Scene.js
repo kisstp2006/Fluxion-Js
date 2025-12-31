@@ -256,7 +256,9 @@ export default class Scene {
                 }
             };
 
-            // Contact shadow depth prepass (camera depth). Must run before begin3D so shading can sample it.
+            // Depth+normal prepass (camera depth + world normals). Needed for:
+            // - contact shadows (PBR shader)
+            // - screen-space shadows (post-process)
             if (typeof renderer?.renderContactDepth === 'function') {
                 renderer.renderContactDepth(this.camera3D, drawCasters);
             }
