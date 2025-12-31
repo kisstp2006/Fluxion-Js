@@ -86,10 +86,12 @@ export default class SceneLoader {
 
                     // Metallic/Roughness factors
                     if (child.hasAttribute('metallicFactor') || child.hasAttribute('metallic')) {
-                        mat.metallicFactor = parseFloat(child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '0');
+                        const m = parseFloat(child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '0');
+                        mat.metallicFactor = Math.min(1, Math.max(0, m));
                     }
                     if (child.hasAttribute('roughnessFactor') || child.hasAttribute('roughness')) {
-                        mat.roughnessFactor = parseFloat(child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '1');
+                        const r = parseFloat(child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '1');
+                        mat.roughnessFactor = Math.min(1, Math.max(0.04, r));
                     }
 
                     // Normal/AO

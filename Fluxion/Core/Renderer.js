@@ -85,6 +85,10 @@ export default class Renderer {
     /** @type {any[] | null} */
     this._overrideLights = null;
 
+    // --- Material debug view (3D PBR) ---
+    // 0 = OFF, 1 = BaseColor, 2 = Metallic, 3 = Roughness, 4 = Normal, 5 = Ambient Occlusion
+    this.materialDebugView = 0;
+
     // Scratch buffers to avoid per-draw allocations
     this._tmpInvModel = new Float32Array(16);
     this._tmpInvModelT = new Float32Array(16);
@@ -988,6 +992,13 @@ export default class Renderer {
               brdfLut: this.gl.getUniformLocation(this.program3D, 'u_brdfLut'),
               envIntensity: this.gl.getUniformLocation(this.program3D, 'u_envIntensity'),
               prefilterMaxLod: this.gl.getUniformLocation(this.program3D, 'u_prefilterMaxLod'),
+              // Environment fallback sampling (raw skybox cubemap)
+              envMap: this.gl.getUniformLocation(this.program3D, 'u_envMap'),
+              envMaxLod: this.gl.getUniformLocation(this.program3D, 'u_envMaxLod'),
+              hasIbl: this.gl.getUniformLocation(this.program3D, 'u_hasIbl'),
+
+              // Material debug visualization
+              materialDebugView: this.gl.getUniformLocation(this.program3D, 'u_materialDebugView'),
             };
 
             // Bind sampler units once
@@ -1003,6 +1014,11 @@ export default class Renderer {
             if (this._program3DUniforms.irradianceMap) this.gl.uniform1i(this._program3DUniforms.irradianceMap, 7);
             if (this._program3DUniforms.prefilterMap) this.gl.uniform1i(this._program3DUniforms.prefilterMap, 8);
             if (this._program3DUniforms.brdfLut) this.gl.uniform1i(this._program3DUniforms.brdfLut, 9);
+            // Raw environment cubemap (skybox) for fallback sampling
+            if (this._program3DUniforms.envMap) this.gl.uniform1i(this._program3DUniforms.envMap, 10);
+
+            // Material debug visualization (default OFF)
+            if (this._program3DUniforms.materialDebugView) this.gl.uniform1i(this._program3DUniforms.materialDebugView, 0);
           }
         }
       } catch {
@@ -1566,6 +1582,7 @@ export default class Renderer {
     const u = this._program3DUniforms;
     if (u?.cameraPos) gl.uniform3f(u.cameraPos, cam.position.x, cam.position.y, cam.position.z);
     if (u?.exposure) gl.uniform1f(u.exposure, Number.isFinite(this.pbrExposure) ? this.pbrExposure : 1.0);
+    if (u?.materialDebugView) gl.uniform1i(u.materialDebugView, (this.materialDebugView | 0));
 
     // IBL (split-sum): irradiance cubemap + GGX prefilter cubemap + BRDF LUT
     // Kick off generation if needed; we’ll fall back to a dim ambient until ready.
@@ -1582,6 +1599,8 @@ export default class Renderer {
 
     const preMax = ibl ? (ibl.prefilterMaxLod || 0) : 0;
     if (u?.prefilterMaxLod) gl.uniform1f(u.prefilterMaxLod, preMax);
+    if (u?.hasIbl) gl.uniform1i(u.hasIbl, ibl ? 1 : 0);
+    if (u?.envMaxLod) gl.uniform1f(u.envMaxLod, hasEnv ? (this.currentSkybox.getMaxLod?.() || 0) : 0);
 
     if (u?.irradianceMap) {
       gl.activeTexture(gl.TEXTURE7);
@@ -1594,6 +1613,10 @@ export default class Renderer {
     if (u?.brdfLut) {
       gl.activeTexture(gl.TEXTURE9);
       gl.bindTexture(gl.TEXTURE_2D, ibl ? ibl.brdfLut : null);
+    }
+    if (u?.envMap) {
+      gl.activeTexture(gl.TEXTURE10);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, hasEnv ? this.currentSkybox.cubemapTexture : null);
     }
     // Keep 2D safe: restore active texture to unit 0 for subsequent sprite flushes.
     gl.activeTexture(gl.TEXTURE0);
@@ -2014,6 +2037,8 @@ export default class Renderer {
     }
 
     const u = this._program3DUniforms;
+    // Allow switching debug mode mid-pass without needing to restart begin3D().
+    if (u?.materialDebugView) gl.uniform1i(u.materialDebugView, (this.materialDebugView | 0));
 
     // Model + normal matrix
     if (u?.model) gl.uniformMatrix4fv(u.model, false, model);
@@ -2035,10 +2060,10 @@ export default class Renderer {
     const baseFactor = m.baseColorFactor || m.albedoColor || [1, 1, 1, 1];
     if (u?.baseColorFactor) gl.uniform4fv(u.baseColorFactor, baseFactor);
 
-    const metallicFactor = Number.isFinite(m.metallicFactor) ? m.metallicFactor : 0.0;
+    const metallicFactor = Number.isFinite(m.metallicFactor) ? Math.min(1.0, Math.max(0.0, m.metallicFactor)) : 0.0;
     if (u?.metallicFactor) gl.uniform1f(u.metallicFactor, metallicFactor);
 
-    const roughnessFactor = Number.isFinite(m.roughnessFactor) ? m.roughnessFactor : 1.0;
+    const roughnessFactor = Number.isFinite(m.roughnessFactor) ? Math.min(1.0, Math.max(0.04, m.roughnessFactor)) : 1.0;
     if (u?.roughnessFactor) gl.uniform1f(u.roughnessFactor, roughnessFactor);
 
     const normalScale = Number.isFinite(m.normalScale) ? m.normalScale : 1.0;
@@ -2472,6 +2497,53 @@ export default class Renderer {
       const worldRelY = -unzoomX * sinR + unzoomY * cosR;
 
       return { x: worldRelX + camera.x, y: worldRelY + camera.y };
+  }
+
+  // --- Material debug visualization (3D PBR) ---
+  static MaterialDebugView = Object.freeze({
+    Off: 0,
+    BaseColor: 1,
+    Metallic: 2,
+    Roughness: 3,
+    Normal: 4,
+    AmbientOcclusion: 5,
+  });
+
+  /**
+   * Set material debug visualization mode for the 3D PBR shader.
+   * This mode bypasses all lighting and displays raw material values.
+   *
+   * @param {number|string} mode
+   * - number: use Renderer.MaterialDebugView enum
+   * - string: 'off'|'basecolor'|'metallic'|'roughness'|'normal'|'ao'|'ambientocclusion'
+   */
+  setMaterialDebugView(mode) {
+    const m = Renderer.MaterialDebugView;
+    let v = 0;
+    if (typeof mode === 'number' && Number.isFinite(mode)) {
+      v = mode | 0;
+    } else {
+      const s = String(mode || '').toLowerCase().replace(/[\s_-]/g, '');
+      if (s === 'basecolor') v = m.BaseColor;
+      else if (s === 'metallic') v = m.Metallic;
+      else if (s === 'roughness') v = m.Roughness;
+      else if (s === 'normal') v = m.Normal;
+      else if (s === 'ao' || s === 'ambientocclusion') v = m.AmbientOcclusion;
+      else v = m.Off;
+    }
+
+    this.materialDebugView = v;
+
+    // If currently in a 3D pass, apply immediately.
+    if (this._in3DPass && this.program3D && this._program3DUniforms?.materialDebugView) {
+      this.gl.useProgram(this.program3D);
+      this.gl.uniform1i(this._program3DUniforms.materialDebugView, v);
+    }
+  }
+
+  /** @returns {number} */
+  getMaterialDebugView() {
+    return (this.materialDebugView | 0);
   }
 
 }

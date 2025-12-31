@@ -75,6 +75,27 @@ export default class Engine {
                 this.showStats = !this.showStats;
                 console.log(`Performance stats ${this.showStats ? 'enabled' : 'disabled'}`);
             }
+            // Material debug visualization (3D PBR): cycle views with F10
+            if (e.key === 'F10') {
+                const r = this.renderer;
+                if (r && typeof r.setMaterialDebugView === 'function') {
+                    const modes = [
+                        { id: 0, name: 'OFF' },
+                        { id: 1, name: 'BaseColor' },
+                        { id: 2, name: 'Metallic' },
+                        { id: 3, name: 'Roughness' },
+                        { id: 4, name: 'Normal' },
+                        { id: 5, name: 'Ambient Occlusion' },
+                    ];
+                    const cur = (typeof r.getMaterialDebugView === 'function') ? (r.getMaterialDebugView() | 0) : (r.materialDebugView | 0);
+                    const idx = Math.max(0, modes.findIndex(m => m.id === cur));
+                    const next = modes[(idx + 1) % modes.length];
+                    r.setMaterialDebugView(next.id);
+                    console.log(`Material debug view: ${next.name}`);
+                } else {
+                    console.warn('Material debug view not available on this renderer.');
+                }
+            }
         });
 
         // Boot sequence (async): load fonts/version, wait renderer ready, init game, wait assets, then start loop.

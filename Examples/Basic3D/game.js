@@ -25,7 +25,7 @@ class Cube3D {
     this.material = new Material();
     this.material.baseColorFactor = [1.0, 0.7, 0.2, 1.0];
     this.material.metallicFactor = 0.0;
-    this.material.roughnessFactor = 0.35;
+    this.material.roughnessFactor = 0.65;
   }
 
   /** @param {number} dt */
@@ -74,7 +74,7 @@ const game = {
       name: 'Lamp',
       position: [2.5, 1.5, -2.5],
       color: [1.0, 0.82, 0.65],
-      intensity: 120,
+      intensity: 70,
       range: 20,
     }));
 

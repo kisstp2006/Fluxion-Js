@@ -107,8 +107,8 @@ export default class Material {
       );
 
       // Metallic / Roughness factors
-      mat.metallicFactor = Material._parseNumber(data.metallicFactor ?? data.metallic, mat.metallicFactor);
-      mat.roughnessFactor = Material._parseNumber(data.roughnessFactor ?? data.roughness, mat.roughnessFactor);
+      mat.metallicFactor = Material._clamp(Material._parseNumber(data.metallicFactor ?? data.metallic, mat.metallicFactor), 0.0, 1.0);
+      mat.roughnessFactor = Material._clamp(Material._parseNumber(data.roughnessFactor ?? data.roughness, mat.roughnessFactor), 0.04, 1.0);
 
       // Normal / AO
       mat.normalScale = Material._parseNumber(data.normalScale, mat.normalScale);
@@ -181,6 +181,12 @@ export default class Material {
   static _parseNumber(v, fallback) {
     const n = Number(v);
     return Number.isFinite(n) ? n : fallback;
+  }
+
+  static _clamp(x, min, max) {
+    const n = Number(x);
+    if (!Number.isFinite(n)) return min;
+    return Math.min(max, Math.max(min, n));
   }
 
   static _parseAlphaMode(v) {

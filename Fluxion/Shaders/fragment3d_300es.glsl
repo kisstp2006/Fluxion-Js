@@ -22,7 +22,9 @@ uniform vec4 u_lightParams[MAX_LIGHTS];         // x = range (0=infinite), y = o
 uniform vec3 u_ambientColor;   // linear RGB (indirect only)
 
 // Metallic–roughness material inputs
-uniform vec4 u_baseColorFactor;    // linear RGBA
+// NOTE: baseColorFactor is authored like an albedo color (typically picked in sRGB),
+// so we convert its RGB to linear before lighting, matching the texture workflow.
+uniform vec4 u_baseColorFactor;    // sRGB RGB + linear A
 uniform float u_metallicFactor;    // 0..1
 uniform float u_roughnessFactor;   // 0..1
 uniform float u_normalScale;       // >=0
@@ -30,12 +32,25 @@ uniform float u_aoStrength;        // 0..1
 uniform vec3 u_emissiveFactor;     // linear RGB
 uniform float u_exposure;          // HDR exposure multiplier (linear)
 
+// Material debug visualization:
+// 0 = OFF (normal PBR)
+// 1 = BaseColor
+// 2 = Metallic
+// 3 = Roughness
+// 4 = Normal (final world-space normal, mapped to 0..1)
+// 5 = Ambient Occlusion (after strength applied)
+uniform int u_materialDebugView;
+
 // Environment (IBL)
 uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
 uniform samplerCube u_prefilterMap;   // GGX prefiltered cubemap (linear, mipped)
 uniform sampler2D u_brdfLut;          // split-sum BRDF LUT (RG)
 uniform float u_envIntensity;         // linear scalar
 uniform float u_prefilterMaxLod;      // max LOD available in prefilterMap
+// Fallback env sampling (before IBL generation finishes)
+uniform samplerCube u_envMap;         // skybox cubemap (assumed sRGB-ish; we decode)
+uniform float u_envMaxLod;            // max LOD available in envMap mip chain
+uniform int u_hasIbl;                 // 1 if irradiance/prefilter/brdfLut are available
 
 // Alpha
 // 0 = OPAQUE, 1 = MASK (cutout), 2 = BLEND
@@ -133,7 +148,8 @@ mat3 computeTBN(vec3 N, vec3 pos, vec2 uv) {
 void main() {
   // --- Material sampling ---
   vec4 baseTex = texture(u_baseColorMap, v_uv);
-  vec3 baseColor = srgbToLinear(baseTex.rgb) * u_baseColorFactor.rgb;
+  vec3 baseFactorLin = srgbToLinear(u_baseColorFactor.rgb);
+  vec3 baseColor = srgbToLinear(baseTex.rgb) * baseFactorLin;
 
   float alpha = baseTex.a * u_baseColorFactor.a;
   alpha *= texture(u_alphaMap, v_uv).r;
@@ -150,8 +166,10 @@ void main() {
   float metallic = clamp(texture(u_metallicMap, v_uv).r * u_metallicFactor, 0.0, 1.0);
   float roughness = clamp(texture(u_roughnessMap, v_uv).r * u_roughnessFactor, 0.04, 1.0);
 
-  float aoTex = texture(u_aoMap, v_uv).r;
-  float ao = mix(1.0, aoTex, clamp(u_aoStrength, 0.0, 1.0));
+  float aoValue = texture(u_aoMap, v_uv).r;
+  float aoStrength = clamp(u_aoStrength, 0.0, 1.0);
+  // AO affects INDIRECT lighting only (ambient / IBL diffuse). It must NOT darken direct light or specular.
+  float ao = mix(1.0, aoValue, aoStrength);
 
   vec3 emissive = srgbToLinear(texture(u_emissiveMap, v_uv).rgb) * u_emissiveFactor;
 
@@ -163,8 +181,38 @@ void main() {
   mat3 TBN = computeTBN(N, v_worldPos, v_uv);
   N = normalize(TBN * nTex);
 
+  // --- Material debug view (bypass ALL lighting) ---
+  if (u_materialDebugView != 0) {
+    vec3 dbg = vec3(0.0);
+    if (u_materialDebugView == 1) {
+      dbg = baseColor; // linear RGB used for lighting
+    } else if (u_materialDebugView == 2) {
+      dbg = vec3(metallic);
+    } else if (u_materialDebugView == 3) {
+      dbg = vec3(roughness);
+    } else if (u_materialDebugView == 4) {
+      dbg = normalize(N) * 0.5 + 0.5;
+    } else if (u_materialDebugView == 5) {
+      dbg = vec3(ao);
+    }
+
+    // Display encode only (no tone mapping / exposure / lighting).
+    outColor = vec4(linearToSrgb(clamp(dbg, 0.0, 1.0)), alpha);
+    return;
+  }
+
   vec3 V = normalize(u_cameraPos - v_worldPos);
   float NdotV = max(dot(N, V), 0.0);
+
+  // --- Specular anti-aliasing (prevents "tight white dots" on rough dielectrics) ---
+  // Increase effective roughness based on how quickly the normal changes across the pixel.
+  // This is NOT a Phong/Blinn shininess exponent; it simply reduces specular aliasing/fireflies.
+  vec3 dndx = dFdx(N);
+  vec3 dndy = dFdy(N);
+  float variance = max(dot(dndx, dndx), dot(dndy, dndy));
+  float r2 = roughness * roughness;
+  r2 = clamp(r2 + 0.25 * variance, 0.0, 1.0);
+  roughness = clamp(sqrt(r2), 0.04, 1.0);
 
   // --- Cook–Torrance BRDF inputs ---
   vec3 F0 = mix(vec3(0.04), baseColor, metallic);
@@ -241,26 +289,43 @@ void main() {
   // Indirect lighting:
   // - Diffuse term uses irradiance convolution
   // - Specular term uses GGX prefilter + split-sum BRDF LUT
-  vec3 ambient = u_ambientColor * baseColor * (1.0 - metallic) * ao;
+  vec3 ambient = u_ambientColor * baseColor * (1.0 - metallic);
+  ambient *= ao;
 
   if (u_envIntensity > 0.0) {
     vec3 R = reflect(-V, N);
-    float lod = clamp(roughness * u_prefilterMaxLod, 0.0, u_prefilterMaxLod);
 
-    // Both IBL textures are generated in linear space already.
-    vec3 irradiance = texture(u_irradianceMap, N).rgb * u_envIntensity;
-    vec3 prefiltered = textureLod(u_prefilterMap, R, lod).rgb * u_envIntensity;
-
-    vec2 brdf = texture(u_brdfLut, vec2(NdotV, roughness)).rg;
     vec3 Fenv = F_SchlickRoughness(NdotV, F0, roughness);
-
     vec3 kS = Fenv;
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
 
-    vec3 diffuseIBL = irradiance * baseColor * kD;
-    vec3 specIBL = prefiltered * (Fenv * brdf.x + brdf.y);
+    if (u_hasIbl == 1) {
+      float lod = clamp(roughness * u_prefilterMaxLod, 0.0, u_prefilterMaxLod);
 
-    ambient += (diffuseIBL + specIBL) * ao;
+      // IBL textures are generated in linear space already.
+      vec3 irradiance = texture(u_irradianceMap, N).rgb * u_envIntensity;
+      vec3 prefiltered = textureLod(u_prefilterMap, R, lod).rgb * u_envIntensity;
+      vec2 brdf = texture(u_brdfLut, vec2(NdotV, roughness)).rg;
+
+      vec3 diffuseIBL = irradiance * baseColor * kD;
+      vec3 specIBL = prefiltered * (Fenv * brdf.x + brdf.y);
+
+      // AO affects indirect diffuse only; do NOT occlude specular reflections/highlights.
+      ambient += diffuseIBL * ao;
+      ambient += specIBL;
+    } else {
+      // Fallback: sample the skybox cubemap directly (roughness-driven mip LOD).
+      // Decode to linear for lighting calculations.
+      vec3 envDiffuse = srgbToLinear(texture(u_envMap, N).rgb) * u_envIntensity;
+      float envLod = clamp(roughness * u_envMaxLod, 0.0, u_envMaxLod);
+      vec3 envSpec = srgbToLinear(textureLod(u_envMap, R, envLod).rgb) * u_envIntensity;
+
+      vec3 diffuseIBL = envDiffuse * baseColor * kD;
+      vec3 specIBL = envSpec * kS;
+
+      ambient += diffuseIBL * ao;
+      ambient += specIBL;
+    }
   }
 
   vec3 color = ambient + Lo + emissive;

@@ -12,14 +12,14 @@
     <PointLight name="Lamp"
                 x="2.5" y="1.5" z="-2.5"
                 color="#ffd2a6"
-                intensity="120"
+                intensity="70"
                 range="20" />
     <!-- Optional spotlight for extra highlights -->
     <SpotLight name="Spot"
                x="-2.5" y="2.0" z="0.0"
                direction="0.35, -0.8, -0.45"
                color="#a6c8ff"
-               intensity="180"
+               intensity="90"
                range="25"
                innerAngleDeg="14"
                outerAngleDeg="24" />

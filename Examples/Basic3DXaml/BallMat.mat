@@ -1,7 +1,7 @@
 {
   "baseColorFactor": "#00ff4cff",
   "metallicFactor": 0.0,
-  "roughnessFactor": 0.35,
+  "roughnessFactor": 0.65,
   "normalScale": 1.0,
   "aoStrength": 1.0,
   "emissiveFactor": [0, 0, 0],
