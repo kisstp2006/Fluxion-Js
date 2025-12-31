@@ -28,6 +28,14 @@ uniform float u_roughnessFactor;   // 0..1
 uniform float u_normalScale;       // >=0
 uniform float u_aoStrength;        // 0..1
 uniform vec3 u_emissiveFactor;     // linear RGB
+uniform float u_exposure;          // HDR exposure multiplier (linear)
+
+// Environment (IBL)
+uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
+uniform samplerCube u_prefilterMap;   // GGX prefiltered cubemap (linear, mipped)
+uniform sampler2D u_brdfLut;          // split-sum BRDF LUT (RG)
+uniform float u_envIntensity;         // linear scalar
+uniform float u_prefilterMaxLod;      // max LOD available in prefilterMap
 
 // Alpha
 // 0 = OPAQUE, 1 = MASK (cutout), 2 = BLEND
@@ -48,13 +56,33 @@ out vec4 outColor;
 
 const float PI = 3.1415926535897932384626433832795;
 
+// Correct sRGB EOTF/OETF (piecewise)
 vec3 srgbToLinear(vec3 c) {
-  // Approximate sRGB->linear. Good enough for engine use.
-  return pow(c, vec3(2.2));
+  vec3 lo = c / 12.92;
+  vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+  return mix(lo, hi, step(vec3(0.04045), c));
 }
 
 vec3 linearToSrgb(vec3 c) {
-  return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
+  c = max(c, vec3(0.0));
+  vec3 lo = c * 12.92;
+  vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+  return mix(lo, hi, step(vec3(0.0031308), c));
+}
+
+// ACES filmic tone mapping (Narkowicz 2015 fit)
+vec3 toneMapACES(vec3 x) {
+  const float a = 2.51;
+  const float b = 0.03;
+  const float c = 2.43;
+  const float d = 0.59;
+  const float e = 0.14;
+  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+// Fresnel with roughness adjustment (helps grazing reflections for rough surfaces)
+vec3 F_SchlickRoughness(float cosTheta, vec3 F0, float roughness) {
+  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
 // GGX / Trowbridge-Reitz normal distribution function
@@ -210,13 +238,36 @@ void main() {
     Lo += (diffuse + specular) * radiance * NdotL * attenuation;
   }
 
-  // Indirect lighting (simple ambient term; AO affects indirect only)
+  // Indirect lighting:
+  // - Diffuse term uses irradiance convolution
+  // - Specular term uses GGX prefilter + split-sum BRDF LUT
   vec3 ambient = u_ambientColor * baseColor * (1.0 - metallic) * ao;
+
+  if (u_envIntensity > 0.0) {
+    vec3 R = reflect(-V, N);
+    float lod = clamp(roughness * u_prefilterMaxLod, 0.0, u_prefilterMaxLod);
+
+    // Both IBL textures are generated in linear space already.
+    vec3 irradiance = texture(u_irradianceMap, N).rgb * u_envIntensity;
+    vec3 prefiltered = textureLod(u_prefilterMap, R, lod).rgb * u_envIntensity;
+
+    vec2 brdf = texture(u_brdfLut, vec2(NdotV, roughness)).rg;
+    vec3 Fenv = F_SchlickRoughness(NdotV, F0, roughness);
+
+    vec3 kS = Fenv;
+    vec3 kD = (vec3(1.0) - kS) * (1.0 - metallic);
+
+    vec3 diffuseIBL = irradiance * baseColor * kD;
+    vec3 specIBL = prefiltered * (Fenv * brdf.x + brdf.y);
+
+    ambient += (diffuseIBL + specIBL) * ao;
+  }
 
   vec3 color = ambient + Lo + emissive;
 
-  // Tone map + gamma encode for display
-  color = color / (color + vec3(1.0));
+  // HDR tone map + sRGB encode for display
+  color *= max(u_exposure, 0.0);
+  color = toneMapACES(color);
   color = linearToSrgb(color);
 
   outColor = vec4(color, alpha);

@@ -72,6 +72,11 @@ export default class Renderer {
     this.pbrLightDirection = [0.5, -1.0, 0.3];
     this.pbrLightColor = [1.0, 1.0, 1.0];
     this.pbrAmbientColor = [0.03, 0.03, 0.03];
+    // HDR exposure for tone mapping (1.0 = neutral)
+    this.pbrExposure = 1.0;
+
+    // Environment lighting (IBL via skybox)
+    this.pbrEnvIntensity = 1.0;
 
     // Real-time lights (PBR): use fixed-size uniform arrays for speed.
     this.maxPbrLights = 8;
@@ -964,6 +969,7 @@ export default class Renderer {
               normalScale: this.gl.getUniformLocation(this.program3D, 'u_normalScale'),
               aoStrength: this.gl.getUniformLocation(this.program3D, 'u_aoStrength'),
               emissiveFactor: this.gl.getUniformLocation(this.program3D, 'u_emissiveFactor'),
+              exposure: this.gl.getUniformLocation(this.program3D, 'u_exposure'),
 
               alphaMode: this.gl.getUniformLocation(this.program3D, 'u_alphaMode'),
               alphaCutoff: this.gl.getUniformLocation(this.program3D, 'u_alphaCutoff'),
@@ -975,6 +981,13 @@ export default class Renderer {
               aoMap: this.gl.getUniformLocation(this.program3D, 'u_aoMap'),
               emissiveMap: this.gl.getUniformLocation(this.program3D, 'u_emissiveMap'),
               alphaMap: this.gl.getUniformLocation(this.program3D, 'u_alphaMap'),
+
+              // Environment reflections (IBL split-sum)
+              irradianceMap: this.gl.getUniformLocation(this.program3D, 'u_irradianceMap'),
+              prefilterMap: this.gl.getUniformLocation(this.program3D, 'u_prefilterMap'),
+              brdfLut: this.gl.getUniformLocation(this.program3D, 'u_brdfLut'),
+              envIntensity: this.gl.getUniformLocation(this.program3D, 'u_envIntensity'),
+              prefilterMaxLod: this.gl.getUniformLocation(this.program3D, 'u_prefilterMaxLod'),
             };
 
             // Bind sampler units once
@@ -986,6 +999,10 @@ export default class Renderer {
             if (this._program3DUniforms.aoMap) this.gl.uniform1i(this._program3DUniforms.aoMap, 4);
             if (this._program3DUniforms.emissiveMap) this.gl.uniform1i(this._program3DUniforms.emissiveMap, 5);
             if (this._program3DUniforms.alphaMap) this.gl.uniform1i(this._program3DUniforms.alphaMap, 6);
+            // IBL samplers
+            if (this._program3DUniforms.irradianceMap) this.gl.uniform1i(this._program3DUniforms.irradianceMap, 7);
+            if (this._program3DUniforms.prefilterMap) this.gl.uniform1i(this._program3DUniforms.prefilterMap, 8);
+            if (this._program3DUniforms.brdfLut) this.gl.uniform1i(this._program3DUniforms.brdfLut, 9);
           }
         }
       } catch {
@@ -1043,6 +1060,87 @@ export default class Renderer {
       emissive: make1x1(0, 0, 0, 255),
       alpha: make1x1(255, 255, 255, 255),
     };
+
+    // --- IBL generation programs (WebGL2 only) ---
+    this._ibl = {
+      ready: false,
+      cache: new WeakMap(), // cubemapTexture -> { irradianceMap, prefilterMap, prefilterMaxLod, brdfLut }
+      inFlight: new WeakMap(), // cubemapTexture -> Promise
+      // programs
+      progIrradiance: null,
+      progPrefilter: null,
+      progBrdf: null,
+      // uniforms
+      uIrr: { view: null, proj: null, envMap: null },
+      uPre: { view: null, proj: null, envMap: null, roughness: null },
+      uBrdf: { },
+      // capture matrices
+      captureProj: Mat4.perspective(Math.PI / 2, 1, 0.1, 10.0),
+      captureViews: null,
+    };
+
+    if (this.isWebGL2) {
+      try {
+        const vCap = await this.loadShaderFile('../../Fluxion/Shaders/IBL/cubemap_capture_vertex_300es.glsl');
+        const fIrr = await this.loadShaderFile('../../Fluxion/Shaders/IBL/irradiance_convolution_fragment_300es.glsl');
+        const fPre = await this.loadShaderFile('../../Fluxion/Shaders/IBL/prefilter_env_fragment_300es.glsl');
+        const vBrdf = await this.loadShaderFile('../../Fluxion/Shaders/IBL/brdf_lut_vertex_300es.glsl');
+        const fBrdf = await this.loadShaderFile('../../Fluxion/Shaders/IBL/brdf_lut_fragment_300es.glsl');
+
+        const vsCap = this.createShader(this.gl.VERTEX_SHADER, vCap);
+        const fsIrr = this.createShader(this.gl.FRAGMENT_SHADER, fIrr);
+        const fsPre = this.createShader(this.gl.FRAGMENT_SHADER, fPre);
+        const vsBrdf = this.createShader(this.gl.VERTEX_SHADER, vBrdf);
+        const fsBrdfS = this.createShader(this.gl.FRAGMENT_SHADER, fBrdf);
+
+        if (vsCap && fsIrr) {
+          this._ibl.progIrradiance = this.createProgram(vsCap, fsIrr);
+        }
+        if (vsCap && fsPre) {
+          this._ibl.progPrefilter = this.createProgram(vsCap, fsPre);
+        }
+        if (vsBrdf && fsBrdfS) {
+          this._ibl.progBrdf = this.createProgram(vsBrdf, fsBrdfS);
+        }
+
+        // Cache uniform locations
+        if (this._ibl.progIrradiance) {
+          this._ibl.uIrr.view = this.gl.getUniformLocation(this._ibl.progIrradiance, 'u_view');
+          this._ibl.uIrr.proj = this.gl.getUniformLocation(this._ibl.progIrradiance, 'u_proj');
+          this._ibl.uIrr.envMap = this.gl.getUniformLocation(this._ibl.progIrradiance, 'u_envMap');
+          this.gl.useProgram(this._ibl.progIrradiance);
+          if (this._ibl.uIrr.envMap) this.gl.uniform1i(this._ibl.uIrr.envMap, 0);
+        }
+        if (this._ibl.progPrefilter) {
+          this._ibl.uPre.view = this.gl.getUniformLocation(this._ibl.progPrefilter, 'u_view');
+          this._ibl.uPre.proj = this.gl.getUniformLocation(this._ibl.progPrefilter, 'u_proj');
+          this._ibl.uPre.envMap = this.gl.getUniformLocation(this._ibl.progPrefilter, 'u_envMap');
+          this._ibl.uPre.roughness = this.gl.getUniformLocation(this._ibl.progPrefilter, 'u_roughness');
+          this.gl.useProgram(this._ibl.progPrefilter);
+          if (this._ibl.uPre.envMap) this.gl.uniform1i(this._ibl.uPre.envMap, 0);
+        }
+
+        // Capture view matrices (lookAt from origin)
+        const mkView = (tx, ty, tz, ux, uy, uz) => {
+          const eye = { x: 0, y: 0, z: 0 };
+          const target = { x: tx, y: ty, z: tz };
+          const up = { x: ux, y: uy, z: uz };
+          return Mat4.lookAt(eye, target, up, new Float32Array(16));
+        };
+        this._ibl.captureViews = [
+          mkView(1, 0, 0, 0, -1, 0),
+          mkView(-1, 0, 0, 0, -1, 0),
+          mkView(0, 1, 0, 0, 0, 1),
+          mkView(0, -1, 0, 0, 0, -1),
+          mkView(0, 0, 1, 0, -1, 0),
+          mkView(0, 0, -1, 0, -1, 0),
+        ];
+
+        this._ibl.ready = !!(this._ibl.progIrradiance && this._ibl.progPrefilter && this._ibl.progBrdf);
+      } catch (e) {
+        this._ibl.ready = false;
+      }
+    }
 
     this.gl.useProgram(this.program);
 
@@ -1467,6 +1565,38 @@ export default class Renderer {
     // Global lighting uniforms (per-frame)
     const u = this._program3DUniforms;
     if (u?.cameraPos) gl.uniform3f(u.cameraPos, cam.position.x, cam.position.y, cam.position.z);
+    if (u?.exposure) gl.uniform1f(u.exposure, Number.isFinite(this.pbrExposure) ? this.pbrExposure : 1.0);
+
+    // IBL (split-sum): irradiance cubemap + GGX prefilter cubemap + BRDF LUT
+    // Kick off generation if needed; we’ll fall back to a dim ambient until ready.
+    this.ensureIblForCurrentSkybox?.();
+
+    const hasEnv = !!(this.currentSkybox && this.currentSkybox.isLoaded && this.currentSkybox.isLoaded() && this.currentSkybox.cubemapTexture);
+    const envIntensity = hasEnv ? (Number.isFinite(this.pbrEnvIntensity) ? this.pbrEnvIntensity : 1.0) : 0.0;
+    if (u?.envIntensity) gl.uniform1f(u.envIntensity, envIntensity);
+
+    let ibl = null;
+    if (hasEnv && this._ibl?.cache) {
+      ibl = this._ibl.cache.get(this.currentSkybox.cubemapTexture) || null;
+    }
+
+    const preMax = ibl ? (ibl.prefilterMaxLod || 0) : 0;
+    if (u?.prefilterMaxLod) gl.uniform1f(u.prefilterMaxLod, preMax);
+
+    if (u?.irradianceMap) {
+      gl.activeTexture(gl.TEXTURE7);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, ibl ? ibl.irradianceMap : null);
+    }
+    if (u?.prefilterMap) {
+      gl.activeTexture(gl.TEXTURE8);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, ibl ? ibl.prefilterMap : null);
+    }
+    if (u?.brdfLut) {
+      gl.activeTexture(gl.TEXTURE9);
+      gl.bindTexture(gl.TEXTURE_2D, ibl ? ibl.brdfLut : null);
+    }
+    // Keep 2D safe: restore active texture to unit 0 for subsequent sprite flushes.
+    gl.activeTexture(gl.TEXTURE0);
 
     const ac = this.pbrAmbientColor || [0.03, 0.03, 0.03];
     if (u?.ambientColor) gl.uniform3f(u.ambientColor, Number(ac[0] ?? 0.03), Number(ac[1] ?? 0.03), Number(ac[2] ?? 0.03));
@@ -1699,6 +1829,155 @@ export default class Renderer {
    */
   setSkybox(skybox) {
     this.currentSkybox = skybox;
+  }
+
+  /**
+   * Ensure IBL textures (irradiance, prefilter, brdfLUT) exist for the current skybox.
+   * Kicks off async generation and returns immediately.
+   */
+  ensureIblForCurrentSkybox() {
+    if (!this.isWebGL2 || !this._ibl?.ready) return;
+    const sb = this.currentSkybox;
+    if (!sb || !sb.isLoaded?.() || !sb.cubemapTexture) return;
+
+    const key = sb.cubemapTexture;
+    if (this._ibl.cache.has(key)) return;
+    if (this._ibl.inFlight.has(key)) return;
+
+    const p = this._generateIblFromCubemap(key, sb);
+    this._ibl.inFlight.set(key, p);
+    this.trackAssetPromise?.(p);
+    p.finally(() => {
+      this._ibl.inFlight.delete(key);
+    });
+  }
+
+  async _generateIblFromCubemap(envCubemap, skybox) {
+    const gl = this.gl;
+    if (!gl || !this._ibl?.ready) return null;
+
+    // Try to use float render targets when supported for best quality.
+    gl.getExtension('EXT_color_buffer_float');
+
+    const createCubemap = (size, withMips) => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, tex);
+
+      const levels = withMips ? (Math.floor(Math.log2(size)) + 1) : 1;
+      for (let level = 0; level < levels; level++) {
+        const w = Math.max(1, size >> level);
+        const h = Math.max(1, size >> level);
+        for (let face = 0; face < 6; face++) {
+          gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, level, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+        }
+      }
+
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, withMips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+      return { tex, levels };
+    };
+
+    const create2D = (w, h) => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      return tex;
+    };
+
+    const fbo = gl.createFramebuffer();
+    const rbo = gl.createRenderbuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, 512, 512);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, rbo);
+
+    // Use the skybox cube mesh as capture geometry.
+    const cubeMesh = skybox?._mesh;
+    if (!cubeMesh) return null;
+
+    // Bind env cubemap to unit 0 for all IBL generation shaders.
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, envCubemap);
+
+    // 1) Irradiance map (diffuse)
+    const irrSize = 32;
+    const irr = createCubemap(irrSize, false);
+    gl.viewport(0, 0, irrSize, irrSize);
+    gl.useProgram(this._ibl.progIrradiance);
+    if (this._ibl.uIrr.proj) gl.uniformMatrix4fv(this._ibl.uIrr.proj, false, this._ibl.captureProj);
+
+    // Bind cube vertex layout for capture shader (position only at offset 0)
+    cubeMesh.bindLayout?.(0, 1, 2); // ensure VAO exists (layout locations don't matter for capture shader since we use location=0)
+    if (cubeMesh.vao) gl.bindVertexArray(cubeMesh.vao);
+    else gl.bindBuffer(gl.ARRAY_BUFFER, cubeMesh.vbo);
+
+    for (let face = 0; face < 6; face++) {
+      if (this._ibl.uIrr.view) gl.uniformMatrix4fv(this._ibl.uIrr.view, false, this._ibl.captureViews[face]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, irr.tex, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      cubeMesh.draw();
+    }
+
+    // 2) Prefiltered env map (specular) with mip chain
+    const preSize = 128;
+    const pre = createCubemap(preSize, true);
+    gl.useProgram(this._ibl.progPrefilter);
+    if (this._ibl.uPre.proj) gl.uniformMatrix4fv(this._ibl.uPre.proj, false, this._ibl.captureProj);
+
+    for (let mip = 0; mip < pre.levels; mip++) {
+      const w = Math.max(1, preSize >> mip);
+      const h = Math.max(1, preSize >> mip);
+      gl.viewport(0, 0, w, h);
+      // Resize depth buffer
+      gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, w, h);
+      const roughness = (pre.levels <= 1) ? 0.0 : (mip / (pre.levels - 1));
+      if (this._ibl.uPre.roughness) gl.uniform1f(this._ibl.uPre.roughness, roughness);
+
+      for (let face = 0; face < 6; face++) {
+        if (this._ibl.uPre.view) gl.uniformMatrix4fv(this._ibl.uPre.view, false, this._ibl.captureViews[face]);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_CUBE_MAP_POSITIVE_X + face, pre.tex, mip);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        cubeMesh.draw();
+      }
+    }
+
+    // 3) BRDF LUT (2D)
+    const brdfSize = 256;
+    const brdfTex = create2D(brdfSize, brdfSize);
+    gl.viewport(0, 0, brdfSize, brdfSize);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rbo);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, brdfSize, brdfSize);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, brdfTex, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.useProgram(this._ibl.progBrdf);
+    gl.bindVertexArray(null);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // Cleanup
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    // Cache
+    const record = {
+      irradianceMap: irr.tex,
+      prefilterMap: pre.tex,
+      prefilterMaxLod: pre.levels - 1,
+      brdfLut: brdfTex,
+    };
+    this._ibl.cache.set(envCubemap, record);
+    return record;
   }
 
   /**

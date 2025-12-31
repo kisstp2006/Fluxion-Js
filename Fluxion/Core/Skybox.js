@@ -21,6 +21,9 @@ export default class Skybox {
     this.isEquirectangular = isEquirectangular;
     this._mesh = null;
     this._loaded = false;
+    // For environment reflections (roughness LOD)
+    this._size = 1;
+    this._maxLod = 0;
     
     // Create skybox mesh (large cube)
     this._createSkyboxMesh();
@@ -92,13 +95,18 @@ export default class Skybox {
     }
     
     // Set texture parameters
-    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     
+    // Generate mipmaps so roughness-based reflections can use LOD.
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
     gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+
+    this._size = 1;
+    this._maxLod = 0;
     this._loaded = true;
   }
 
@@ -148,13 +156,22 @@ export default class Skybox {
 
     try {
       await Promise.all(loadPromises);
+
+      // Store size from first face if possible (used for env LOD)
+      const first = sources[0];
+      const w = (first && typeof first === 'object' && 'width' in first) ? first.width : 0;
+      this._size = (w && Number.isFinite(w)) ? w : (this._size || 1);
+      this._maxLod = Math.max(0, Math.floor(Math.log2(Math.max(1, this._size))) );
       
       // Set texture parameters
-      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
       gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+
+      // Generate mipmaps so roughness-based reflections can use LOD.
+      gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
       
       gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
       this._loaded = true;
@@ -249,14 +266,27 @@ export default class Skybox {
     }
     
     // Set texture parameters
-    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
     
+    // Generate mipmaps so roughness-based reflections can use LOD.
+    gl.generateMipmap(gl.TEXTURE_CUBE_MAP);
     gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+
+    this._size = size;
+    this._maxLod = Math.max(0, Math.floor(Math.log2(Math.max(1, size))) );
     this._loaded = true;
+  }
+
+  /**
+   * Maximum cubemap mip LOD usable for roughness-based sampling.
+   * @returns {number}
+   */
+  getMaxLod() {
+    return this._maxLod || 0;
   }
 
   /**
