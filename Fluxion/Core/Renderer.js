@@ -81,6 +81,21 @@ export default class Renderer {
     this.csmSplitLambda = 0.6; // 0 = linear, 1 = logarithmic
     this.csmBlend = 0.15; // 0..0.5 (fraction of cascade length)
     this.csmMaxDistance = 0.0; // 0 = use camera far; otherwise clamp CSM range
+
+    // --- Contact shadows (screen/view-space micro-occlusion) ---
+    this.contactShadowsEnabled = true;
+    this.contactShadowStrength = 0.35; // subtle by default
+    this.contactShadowMaxDistance = 0.35; // world units along ray
+    this.contactShadowSteps = 12;
+    this.contactShadowThickness = 0.0015; // depth thickness in clip depth units
+
+    this.depthPrepassProgram = null;
+    this._depthPrepassAttribs = null;
+    this._depthPrepassUniforms = null;
+    this.sceneDepthFramebuffer = null;
+    this.sceneDepthTexture = null;
+    this._sceneDepthW = 0;
+    this._sceneDepthH = 0;
     // Shadow filtering / quality
     // 1 = hard (PS2 style), 3 or 5 = PCF kernel size
     this.shadowPcfKernel = 3;
@@ -960,6 +975,8 @@ export default class Renderer {
     const skyboxFragmentShaderPath = '../../Fluxion/Shaders/skybox_fragment_300es.glsl';
     const shadowVertexShaderPath = '../../Fluxion/Shaders/shadow_depth_vertex_300es.glsl';
     const shadowFragmentShaderPath = '../../Fluxion/Shaders/shadow_depth_fragment_300es.glsl';
+    const depthPrepassVertexShaderPath = '../../Fluxion/Shaders/depth_prepass_vertex_300es.glsl';
+    const depthPrepassFragmentShaderPath = '../../Fluxion/Shaders/depth_prepass_fragment_300es.glsl';
 
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
@@ -1085,6 +1102,14 @@ export default class Renderer {
               cameraNear: this.gl.getUniformLocation(this.program3D, 'u_cameraNear'),
               cameraFar: this.gl.getUniformLocation(this.program3D, 'u_cameraFar'),
               csmBlend: this.gl.getUniformLocation(this.program3D, 'u_csmBlend'),
+
+              // Contact shadows (camera depth prepass + ray-march)
+              sceneDepthTex: this.gl.getUniformLocation(this.program3D, 'u_sceneDepthTex'),
+              hasSceneDepth: this.gl.getUniformLocation(this.program3D, 'u_hasSceneDepth'),
+              contactShadowStrength: this.gl.getUniformLocation(this.program3D, 'u_contactShadowStrength'),
+              contactShadowMaxDistance: this.gl.getUniformLocation(this.program3D, 'u_contactShadowMaxDistance'),
+              contactShadowSteps: this.gl.getUniformLocation(this.program3D, 'u_contactShadowSteps'),
+              contactShadowThickness: this.gl.getUniformLocation(this.program3D, 'u_contactShadowThickness'),
             };
 
             // Bind sampler units once
@@ -1105,6 +1130,8 @@ export default class Renderer {
 
             // CSM shadow map sampler (depth texture array)
             if (this._program3DUniforms.csmShadowMap) this.gl.uniform1i(this._program3DUniforms.csmShadowMap, 11);
+            // Scene depth sampler for contact shadows
+            if (this._program3DUniforms.sceneDepthTex) this.gl.uniform1i(this._program3DUniforms.sceneDepthTex, 12);
 
             // Material debug visualization (default OFF)
             if (this._program3DUniforms.materialDebugView) this.gl.uniform1i(this._program3DUniforms.materialDebugView, 0);
@@ -1137,6 +1164,30 @@ export default class Renderer {
         }
       } catch (e) {
         this.shadowProgram = null;
+      }
+
+      // Depth prepass program (WebGL2 only) - used for contact shadows
+      try {
+        const vsD = await this.loadShaderFile(depthPrepassVertexShaderPath);
+        const fsD = await this.loadShaderFile(depthPrepassFragmentShaderPath);
+        const dpVS = this.createShader(this.gl.VERTEX_SHADER, vsD);
+        const dpFS = this.createShader(this.gl.FRAGMENT_SHADER, fsD);
+        if (dpVS && dpFS) {
+          this.depthPrepassProgram = this.createProgram(dpVS, dpFS);
+          if (this.depthPrepassProgram) {
+            this._depthPrepassAttribs = {
+              position: this.gl.getAttribLocation(this.depthPrepassProgram, 'a_position'),
+              normal: this.gl.getAttribLocation(this.depthPrepassProgram, 'a_normal'),
+              uv: this.gl.getAttribLocation(this.depthPrepassProgram, 'a_uv'),
+            };
+            this._depthPrepassUniforms = {
+              viewProj: this.gl.getUniformLocation(this.depthPrepassProgram, 'u_viewProj'),
+              model: this.gl.getUniformLocation(this.depthPrepassProgram, 'u_model'),
+            };
+          }
+        }
+      } catch (e) {
+        this.depthPrepassProgram = null;
       }
       
       // Skybox shader program
@@ -1721,6 +1772,19 @@ export default class Renderer {
     if (u?.csmShadowMap) {
       gl.activeTexture(gl.TEXTURE11);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, (this._shadowReady && this.shadowsEnabled) ? this.shadowDepthTexture : null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    // Contact shadow uniforms (camera depth prepass)
+    const hasSceneDepth = !!(this.sceneDepthTexture && this.contactShadowsEnabled);
+    if (u?.hasSceneDepth) gl.uniform1i(u.hasSceneDepth, hasSceneDepth ? 1 : 0);
+    if (u?.contactShadowStrength) gl.uniform1f(u.contactShadowStrength, Number.isFinite(this.contactShadowStrength) ? this.contactShadowStrength : 0.35);
+    if (u?.contactShadowMaxDistance) gl.uniform1f(u.contactShadowMaxDistance, Number.isFinite(this.contactShadowMaxDistance) ? this.contactShadowMaxDistance : 0.35);
+    if (u?.contactShadowSteps) gl.uniform1i(u.contactShadowSteps, (this.contactShadowSteps | 0) || 0);
+    if (u?.contactShadowThickness) gl.uniform1f(u.contactShadowThickness, Number.isFinite(this.contactShadowThickness) ? this.contactShadowThickness : 0.0015);
+    if (u?.sceneDepthTex) {
+      gl.activeTexture(gl.TEXTURE12);
+      gl.bindTexture(gl.TEXTURE_2D, hasSceneDepth ? this.sceneDepthTexture : null);
       gl.activeTexture(gl.TEXTURE0);
     }
 
@@ -2344,6 +2408,96 @@ export default class Renderer {
     }
   }
 
+  _initSceneDepthResources(width, height) {
+    const gl = this.gl;
+    if (!this.isWebGL2) return false;
+    const w = Math.max(1, width | 0);
+    const h = Math.max(1, height | 0);
+    if (this.sceneDepthTexture && this.sceneDepthFramebuffer && this._sceneDepthW === w && this._sceneDepthH === h) {
+      return true;
+    }
+
+    this._sceneDepthW = w;
+    this._sceneDepthH = h;
+
+    if (!this.sceneDepthTexture) this.sceneDepthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.sceneDepthTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.NONE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, w, h, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    if (!this.sceneDepthFramebuffer) this.sceneDepthFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneDepthFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.sceneDepthTexture, 0);
+    gl.drawBuffers([gl.NONE]);
+    gl.readBuffer(gl.NONE);
+    const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (status !== gl.FRAMEBUFFER_COMPLETE) {
+      console.warn('Scene depth prepass framebuffer incomplete:', status);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Render a camera-depth prepass into a depth texture (used for contact shadows).
+   * @param {import('./Camera3D.js').default|null|undefined} camera3D
+   * @param {() => void} drawCasters
+   * @returns {boolean}
+   */
+  renderContactDepth(camera3D, drawCasters) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.contactShadowsEnabled) return false;
+    if (!this.depthPrepassProgram || !this._depthPrepassUniforms) return false;
+    if (typeof drawCasters !== 'function') return false;
+
+    const gl = this.gl;
+    const cam = camera3D || this._defaultCamera3D;
+
+    const vp = gl.getParameter(gl.VIEWPORT);
+    const w = vp[2] | 0;
+    const h = vp[3] | 0;
+    if (!this._initSceneDepthResources(w, h)) return false;
+
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const prevVp = vp;
+    const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+
+    try {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneDepthFramebuffer);
+      gl.viewport(0, 0, w, h);
+      gl.clearDepth(1.0);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+
+      gl.useProgram(this.depthPrepassProgram);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+
+      const vpMat = cam.getViewProjectionMatrix();
+      if (this._depthPrepassUniforms.viewProj) gl.uniformMatrix4fv(this._depthPrepassUniforms.viewProj, false, vpMat);
+
+      // During drawCasters(), MeshNode.drawShadow will call renderer.drawMeshShadow (shadow program).
+      // For the depth prepass we want the same caster traversal but calling our depth variant.
+      this._inContactDepthPass = true;
+      drawCasters();
+      this._inContactDepthPass = false;
+
+      return true;
+    } finally {
+      this._inContactDepthPass = false;
+      gl.useProgram(prevProg);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+    }
+  }
+
   // Shadow tuning / options
   static ShadowFilter = Object.freeze({
     PS2: 1,   // hard, 1 tap
@@ -2443,6 +2597,13 @@ export default class Renderer {
       strength: Number(this.shadowStrength) || 0,
     };
   }
+
+  // Contact shadow API
+  setContactShadowsEnabled(enabled) { this.contactShadowsEnabled = !!enabled; }
+  setContactShadowStrength(v) { this.contactShadowStrength = Math.max(0.0, Math.min(1.0, Number(v) || 0.0)); }
+  setContactShadowMaxDistance(v) { this.contactShadowMaxDistance = Math.max(0.0, Number(v) || 0.0); }
+  setContactShadowSteps(v) { this.contactShadowSteps = Math.max(0, Math.min(32, (Number(v) || 0) | 0)); }
+  setContactShadowThickness(v) { this.contactShadowThickness = Math.max(0.0, Number(v) || 0.0); }
 
   // --- Cascaded Shadow Maps (CSM) ---
   _getMainDirectionalLightDir(lights) {
@@ -2749,14 +2910,24 @@ export default class Renderer {
   }
 
   drawMeshShadow(mesh, modelMatrix) {
-    if (!this._inShadowPass) return false;
+    // This function is reused by multiple depth-only passes:
+    // - shadow map pass (CSM / single)
+    // - camera depth prepass for contact shadows
+    if (!this._inShadowPass && !this._inContactDepthPass) return false;
     if (!mesh) return false;
 
     const gl = this.gl;
     const model = modelMatrix || this._identityModel3D;
 
-    // Bind mesh VAO/layout for the shadow program.
-    const a = this._shadowAttribs || {};
+    const isContact = !!this._inContactDepthPass;
+    const prog = isContact ? this.depthPrepassProgram : this.shadowProgram;
+    const a = isContact ? (this._depthPrepassAttribs || {}) : (this._shadowAttribs || {});
+    const u = isContact ? (this._depthPrepassUniforms || {}) : (this._shadowUniforms || {});
+
+    if (!prog) return false;
+    gl.useProgram(prog);
+
+    // Bind mesh VAO/layout for the active depth program.
     mesh.bindLayout(a.position ?? 0, a.normal ?? -1, a.uv ?? -1);
 
     if (mesh.vao && typeof gl.bindVertexArray === 'function') gl.bindVertexArray(mesh.vao);
@@ -2770,7 +2941,7 @@ export default class Renderer {
       }
     }
 
-    if (this._shadowUniforms?.model) gl.uniformMatrix4fv(this._shadowUniforms.model, false, model);
+    if (u?.model) gl.uniformMatrix4fv(u.model, false, model);
 
     mesh.draw();
     return true;

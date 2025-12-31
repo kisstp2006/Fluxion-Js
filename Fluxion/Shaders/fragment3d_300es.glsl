@@ -1,12 +1,15 @@
 #version 300 es
 precision highp float;
 precision highp sampler2DArray;
+precision highp sampler2D;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
 in vec2 v_uv;
 
 uniform vec3 u_cameraPos;
+// Same matrix as the vertex stage uses; needed for contact-shadow raymarch reprojection.
+uniform mat4 u_viewProj;
 
 // Real-time lights (accumulated)
 // Light types:
@@ -69,6 +72,14 @@ uniform float u_shadowFadeEnd;
 uniform int u_shadowAffectsIndirect;
 // 0..1 shadow strength (0 = disabled, 1 = full)
 uniform float u_shadowStrength;
+
+// Contact shadows (camera depth prepass)
+uniform sampler2D u_sceneDepthTex;
+uniform int u_hasSceneDepth;
+uniform float u_contactShadowStrength;     // 0..1
+uniform float u_contactShadowMaxDistance;  // world units
+uniform int u_contactShadowSteps;          // e.g. 8..16
+uniform float u_contactShadowThickness;    // depth thickness in 0..1 clip depth units
 
 // Environment (IBL)
 uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
@@ -260,6 +271,42 @@ float computeDirectionalShadow(vec3 worldPos, float bias) {
   return s0;
 }
 
+float computeContactShadow(vec3 worldPos, vec3 dirToLight) {
+  if (u_hasSceneDepth != 1) return 1.0;
+  int steps = max(u_contactShadowSteps, 0);
+  if (steps <= 0) return 1.0;
+  float maxDist = max(u_contactShadowMaxDistance, 0.0);
+  if (maxDist <= 0.0) return 1.0;
+
+  // Start slightly offset to avoid immediate self-hit.
+  vec3 start = worldPos + dirToLight * 0.01;
+  float hit = 0.0;
+
+  for (int i = 1; i <= 24; i++) {
+    if (i > steps) break;
+    float t = (float(i) / float(steps)) * maxDist;
+    vec3 p = start + dirToLight * t;
+    vec4 clip = u_viewProj * vec4(p, 1.0);
+    float invW = 1.0 / max(clip.w, 1e-6);
+    vec3 ndc = clip.xyz * invW;
+    vec3 uvz = ndc * 0.5 + 0.5;
+    if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) {
+      continue;
+    }
+
+    float sceneDepth = texture(u_sceneDepthTex, uvz.xy).r;
+    // If our ray point is behind geometry that the camera sees, we found a nearby occluder.
+    if (uvz.z - u_contactShadowThickness > sceneDepth) {
+      // Stronger when hit is closer.
+      hit = 1.0 - (t / maxDist);
+      break;
+    }
+  }
+
+  float strength = clamp(u_contactShadowStrength, 0.0, 1.0);
+  return 1.0 - hit * strength;
+}
+
 void main() {
   // --- Material sampling ---
   vec4 baseTex = texture(u_baseColorMap, v_uv);
@@ -330,6 +377,12 @@ void main() {
   // Apply strength by blending between "no shadow" (1.0) and computed visibility.
   float dirVisibility = mix(1.0, dirShadow, shadowStrength);
   float indirectShadowMul = (u_shadowAffectsIndirect == 1) ? dirVisibility : 1.0;
+
+  // Contact shadows: short-distance occlusion toward the main directional light.
+  // These are subtle and only affect very near intersections (helps grounding).
+  vec3 dirToLight = normalize(-u_lightDirInner[0].xyz);
+  float contactMul = computeContactShadow(v_worldPos, dirToLight);
+  dirVisibility *= contactMul;
 
   // --- Specular anti-aliasing (prevents "tight white dots" on rough dielectrics) ---
   // Increase effective roughness based on how quickly the normal changes across the pixel.

@@ -255,6 +255,12 @@ export default class Scene {
                     if (obj && typeof obj.drawShadow === 'function') obj.drawShadow(renderer);
                 }
             };
+
+            // Contact shadow depth prepass (camera depth). Must run before begin3D so shading can sample it.
+            if (typeof renderer?.renderContactDepth === 'function') {
+                renderer.renderContactDepth(this.camera3D, drawCasters);
+            }
+
             if (typeof renderer?.renderShadowMaps === 'function') {
                 renderer.renderShadowMaps(this.camera3D, this.lights, drawCasters);
             } else if (renderer?.beginShadowPass?.(this.camera3D, this.lights)) {
