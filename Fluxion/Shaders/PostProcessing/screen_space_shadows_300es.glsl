@@ -49,7 +49,11 @@ void main() {
     return;
   }
 
-  vec3 N = decodeNormal(texture(u_normals, v_texCoord).rgb);
+  vec4 nPacked = texture(u_normals, v_texCoord);
+  vec3 N = decodeNormal(nPacked.rgb);
+  // Primary shadow visibility (CSM) written by the normal prepass into alpha.
+  // 1 = fully lit, 0 = fully shadowed.
+  float primaryVis = clamp(nPacked.a, 0.0, 1.0);
   vec3 V0 = reconstructViewPos(v_texCoord, depth0);
 
   float strength = clamp(u_strength, 0.0, 1.0) * edgeMask(v_texCoord);
@@ -87,9 +91,11 @@ void main() {
     }
   }
 
-  float shadow = clamp(hit * strength, 0.0, 1.0);
-  // Blend: enhance missing detail, don't replace shadow maps.
-  base.rgb *= (1.0 - shadow);
+  float ssOcc = clamp(hit * strength, 0.0, 1.0);
+  // Detail-layer compositing: reduce SS occlusion where the primary shadow already occludes
+  // to prevent double-darkening.
+  float detailOcc = ssOcc * primaryVis;
+  base.rgb *= (1.0 - detailOcc);
   outColor = base;
 }
 
