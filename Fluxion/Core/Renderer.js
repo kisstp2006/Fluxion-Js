@@ -1756,27 +1756,50 @@ export default class Renderer {
     this._legacyDrawCallsThisFrame = 0;
     this._usedInstancingThisFrame = false;
 
+    const gl = this.gl;
+
+    // Defensive: some debug/post passes may leave scissor/color masks enabled.
+    // If scissor is enabled, gl.clear() only clears the scissor rect, leaving stale pixels.
+    const wasScissor = gl.isEnabled(gl.SCISSOR_TEST);
+    const prevScissorBox = wasScissor ? gl.getParameter(gl.SCISSOR_BOX) : null;
+    const prevViewport = gl.getParameter(gl.VIEWPORT);
+
+    if (wasScissor) gl.disable(gl.SCISSOR_TEST);
+    gl.colorMask(true, true, true, true);
+    gl.depthMask(true);
+    gl.stencilMask(0xFF);
+
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
-      this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, this.mainScreenMsaaFramebuffer || this.mainScreenFramebuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.mainScreenMsaaFramebuffer || this.mainScreenFramebuffer);
 
       // Clear the entire framebuffer (including black bars area)
-      this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       const clearMask = (this.mainScreenMsaaFramebuffer || this.mainScreenDepthStencilRbo)
-        ? (this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT | this.gl.STENCIL_BUFFER_BIT)
-        : this.gl.COLOR_BUFFER_BIT;
-      this.gl.clear(clearMask);
+        ? (gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT)
+        : gl.COLOR_BUFFER_BIT;
+      gl.clear(clearMask);
 
       // Set viewport to the letterboxed area for the game to draw into
-      this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
-      return;
+      gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+    } else {
+      // No post-processing: render directly to the default framebuffer.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     }
 
-    // No post-processing: render directly to the default framebuffer.
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
-    this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    this.gl.clear(this.gl.COLOR_BUFFER_BIT);
-    this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
+    // Restore scissor state if it was enabled before beginFrame().
+    if (wasScissor) {
+      gl.enable(gl.SCISSOR_TEST);
+      gl.scissor(prevScissorBox[0], prevScissorBox[1], prevScissorBox[2], prevScissorBox[3]);
+    }
+    // Restore viewport in case callers rely on it (we already set the game viewport above).
+    // Keep this as a safety net for any external code that queries viewport after beginFrame.
+    if (prevViewport) {
+      // no-op: viewport is already set for the game; preserve intent and avoid extra state churn.
+    }
   }
 
   /**
