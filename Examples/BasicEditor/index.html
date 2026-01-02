@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fluxion - Basic Editor</title>
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "gl-matrix": "../../node_modules/gl-matrix/esm/index.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="app">
+    <aside class="panel" id="leftPanel">
+      <div class="panelHeader">
+        <div class="title">Basic Editor</div>
+        <div class="subtitle">Scene tree + inspector</div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Scene</div>
+        <div class="row">
+          <select id="sceneSelect" class="input">
+            <option value="../Basic3DXaml/scene.xaml">Basic3DXaml (scene.xaml)</option>
+          </select>
+          <button id="reloadBtn" class="btn">Reload</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Mode</div>
+        <div class="segmented" role="tablist" aria-label="Editor Mode">
+          <button id="mode2dBtn" class="segBtn active" role="tab" aria-selected="true">2D</button>
+          <button id="mode3dBtn" class="segBtn" role="tab" aria-selected="false">3D</button>
+        </div>
+      </div>
+
+      <div class="section grow">
+        <div class="sectionTitle">Objects</div>
+        <div id="sceneTree" class="tree" role="list"></div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Tips</div>
+        <div class="hint">
+          - Click an object to inspect/edit.<br />
+          - WASD/QE + mouse to fly (from the loaded scene’s game logic, if present).
+        </div>
+      </div>
+    </aside>
+
+    <main class="viewport">
+      <canvas id="gameCanvas"></canvas>
+      <div class="viewportOverlay" id="overlay">
+        <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
+        <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
+      </div>
+    </main>
+
+    <aside class="panel" id="rightPanel">
+      <div class="panelHeader">
+        <div class="title">Inspector</div>
+        <div class="subtitle" id="inspectorSubtitle">No selection</div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Common</div>
+        <div class="form" id="inspectorCommon"></div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Transform</div>
+        <div class="form" id="inspectorTransform"></div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Debug</div>
+        <label class="checkRow"><input type="checkbox" id="dbgShowAxes" checked /> Show axes</label>
+        <label class="checkRow"><input type="checkbox" id="dbgShowAabb" checked /> Show AABB (approx)</label>
+        <label class="checkRow"><input type="checkbox" id="dbgDepthTest" checked /> Depth-test debug</label>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

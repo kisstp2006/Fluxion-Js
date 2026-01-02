@@ -13,6 +13,9 @@
   "license": "ISC",
   "type": "commonjs",
   "description": "",
+  "dependencies": {
+    "gl-matrix": "^3.4.4"
+  },
   "devDependencies": {
     "electron": "^35.0.1",
     "electron-builder": "^25.1.8"

@@ -24,7 +24,8 @@ export default class Engine {
     *     renderTargets?: {
     *       msaaSamples?: number
     *     }
-    *     instancing2D?: boolean
+    *     instancing2D?: boolean,
+    *     respectCssSize?: boolean
      *   },
      *   splashScreen?: any,
      *   input?: any

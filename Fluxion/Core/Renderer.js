@@ -23,7 +23,8 @@ export default class Renderer {
     *   renderTargets?: {
     *     msaaSamples?: number
     *   }
-    *   instancing2D?: boolean
+      *   instancing2D?: boolean,
+      *   respectCssSize?: boolean
    * }=} options
    */
   constructor(canvasId, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
@@ -39,6 +40,7 @@ export default class Renderer {
     const contextAttributes = cfg.contextAttributes;
     const renderTargets = (cfg.renderTargets && typeof cfg.renderTargets === 'object') ? cfg.renderTargets : {};
     const instancing2D = cfg.instancing2D !== false;
+    const respectCssSize = !!cfg.respectCssSize;
 
     this.requestedWebGLVersion = requested;
     this.allowWebGLFallback = allowFallback;
@@ -53,6 +55,10 @@ export default class Renderer {
     // WebGL2-only: use instanced rendering for 2D sprites (default true).
     // Falls back automatically to the legacy quad-vertex batching path.
     this.instancing2D = !!instancing2D;
+
+    // When true, the renderer will size the drawing buffer to the canvas' CSS box
+    // and will NOT overwrite canvas.style.width/height.
+    this.respectCssSize = respectCssSize;
 
     // 3D pass (layer 0) groundwork
     this._in3DPass = false;
@@ -684,44 +690,68 @@ export default class Renderer {
   }
 
   /**
-   * Resizes the canvas to fit the window, maintaining aspect ratio if configured.
+   * Resizes the canvas to match its on-page size, maintaining aspect ratio if configured.
+   *
+   * IMPORTANT:
+   * Many examples use a fullscreen canvas (so window size == canvas size).
+   * The editor embeds the canvas inside a layout with side panels; in that case
+   * we must size to the canvas' CSS box (clientWidth/clientHeight), not the window.
    */
   resizeCanvas() {
     const dpi = window.devicePixelRatio || 1;
-    const windowWidth = window.innerWidth;
-    const windowHeight = window.innerHeight;
+
+    // For fullscreen examples, the engine historically drives the canvas size.
+    // For embedded layouts (e.g. the editor), let CSS define the on-page size.
+    let cssWidth = 0;
+    let cssHeight = 0;
+    if (this.respectCssSize) {
+      cssWidth = this.canvas?.clientWidth || 0;
+      cssHeight = this.canvas?.clientHeight || 0;
+    }
+
+    const targetCssWidth = (cssWidth > 0) ? cssWidth : window.innerWidth;
+    const targetCssHeight = (cssHeight > 0) ? cssHeight : window.innerHeight;
+
+    // If a previous run pinned the canvas size via inline styles, clear it so
+    // the layout (CSS/grid/flex) can drive the visible size.
+    if (this.respectCssSize && this.canvas) {
+      if (this.canvas.style.width) this.canvas.style.width = '';
+      if (this.canvas.style.height) this.canvas.style.height = '';
+    }
 
     if (this.maintainAspectRatio) {
-      const windowAspectRatio = windowWidth / windowHeight;
+      const windowAspectRatio = targetCssWidth / targetCssHeight;
       
       let viewportX = 0, viewportY = 0;
       let viewportWidth, viewportHeight;
 
       if (windowAspectRatio > this.targetAspectRatio) {
         // Window is wider than target - add black bars on sides
-        const canvasHeight = windowHeight;
+        const canvasHeight = targetCssHeight;
         const canvasWidth = canvasHeight * this.targetAspectRatio;
         
         viewportWidth = canvasWidth * dpi;
         viewportHeight = canvasHeight * dpi;
-        viewportX = ((windowWidth - canvasWidth) / 2) * dpi;
+        viewportX = ((targetCssWidth - canvasWidth) / 2) * dpi;
       } else {
         // Window is taller than target - add black bars on top/bottom
-        const canvasWidth = windowWidth;
+        const canvasWidth = targetCssWidth;
         const canvasHeight = canvasWidth / this.targetAspectRatio;
         
         viewportWidth = canvasWidth * dpi;
         viewportHeight = canvasHeight * dpi;
-        viewportY = ((windowHeight - canvasHeight) / 2) * dpi;
+        viewportY = ((targetCssHeight - canvasHeight) / 2) * dpi;
       }
 
       // Set canvas pixel size to full window
-      this.canvas.width = windowWidth * dpi;
-      this.canvas.height = windowHeight * dpi;
+      this.canvas.width = targetCssWidth * dpi;
+      this.canvas.height = targetCssHeight * dpi;
 
-      // Set canvas DOM size
-      this.canvas.style.width = windowWidth + 'px';
-      this.canvas.style.height = windowHeight + 'px';
+      // Only force DOM size when we're not respecting a layout-driven canvas.
+      if (!this.respectCssSize) {
+        this.canvas.style.width = targetCssWidth + 'px';
+        this.canvas.style.height = targetCssHeight + 'px';
+      }
 
       // Store viewport info (pixels)
       this.viewport.x = Math.round(viewportX);
@@ -738,10 +768,12 @@ export default class Renderer {
       this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     } else {
       // Original stretching behavior
-      this.canvas.width = windowWidth * dpi;
-      this.canvas.height = windowHeight * dpi;
-      this.canvas.style.width = windowWidth + 'px';
-      this.canvas.style.height = windowHeight + 'px';
+      this.canvas.width = targetCssWidth * dpi;
+      this.canvas.height = targetCssHeight * dpi;
+      if (!this.respectCssSize) {
+        this.canvas.style.width = targetCssWidth + 'px';
+        this.canvas.style.height = targetCssHeight + 'px';
+      }
 
       this.viewport.x = 0;
       this.viewport.y = 0;

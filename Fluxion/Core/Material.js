@@ -156,7 +156,7 @@ export default class Material {
 
       return mat;
     } catch (err) {
-      console.error('Material.load error', err);
+      console.error('Material.load error', url, err);
       return null;
     }
   }

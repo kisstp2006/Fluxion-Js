@@ -176,16 +176,8 @@ export default class SceneLoader {
 
                     const src = child.getAttribute('source') || child.getAttribute('src') || null;
                     if (src) {
-                        // Resolve relative to scene URL
-                                                // If url is relative, resolve against window.location or document.baseURI
-                                                let base;
-                                                try {
-                                                    base = new URL('.', url).toString();
-                                                } catch (e) {
-                                                    // fallback: use document.baseURI or window.location.href
-                                                    base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
-                                                }
-                                                const matUrl = new URL(src, base).toString();
+                        // Resolve relative to the scene URL (not the caller page).
+                        const matUrl = new URL(src, baseUrl).toString();
                         const p = Material.load(matUrl, renderer);
                         // Track loading promise on renderer so loading flows can wait
                         renderer?.trackAssetPromise?.(p);
@@ -234,7 +226,7 @@ export default class SceneLoader {
                     }
 
                     // Textures (optional). If any are present, load asynchronously and register a promise.
-                    const base = new URL('.', url).toString();
+                    const base = baseUrl;
                     const getTexUrl = (attr) => {
                         const p = child.getAttribute(attr);
                         if (!p) return null;
