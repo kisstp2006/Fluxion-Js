@@ -23,6 +23,8 @@ export default class Input {
         this.mouseButtons = new Set();
         this.previousMouseButtons = new Set();
         this.mousePosition = { x: 0, y: 0 };
+        this.mouseDelta = { x: 0, y: 0 };
+        this._prevMousePosition = { x: 0, y: 0 };
         this.mouseDownListeners = [];
         this.mouseUpListeners = [];
         this.mouseMoveListeners = [];
@@ -129,6 +131,15 @@ export default class Input {
     }
 
     /**
+     * Gets mouse movement delta for the current frame.
+     * Under pointer lock, this uses movementX/movementY.
+     * @returns {{x: number, y: number}}
+     */
+    getMouseDelta() {
+        return { ...this.mouseDelta };
+    }
+
+    /**
      * Adds a listener for mouse down events.
      * @param {Function} listener - The listener function.
      */
@@ -167,13 +178,20 @@ export default class Input {
     }
 
     handleMouseMove(e) {
+        // When pointer lock is active, clientX/Y are not meaningful; use movementX/Y.
+        const dx = (typeof e.movementX === 'number') ? e.movementX : (e.clientX - this._prevMousePosition.x);
+        const dy = (typeof e.movementY === 'number') ? e.movementY : (e.clientY - this._prevMousePosition.y);
+        this.mouseDelta = { x: dx || 0, y: dy || 0 };
         this.mousePosition = { x: e.clientX, y: e.clientY };
+        this._prevMousePosition = { x: e.clientX, y: e.clientY };
         this.mouseMoveListeners.forEach(listener => listener(this.mousePosition));
     }
 
     update() {
         this.previousKeys = new Set(this.keys);
         this.previousMouseButtons = new Set(this.mouseButtons);
+        // Reset per-frame mouse delta after consumers have had a chance to read it.
+        this.mouseDelta = { x: 0, y: 0 };
     }
 
     clearListeners() {

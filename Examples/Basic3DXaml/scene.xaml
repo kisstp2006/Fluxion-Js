@@ -1,101 +1,125 @@
 <Scene name="Basic3DXaml">
-    <!-- Skybox - solid color for a simple background -->
-    <Skybox color="0.2, 0.3, 0.5" />
+      <!-- Skybox - solid color for a simple background -->
+      <Skybox color="0.2, 0.3, 0.5"/>
 
-    <!-- Real-time lights (PBR) -->
-    <!-- Direction is the direction light rays travel -->
-    <DirectionalLight name="Sun"
-                      direction="0.35, -1.0, 0.25"
-                      color="#ffffff"
-                      intensity="1.2" />
-    <!-- Warm point light near the scene -->
-    <PointLight name="Lamp"
-                x="2.5" y="1.5" z="-2.5"
-                color="#ffd2a6"
-                intensity="70"
-                range="20" />
-    <!-- Optional spotlight for extra highlights -->
-    <SpotLight name="Spot"
-               x="-2.5" y="2.0" z="0.0"
-               direction="0.35, -0.8, -0.45"
-               color="#a6c8ff"
-               intensity="90"
-               range="25"
-               innerAngleDeg="14"
-               outerAngleDeg="24" />
+      <!-- Real-time lights (PBR) -->
+      <!-- Direction is the direction light rays travel -->
+      <DirectionalLight name="Sun"
+                        direction="0.35, -1.0, 0.25"
+                        color="#ffffff"
+                        intensity="1.2"/>
+      <!-- Warm point light near the scene -->
+      <PointLight name="Lamp"
+                  x="2.5"
+                  y="1.5"
+                  z="-2.5"
+                  color="#ffd2a6"
+                  intensity="70"
+                  range="20"/>
+      <!-- Optional spotlight for extra highlights -->
+      <SpotLight name="Spot"
+                 x="-2.5"
+                 y="2.0"
+                 z="0.0"
+                 direction="0.35, -0.8, -0.45"
+                 color="#a6c8ff"
+                 intensity="90"
+                 range="25"
+                 innerAngleDeg="14"
+                 outerAngleDeg="24"/>
 
-    <!-- 2D camera (optional, but consistent with other scenes) -->
-    <Camera name="MainCamera"
-            x="0"
-            y="0"
-            zoom="1.0"/>
-
-    <!-- 3D camera for layer 0 -->
-    <Camera3D name="MainCamera3D"
+      <!-- 2D camera (optional, but consistent with other scenes) -->
+      <Camera name="MainCamera"
               x="0"
-              y="1.5"
-              z="4.5"
-              targetX="0"
-              targetY="0"
-              targetZ="-6"/>
+              y="0"
+              zoom="1.0"/>
 
-    <!-- Named mesh resources -->
-    <Mesh name="Ground"
-          type="Plane"
-          width="14"
-          depth="14"
-          subdivisions="1"
-          color="80,80,80,255"/>
-    <Mesh name="Ball"
-          type="Sphere"
-          radius="1"
-          radialSegments="24"
-          heightSegments="16"
-          color="#ffcc66ff"/>
-    <Mesh name="Ball2"
-          type="Sphere"
-          radius="1"
-          radialSegments="24"
-          heightSegments="16"
-          color="#ffcc66ff"/>
+      <!-- 3D camera for layer 0 -->
+      <Camera3D name="MainCamera3D"
+                x="0"
+                y="1.5"
+                z="6.5"
+                targetX="0"
+                targetY="0"
+                targetZ="-5"/>
 
-    <!-- Simple material resource -->
-    <Material name="BallMat"
-            source="BallMat.mat"/>
+      <!-- Named mesh resources -->
+      <Mesh name="Ground"
+            type="Plane"
+            width="14"
+            depth="14"
+            subdivisions="1"
+            color="80,80,80,255"/>
+      <Mesh name="Ball"
+            type="Sphere"
+            radius="1"
+            radialSegments="24"
+            heightSegments="16"
+            color="#ffcc66ff"/>
+      <Mesh name="Ball2"
+            type="Sphere"
+            radius="1"
+            radialSegments="24"
+            heightSegments="16"
+            color="#ffcc66ff"/>
 
-    <!-- 3D nodes (renderLayer 0) -->
-    <MeshNode name="GroundNode"
-              source="Ground"
-              y="-1.5"/>
-    <MeshNode name="SphereNode"
-              source="Ball"
-              material="BallMat"
-              z="-6"/>
-    <Mesh name="GoofySphere" source="../../Model/GoofySphere.gltf" />
-    <MeshNode name="RobotNode" source="GoofySphere" x="0" y="0" z="-5" />
+      <!-- Simple material resource -->
+      <Material name="BallMat"
+                source="BallMat.mat"/>
 
-    <!-- 2D overlay (renderLayer 1) -->
-    <Text name="Title"
-          text="XAML 3D: MeshNode + primitives"
-          x="40"
-          y="40"
-          fontSize="28"
-          fontFamily="Inter"
-          color="#ffffff"
-          layer="2"/>
-    <Text name="Hint"
-          text="3D is layer 0, 2D is layer 1"
-          x="40"
-          y="75"
-          fontSize="18"
-          fontFamily="Inter"
-          color="#cfcfcf"
-          layer="2"/>
-    <Sprite name="Logo"
-            imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+      <!-- 3D nodes (renderLayer 0) -->
+      <MeshNode name="GroundNode"
+                source="Ground"
+                y="-1.5"/>
+      <MeshNode name="SphereNode"
+                source="Ball"
+                material="BallMat"
+                x="-4.5"
+                z="-5"/>
+      <Mesh name="GoofySphere"
+            source="../../Model/GoofySphere.gltf"/>
+      <Mesh name="GoofyTICube"
+            source="../../Model/GoofyTICube.gltf"/>
+      <Mesh name="GlowingCube"
+            source="../../Model/GlowingCube.gltf"/>
+      <MeshNode name="RobotNode"
+                source="GoofySphere"
+                x="-1.5"
+                y="0"
+                z="-5"/>
+      <MeshNode name="GoofyTICubeNode"
+                source="GoofyTICube"
+                x="1.5"
+                y="0"
+                z="-5"/>
+      <MeshNode name="GlowingCubeNode"
+                source="GlowingCube"
+                x="4.5"
+                y="0"
+                z="-5"/>
+
+      <!-- 2D overlay (renderLayer 1) -->
+      <Text name="Title"
+            text="XAML 3D: MeshNode + primitives"
             x="40"
-            y="110"
-            width="96"
-            height="96"
+            y="40"
+            fontSize="28"
+            fontFamily="Inter"
+            color="#ffffff"
             layer="2"/>
+      <Text name="Hint"
+            text="3D is layer 0, 2D is layer 1"
+            x="40"
+            y="75"
+            fontSize="18"
+            fontFamily="Inter"
+            color="#cfcfcf"
+            layer="2"/>
+      <Sprite name="Logo"
+              imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+              x="40"
+              y="110"
+              width="96"
+              height="96"
+              layer="2"/>
 </Scene>

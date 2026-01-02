@@ -1,8 +1,8 @@
 {
   "type": "gltf-metadata",
   "version": 1,
-  "sourceUrl": "file:///C:/Users/tibig/Documents/game%20engines/Fluxion-Js/Model/GoofySphere.gltf",
-  "timestamp": "2026-01-02T18:08:39.629Z",
+  "sourceUrl": "file:///C:/Users/tibig/Documents/game%20engines/Fluxion-Js/Model/GlowingCube.gltf",
+  "timestamp": "2026-01-02T18:08:39.625Z",
   "gltf": {
     "asset": null,
     "sceneCount": 1,
@@ -19,13 +19,13 @@
     "meshEntries": 1,
     "materialEntries": 2,
     "nodeEntries": 0,
-    "totalVertices": 2020,
-    "totalIndices": 2880,
+    "totalVertices": 24,
+    "totalIndices": 36,
     "meshes": [
       {
-        "key": "Sphere.001",
-        "vertexCount": 2020,
-        "indexCount": 2880,
+        "key": "Cube",
+        "vertexCount": 24,
+        "indexCount": 36,
         "indexed": true
       }
     ],
@@ -59,19 +59,19 @@
         }
       },
       {
-        "key": "Material.002",
+        "key": "Material",
         "baseColorFactor": [
+          0.0029233701061457396,
+          0.8001260757446289,
           0,
-          0.24007947742938995,
-          0.8016026020050049,
           1
         ],
-        "metallicFactor": 0.6904761791229248,
-        "roughnessFactor": 0.8253968358039856,
+        "metallicFactor": 0,
+        "roughnessFactor": 0.5,
         "emissiveFactor": [
-          0,
-          0,
-          0
+          0.30103862285614014,
+          1,
+          0.0038045633118599653
         ],
         "alphaMode": "OPAQUE",
         "alphaCutoff": 0.5,

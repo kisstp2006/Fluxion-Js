@@ -141,7 +141,54 @@ export default class Engine {
             // Many examples do `new Input()` manually; this remains compatible.
             new Input();
         }
+
+        // Optional pointer lock (mouse lock) for FPS/free-fly cameras.
+        // Note: browsers require a user gesture (click) to enter pointer lock.
+        this._mouseLockEnabled = !!inputCfg.lockMouse;
+        this._pointerLocked = false;
+        if (this._mouseLockEnabled) {
+            try {
+                const canvas = this.renderer?.canvas;
+                if (canvas && typeof canvas.addEventListener === 'function') {
+                    canvas.addEventListener('click', () => {
+                        // Only request when not already locked.
+                        if (document.pointerLockElement !== canvas) {
+                            canvas.requestPointerLock?.();
+                        }
+                    });
+
+                    document.addEventListener('pointerlockchange', () => {
+                        this._pointerLocked = (document.pointerLockElement === canvas);
+                    });
+                }
+            } catch (e) {
+                console.warn('Pointer lock setup failed', e);
+            }
+        }
     } 
+
+    /** @returns {boolean} */
+    isMouseLocked() {
+        return !!this._pointerLocked;
+    }
+
+    /** Request pointer lock (must be called from a user gesture handler). */
+    lockMouse() {
+        try {
+            const canvas = this.renderer?.canvas;
+            if (canvas) canvas.requestPointerLock?.();
+        } catch {
+            // ignore
+        }
+    }
+
+    unlockMouse() {
+        try {
+            document.exitPointerLock?.();
+        } catch {
+            // ignore
+        }
+    }
 
     async _startAsync(options = {}) {
         await Promise.all([this.loadDefaultFont(), this.loadVersionInfo()]);

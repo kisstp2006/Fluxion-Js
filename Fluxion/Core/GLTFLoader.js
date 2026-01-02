@@ -406,8 +406,77 @@ function _decomposeMat4TRSEuler(m) {
     };
 }
 
+function _composeGltfTRSMatrix(node) {
+    const tArr = Array.isArray(node?.translation) ? node.translation : null;
+    const rArr = Array.isArray(node?.rotation) ? node.rotation : null;
+    const sArr = Array.isArray(node?.scale) ? node.scale : null;
+
+    const tx = Number(tArr?.[0] ?? 0);
+    const ty = Number(tArr?.[1] ?? 0);
+    const tz = Number(tArr?.[2] ?? 0);
+
+    // glTF rotation is a unit quaternion [x,y,z,w]
+    const qx = Number(rArr?.[0] ?? 0);
+    const qy = Number(rArr?.[1] ?? 0);
+    const qz = Number(rArr?.[2] ?? 0);
+    const qw = Number(rArr?.[3] ?? 1);
+
+    const sx = Number(sArr?.[0] ?? 1);
+    const sy = Number(sArr?.[1] ?? 1);
+    const sz = Number(sArr?.[2] ?? 1);
+
+    // Quaternion to 3x3 rotation (column-major), then apply scale on columns.
+    const x2 = qx + qx;
+    const y2 = qy + qy;
+    const z2 = qz + qz;
+
+    const xx = qx * x2;
+    const xy = qx * y2;
+    const xz = qx * z2;
+    const yy = qy * y2;
+    const yz = qy * z2;
+    const zz = qz * z2;
+    const wx = qw * x2;
+    const wy = qw * y2;
+    const wz = qw * z2;
+
+    // Rotation matrix (row-major here for readability):
+    // [ 1-(yy+zz) , xy+wz     , xz-wy     ]
+    // [ xy-wz     , 1-(xx+zz) , yz+wx     ]
+    // [ xz+wy     , yz-wx     , 1-(xx+yy) ]
+    const r00 = 1 - (yy + zz);
+    const r01 = xy + wz;
+    const r02 = xz - wy;
+    const r10 = xy - wz;
+    const r11 = 1 - (xx + zz);
+    const r12 = yz + wx;
+    const r20 = xz + wy;
+    const r21 = yz - wx;
+    const r22 = 1 - (xx + yy);
+
+    // Column-major mat4, with scale baked in.
+    const out = Mat4.identity();
+    // Column 0
+    out[0] = r00 * sx;
+    out[1] = r10 * sx;
+    out[2] = r20 * sx;
+    // Column 1
+    out[4] = r01 * sy;
+    out[5] = r11 * sy;
+    out[6] = r21 * sy;
+    // Column 2
+    out[8] = r02 * sz;
+    out[9] = r12 * sz;
+    out[10] = r22 * sz;
+    // Translation
+    out[12] = tx;
+    out[13] = ty;
+    out[14] = tz;
+    return out;
+}
+
 function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorld, outNodes) {
-    const local = gltfNode.matrix ? gltfNode.matrix : Mat4.identity();
+    const local = gltfNode.matrix ? gltfNode.matrix : _composeGltfTRSMatrix(gltfNode);
     const world = Mat4.multiply(parentWorld, local, new Float32Array(16));
 
     // If this node has a mesh, create one MeshNode per primitive mesh key.
@@ -620,24 +689,28 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
 
         // Metallic/Roughness
         if (pbr.metallicFactor !== undefined) {
-            mat.metallicFactor = pbr.metallicFactor;
+            const mf = Number(pbr.metallicFactor);
+            if (Number.isFinite(mf)) mat.metallicFactor = Math.max(0.0, Math.min(1.0, mf));
         }
         if (pbr.roughnessFactor !== undefined) {
-            mat.roughnessFactor = pbr.roughnessFactor;
+            const rf = Number(pbr.roughnessFactor);
+            if (Number.isFinite(rf)) mat.roughnessFactor = Math.max(0.0, Math.min(1.0, rf));
         }
 
         // Textures
         const baseColorTexInfo = pbr.baseColorTexture;
         if (baseColorTexInfo && glTF.textures && glTF.textures[baseColorTexInfo.index]) {
-            const img = glTF.textures[baseColorTexInfo.index]?.source;
-            const tex = _createGLTFTexture(renderer, img, `gltf:baseColor:${baseColorTexInfo.index}`);
+            const t = glTF.textures[baseColorTexInfo.index];
+            const img = t?.source;
+            const tex = _createGLTFTexture(renderer, img, `gltf:baseColor:${baseColorTexInfo.index}`, t?.sampler);
             if (tex) mat.baseColorTexture = tex;
         }
 
         const mrTexInfo = pbr.metallicRoughnessTexture;
         if (mrTexInfo && glTF.textures && glTF.textures[mrTexInfo.index]) {
-            const img = glTF.textures[mrTexInfo.index]?.source;
-            const tex = _createGLTFTexture(renderer, img, `gltf:metallicRoughness:${mrTexInfo.index}`);
+            const t = glTF.textures[mrTexInfo.index];
+            const img = t?.source;
+            const tex = _createGLTFTexture(renderer, img, `gltf:metallicRoughness:${mrTexInfo.index}`, t?.sampler);
             if (tex) {
                 mat.metallicTexture = tex;
                 mat.roughnessTexture = tex;
@@ -647,24 +720,27 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     }
     // Normal
     if (gltfMat.normalTexture && glTF.textures && glTF.textures[gltfMat.normalTexture.index]) {
-        const img = glTF.textures[gltfMat.normalTexture.index]?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:normal:${gltfMat.normalTexture.index}`);
+        const t = glTF.textures[gltfMat.normalTexture.index];
+        const img = t?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:normal:${gltfMat.normalTexture.index}`, t?.sampler);
         if (tex) mat.normalTexture = tex;
         if (typeof gltfMat.normalTexture.scale === 'number') mat.normalScale = gltfMat.normalTexture.scale;
     }
 
     // Occlusion
     if (gltfMat.occlusionTexture && glTF.textures && glTF.textures[gltfMat.occlusionTexture.index]) {
-        const img = glTF.textures[gltfMat.occlusionTexture.index]?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:occlusion:${gltfMat.occlusionTexture.index}`);
+        const t = glTF.textures[gltfMat.occlusionTexture.index];
+        const img = t?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:occlusion:${gltfMat.occlusionTexture.index}`, t?.sampler);
         if (tex) mat.aoTexture = tex;
         if (typeof gltfMat.occlusionTexture.strength === 'number') mat.aoStrength = gltfMat.occlusionTexture.strength;
     }
 
     // Emissive
     if (gltfMat.emissiveTexture && glTF.textures && glTF.textures[gltfMat.emissiveTexture.index]) {
-        const img = glTF.textures[gltfMat.emissiveTexture.index]?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:emissive:${gltfMat.emissiveTexture.index}`);
+        const t = glTF.textures[gltfMat.emissiveTexture.index];
+        const img = t?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:emissive:${gltfMat.emissiveTexture.index}`, t?.sampler);
         if (tex) mat.emissiveTexture = tex;
     }
 
@@ -688,7 +764,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     return mat;
 }
 
-function _createGLTFTexture(renderer, image, cacheKey) {
+function _createGLTFTexture(renderer, image, cacheKey, sampler) {
     const gl = renderer?.gl;
     if (!gl || !image) return null;
 
@@ -700,30 +776,61 @@ function _createGLTFTexture(renderer, image, cacheKey) {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
 
-    // glTF expects UNPACK_FLIP_Y_WEBGL for correct UV orientation in WebGL.
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    // IMPORTANT: do NOT leave premultiply enabled globally; that can zero-out packed maps.
+    // NOTE: In our pipeline, glTF UVs are already in the correct orientation for WebGL sampling,
+    // so we do NOT flip images on upload (flipping would make them appear upside-down).
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
 
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
     const isPowerOf2 = (value) => (value & (value - 1)) === 0;
-    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    } else {
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    const w = image.width | 0;
+    const h = image.height | 0;
+    const isPOT = w > 0 && h > 0 && isPowerOf2(w) && isPowerOf2(h);
+    const isWebGL2 = !!renderer?.isWebGL2;
+
+    // glTF sampler defaults
+    const wrapS = (sampler && sampler.wrapS !== undefined) ? sampler.wrapS : gl.REPEAT;
+    const wrapT = (sampler && sampler.wrapT !== undefined) ? sampler.wrapT : gl.REPEAT;
+    const magFilter = (sampler && sampler.magFilter) ? sampler.magFilter : gl.LINEAR;
+    const minFilter = (sampler && sampler.minFilter) ? sampler.minFilter : gl.LINEAR_MIPMAP_LINEAR;
+    const wantsMips = (minFilter === gl.NEAREST_MIPMAP_NEAREST || minFilter === gl.LINEAR_MIPMAP_NEAREST ||
+        minFilter === gl.NEAREST_MIPMAP_LINEAR || minFilter === gl.LINEAR_MIPMAP_LINEAR);
+    const canMips = (isWebGL2 || isPOT);
+
+    // WebGL1 restriction: NPOT textures cannot use repeat or mipmaps.
+    const finalWrapS = (!isWebGL2 && !isPOT) ? gl.CLAMP_TO_EDGE : wrapS;
+    const finalWrapT = (!isWebGL2 && !isPOT) ? gl.CLAMP_TO_EDGE : wrapT;
+    let finalMin = minFilter;
+    if (wantsMips && !canMips) finalMin = gl.LINEAR;
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, finalWrapS);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, finalWrapT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, finalMin);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+
+    try {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+        if (wantsMips && canMips) {
+            gl.generateMipmap(gl.TEXTURE_2D);
+        }
+    } catch (e) {
+        console.warn('GLTF: texImage2D failed, using fallback texture', e);
+        gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA,
+            1,
+            1,
+            0,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            new Uint8Array([255, 255, 255, 255])
+        );
     }
 
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
-        gl.generateMipmap(gl.TEXTURE_2D);
-    }
-
-    // Restore defaults
+    // Restore to WebGL defaults (do not premultiply by default)
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.bindTexture(gl.TEXTURE_2D, null);
 
     // Best-effort cache (if renderer cache infra exists)

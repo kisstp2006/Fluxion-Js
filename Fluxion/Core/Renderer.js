@@ -1360,11 +1360,15 @@ export default class Renderer {
 
     this._defaultPbrTextures = {
       baseColor: make1x1(255, 255, 255, 255),
-      metallic: make1x1(0, 0, 0, 255),
+      // Must be white so `metallicFactor` can work without a metallic map.
+      // (Shader multiplies sampled channel by factor; a black default would force metallic=0.)
+      metallic: make1x1(255, 255, 255, 255),
       roughness: make1x1(255, 255, 255, 255),
       normal: make1x1(128, 128, 255, 255),
       ao: make1x1(255, 255, 255, 255),
-      emissive: make1x1(0, 0, 0, 255),
+      // Must be white so `emissiveFactor` works without an emissive map.
+      // (Shader multiplies sampled emissive RGB by emissiveFactor; a black default would force emissive=0.)
+      emissive: make1x1(255, 255, 255, 255),
       alpha: make1x1(255, 255, 255, 255),
     };
 
