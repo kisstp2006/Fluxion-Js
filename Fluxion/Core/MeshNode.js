@@ -227,6 +227,11 @@ export default class MeshNode {
     const t = String(type || '').toLowerCase();
     const p = params || {};
 
+    // Group/empty node: intentionally has no mesh; used as a container.
+    if (t === 'group' || t === 'empty') {
+      return null;
+    }
+
     // GLTF mesh (already converted, stored directly)
     // For GLTF, params is the entire mesh definition object with .mesh property
     if (t === 'gltf') {
@@ -299,19 +304,20 @@ export default class MeshNode {
   draw3D(renderer) {
     if (!this.active) return;
     this._ensureMesh(renderer);
-    if (!this._mesh) return;
 
-    // Prefer an explicit material if one is assigned, otherwise fall back to node color.
-    let matToUse = this.material;
-    if (!matToUse) {
-      const defCol = this.meshDefinition?.color;
-      const col = defCol || this.color || [1, 1, 1, 1];
-      // Back-compat: current Material uses albedoColor; PBR upgrade adds baseColorFactor alias.
-      this._defaultMaterial.albedoColor = col;
-      matToUse = this._defaultMaterial;
+    if (this._mesh) {
+      // Prefer an explicit material if one is assigned, otherwise fall back to node color.
+      let matToUse = this.material;
+      if (!matToUse) {
+        const defCol = this.meshDefinition?.color;
+        const col = defCol || this.color || [1, 1, 1, 1];
+        // Back-compat: current Material uses albedoColor; PBR upgrade adds baseColorFactor alias.
+        this._defaultMaterial.albedoColor = col;
+        matToUse = this._defaultMaterial;
+      }
+
+      renderer.drawMesh(this._mesh, this._getModelMatrix(), matToUse);
     }
-
-    renderer.drawMesh(this._mesh, this._getModelMatrix(), matToUse);
 
     // Draw child 3D nodes (if any)
     for (const child of this.children) {
@@ -328,9 +334,10 @@ export default class MeshNode {
     if (!renderer?.drawMeshShadow) return;
 
     this._ensureMesh(renderer);
-    if (!this._mesh) return;
 
-    renderer.drawMeshShadow(this._mesh, this._getModelMatrix());
+    if (this._mesh) {
+      renderer.drawMeshShadow(this._mesh, this._getModelMatrix());
+    }
 
     for (const child of this.children) {
       if (child && typeof child.drawShadow === 'function') child.drawShadow(renderer);

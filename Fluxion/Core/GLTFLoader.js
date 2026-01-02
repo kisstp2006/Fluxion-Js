@@ -82,6 +82,13 @@ function _loadGLTF(glTFLoader, url, gl, renderer, resolve, reject) {
     const originalOnload = glTFLoader.onload;
     glTFLoader.loadGLTF(url, (glTF) => {
         try {
+            // Attach source URL so texture cache keys can be namespaced per model.
+            // (Otherwise multiple models with texture index 0 collide.)
+            try {
+                glTF.__fluxionSourceUrl = url;
+            } catch {
+                // ignore
+            }
             // Check if buffers loaded successfully
             if (glTFLoader._bufferRequested > 0 && glTFLoader._bufferLoaded < glTFLoader._bufferRequested) {
                 console.warn(`GLTF: Some buffers failed to load. Requested: ${glTFLoader._bufferRequested}, Loaded: ${glTFLoader._bufferLoaded}`);
@@ -106,6 +113,12 @@ function _loadGLTF(glTFLoader, url, gl, renderer, resolve, reject) {
     // Note: The minimal-gltf-loader handles .bin file loading automatically
     // It extracts the base URI from the GLTF file path and loads all buffers
     // referenced in the JSON. No additional code needed here.
+}
+
+function _getGLTFTextureCacheNamespace(glTF) {
+    const u = glTF && (glTF.__fluxionSourceUrl || glTF._sourceUrl);
+    if (!u) return 'gltf';
+    return `gltf@${String(u)}`;
 }
 
 function _safeNumber(n, fallback = 0) {
@@ -316,17 +329,32 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
             for (let pIdx = 0; pIdx < primCount; pIdx++) {
                 const key = (fluxionMeshes.length === 1) ? baseName : `${baseName}_Primitive_${pIdx}`;
                 const prim = gltfMesh.primitives[pIdx];
-                const gltfMat = prim?.material || null;
+                const primMat = (prim && Object.prototype.hasOwnProperty.call(prim, 'material')) ? prim.material : null;
+
+                // minimal-gltf-loader variants may store primitive.material as:
+                // - a Material object, OR
+                // - a numeric material index
+                let gltfMat = primMat;
+                let gltfMatIndex = -1;
+                if (typeof primMat === 'number' && Number.isFinite(primMat)) {
+                    gltfMatIndex = primMat | 0;
+                    gltfMat = Array.isArray(glTF.materials) ? (glTF.materials[gltfMatIndex] || null) : null;
+                } else if (primMat && Array.isArray(glTF.materials)) {
+                    gltfMatIndex = glTF.materials.indexOf(primMat);
+                }
 
                 let matKey = '__gltf_default__';
                 if (gltfMat) {
                     const named = gltfMat.name;
                     if (named && materials.has(named)) {
                         matKey = named;
-                    } else {
-                        const midx = Array.isArray(glTF.materials) ? glTF.materials.indexOf(gltfMat) : -1;
-                        if (midx >= 0) matKey = `Material_${midx}`;
+                    } else if (gltfMatIndex >= 0) {
+                        const fallback = `Material_${gltfMatIndex}`;
+                        if (materials.has(fallback)) matKey = fallback;
                     }
+                } else if (gltfMatIndex >= 0) {
+                    const fallback = `Material_${gltfMatIndex}`;
+                    if (materials.has(fallback)) matKey = fallback;
                 }
                 meshMaterials.set(key, matKey);
             }
@@ -672,6 +700,7 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
  */
 function convertGLTFMaterial(glTF, gltfMat, renderer) {
     const mat = new Material();
+    const ns = _getGLTFTextureCacheNamespace(glTF);
 
     // PBR Metallic-Roughness workflow
     if (gltfMat.pbrMetallicRoughness) {
@@ -702,7 +731,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
         if (baseColorTexInfo && glTF.textures && glTF.textures[baseColorTexInfo.index]) {
             const t = glTF.textures[baseColorTexInfo.index];
             const img = t?.source;
-            const tex = _createGLTFTexture(renderer, img, `gltf:baseColor:${baseColorTexInfo.index}`, t?.sampler);
+            const tex = _createGLTFTexture(renderer, img, `${ns}:baseColor:${baseColorTexInfo.index}`, t?.sampler);
             if (tex) mat.baseColorTexture = tex;
         }
 
@@ -710,7 +739,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
         if (mrTexInfo && glTF.textures && glTF.textures[mrTexInfo.index]) {
             const t = glTF.textures[mrTexInfo.index];
             const img = t?.source;
-            const tex = _createGLTFTexture(renderer, img, `gltf:metallicRoughness:${mrTexInfo.index}`, t?.sampler);
+            const tex = _createGLTFTexture(renderer, img, `${ns}:metallicRoughness:${mrTexInfo.index}`, t?.sampler);
             if (tex) {
                 mat.metallicTexture = tex;
                 mat.roughnessTexture = tex;
@@ -722,7 +751,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     if (gltfMat.normalTexture && glTF.textures && glTF.textures[gltfMat.normalTexture.index]) {
         const t = glTF.textures[gltfMat.normalTexture.index];
         const img = t?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:normal:${gltfMat.normalTexture.index}`, t?.sampler);
+        const tex = _createGLTFTexture(renderer, img, `${ns}:normal:${gltfMat.normalTexture.index}`, t?.sampler);
         if (tex) mat.normalTexture = tex;
         if (typeof gltfMat.normalTexture.scale === 'number') mat.normalScale = gltfMat.normalTexture.scale;
     }
@@ -731,7 +760,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     if (gltfMat.occlusionTexture && glTF.textures && glTF.textures[gltfMat.occlusionTexture.index]) {
         const t = glTF.textures[gltfMat.occlusionTexture.index];
         const img = t?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:occlusion:${gltfMat.occlusionTexture.index}`, t?.sampler);
+        const tex = _createGLTFTexture(renderer, img, `${ns}:occlusion:${gltfMat.occlusionTexture.index}`, t?.sampler);
         if (tex) mat.aoTexture = tex;
         if (typeof gltfMat.occlusionTexture.strength === 'number') mat.aoStrength = gltfMat.occlusionTexture.strength;
     }
@@ -740,7 +769,7 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     if (gltfMat.emissiveTexture && glTF.textures && glTF.textures[gltfMat.emissiveTexture.index]) {
         const t = glTF.textures[gltfMat.emissiveTexture.index];
         const img = t?.source;
-        const tex = _createGLTFTexture(renderer, img, `gltf:emissive:${gltfMat.emissiveTexture.index}`, t?.sampler);
+        const tex = _createGLTFTexture(renderer, img, `${ns}:emissive:${gltfMat.emissiveTexture.index}`, t?.sampler);
         if (tex) mat.emissiveTexture = tex;
     }
 

@@ -90,23 +90,63 @@ export default class SceneLoader {
                         const loadPromise = (async () => {
                             try {
                                 const result = await loadGLTF(gltfUrl, renderer.gl, renderer);
+
+                                // Namespace glTF resources under the XAML mesh name to avoid collisions
+                                // between multiple models that reuse generic names like "Material".
+                                const ns = `${name}::`;
+                                const nsMat = (k) => `${ns}${k}`;
+                                const nsMesh = (k) => `${ns}${k}`;
+
                                 // Register all meshes from GLTF with their GLTF names
                                 for (const [meshName, mesh] of result.meshes.entries()) {
                                     const matKey = result.meshMaterials?.get(meshName);
-                                    scene.registerMesh(meshName, { type: 'gltf', mesh, material: matKey || '__gltf_default__' });
+
+                                    const hint = nsMat(matKey || '__gltf_default__');
+                                    // Prefer namespaced registration; also register the raw name only if unused.
+                                    scene.registerMesh(nsMesh(meshName), { type: 'gltf', mesh, material: hint });
+                                    if (!scene.getMeshDefinition(meshName)) {
+                                        scene.registerMesh(meshName, { type: 'gltf', mesh, material: hint });
+                                    }
                                 }
-                                // Also register the XAML mesh name to point to the first GLTF mesh
-                                // This allows <MeshNode source="XamlName" /> to work
+                                // Also register the XAML mesh name to point to the first GLTF mesh.
+                                // If that mesh is split into multiple primitives, register a group so all
+                                // primitives (and their materials) render.
                                 if (result.meshes.size > 0) {
                                     const firstEntry = Array.from(result.meshes.entries())[0];
                                     const firstMeshName = firstEntry[0];
-                                    const firstMesh = firstEntry[1];
-                                    const matKey = result.meshMaterials?.get(firstMeshName);
-                                    scene.registerMesh(name, { type: 'gltf', mesh: firstMesh, material: matKey || '__gltf_default__' });
+                                    const primMatch = /^(.*)_Primitive_(\d+)$/.exec(firstMeshName);
+                                    const baseName = primMatch ? primMatch[1] : firstMeshName;
+
+                                    const partEntries = Array.from(result.meshes.entries())
+                                        .filter(([k]) => k === baseName || k.startsWith(`${baseName}_Primitive_`))
+                                        .sort((a, b) => {
+                                            const ma = /_Primitive_(\d+)$/.exec(a[0]);
+                                            const mb = /_Primitive_(\d+)$/.exec(b[0]);
+                                            const ia = ma ? parseInt(ma[1]) : 0;
+                                            const ib = mb ? parseInt(mb[1]) : 0;
+                                            return ia - ib;
+                                        });
+
+                                    if (partEntries.length <= 1) {
+                                        const firstMesh = firstEntry[1];
+                                        const matKey = result.meshMaterials?.get(firstMeshName);
+                                        scene.registerMesh(name, { type: 'gltf', mesh: firstMesh, material: nsMat(matKey || '__gltf_default__') });
+                                    } else {
+                                        const parts = partEntries.map(([k, mesh]) => ({
+                                            name: nsMesh(k),
+                                            mesh,
+                                            material: nsMat(result.meshMaterials?.get(k) || '__gltf_default__')
+                                        }));
+                                        scene.registerMesh(name, { type: 'gltf-group', parts });
+                                    }
                                 }
-                                // Register all materials from GLTF
+                                // Register all materials from GLTF under the namespaced key.
                                 for (const [matName, mat] of result.materials.entries()) {
-                                    scene.registerMaterial(matName, mat);
+                                    scene.registerMaterial(nsMat(matName), mat);
+                                    // Also register raw name only if unused (helps backward-compat / debugging).
+                                    if (!scene.getMaterialDefinition(matName)) {
+                                        scene.registerMaterial(matName, mat);
+                                    }
                                 }
                                 return result;
                             } catch (err) {
@@ -298,6 +338,10 @@ export default class SceneLoader {
                                 if (resolvedDef && resolvedDef.type === 'gltf' && resolvedDef.mesh) {
                                     console.log(`GLTF: Resolved mesh "${obj.source}" for MeshNode "${obj.name}"`, resolvedDef);
                                     obj.setMeshDefinition(resolvedDef);
+                                } else if (resolvedDef && resolvedDef.type === 'gltf-group' && Array.isArray(resolvedDef.parts)) {
+                                    console.log(`GLTF: Resolved grouped mesh "${obj.source}" for MeshNode "${obj.name}"`, resolvedDef);
+                                    // Expand to children MeshNodes (one per primitive)
+                                    await SceneLoader._expandGltfGroupMeshNode(obj, resolvedDef, scene);
                                 } else if (gltfResult && gltfResult.meshes && gltfResult.meshes.size > 0) {
                                     // Fallback: use first mesh from GLTF
                                     const gltfMesh = Array.from(gltfResult.meshes.values())[0];
@@ -313,6 +357,9 @@ export default class SceneLoader {
                             // GLTF mesh already loaded
                             console.log(`GLTF: Using already-loaded mesh for MeshNode "${obj.name}"`, def);
                             obj.setMeshDefinition(def);
+                        } else if (def.type === 'gltf-group' && Array.isArray(def.parts)) {
+                            console.log(`GLTF: Using already-loaded grouped mesh for MeshNode "${obj.name}"`, def);
+                            await SceneLoader._expandGltfGroupMeshNode(obj, def, scene);
                         } else {
                             obj.setMeshDefinition(def);
                         }
@@ -365,6 +412,90 @@ export default class SceneLoader {
         } catch (error) {
             console.error("SceneLoader Error:", error);
             return new Scene(); // Return empty scene on error
+        }
+    }
+
+    /**
+     * Expand a GLTF grouped mesh definition (multiple primitives/parts) into child MeshNodes.
+     * Each part keeps its own material hint unless the parent MeshNode specifies an override material.
+     * @param {MeshNode} parent
+     * @param {{type:'gltf-group', parts:Array<{name:string, mesh:any, material:string}>}} def
+     * @param {Scene} scene
+     */
+    static async _expandGltfGroupMeshNode(parent, def, scene) {
+        if (!parent || !def || !Array.isArray(def.parts)) return;
+
+        // Material override on the parent applies to all children.
+        // Ensure it's resolved to a Material instance (not a string name / promise).
+        let overrideMaterial = parent.material;
+        if (overrideMaterial && typeof overrideMaterial === 'string') {
+            const mdef = scene.getMaterialDefinition(overrideMaterial);
+            if (mdef) {
+                if (typeof mdef.then === 'function') {
+                    try {
+                        overrideMaterial = await mdef;
+                    } catch (e) {
+                        console.warn('Failed to resolve override material', parent.material, e);
+                    }
+                } else {
+                    overrideMaterial = mdef;
+                }
+            }
+            // Keep parent consistent for any other uses.
+            if (overrideMaterial && typeof overrideMaterial !== 'string') {
+                parent.setMaterial(overrideMaterial);
+            }
+        }
+
+        // Convert parent into a container node (no mesh of its own).
+        parent.children = [];
+        parent.setMeshDefinition({ type: 'group' });
+
+        // Children do not inherit transforms in Fluxion's current MeshNode implementation,
+        // so we copy transforms onto each child.
+        for (let i = 0; i < def.parts.length; i++) {
+            const part = def.parts[i];
+            if (!part || !part.mesh) continue;
+
+            const child = new MeshNode();
+            child.name = `${parent.name}_part${i}`;
+
+            child.x = parent.x;
+            child.y = parent.y;
+            child.z = parent.z;
+
+            child.scaleX = parent.scaleX;
+            child.scaleY = parent.scaleY;
+            child.scaleZ = parent.scaleZ;
+
+            child.rotX = parent.rotX;
+            child.rotY = parent.rotY;
+            child.rotZ = parent.rotZ;
+
+            child.source = parent.source;
+            child.setMeshDefinition({ type: 'gltf', mesh: part.mesh, material: part.material || '__gltf_default__' });
+
+            // Apply override material if present; else auto-apply the per-part hint.
+            if (overrideMaterial) {
+                child.setMaterial(overrideMaterial);
+            } else if (child.meshDefinition?.material) {
+                const hint = child.meshDefinition.material;
+                const mdef = (typeof hint === 'string') ? scene.getMaterialDefinition(hint) : hint;
+                if (mdef) {
+                    if (typeof mdef.then === 'function') {
+                        try {
+                            const mat = await mdef;
+                            if (mat) child.setMaterial(mat);
+                        } catch (e) {
+                            console.warn('Failed to resolve GLTF part material', hint, e);
+                        }
+                    } else {
+                        child.setMaterial(mdef);
+                    }
+                }
+            }
+
+            parent.addChild(child);
         }
     }
 

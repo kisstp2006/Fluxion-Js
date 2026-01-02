@@ -2525,14 +2525,22 @@ export default class Renderer {
     // Textures (bind defaults if missing)
     const d = this._defaultPbrTextures || {};
 
-    const baseTex = m.baseColorTexture || m.albedoTexture || d.baseColor;
-    const metallicTex = m.metallicTexture || d.metallic;
+    // NOTE: WebGL state can leak between draws if a material supplies an invalid texture value.
+    // Always validate with gl.isTexture() and fall back to defaults.
+    const pickTex = (candidate, fallback) => {
+      if (candidate && gl.isTexture(candidate)) return candidate;
+      return (fallback && gl.isTexture(fallback)) ? fallback : null;
+    };
+
+    const baseTex = pickTex(m.baseColorTexture || m.albedoTexture, d.baseColor);
+    const metallicTex = pickTex(m.metallicTexture, d.metallic);
     // If the material uses glTF packed metallic-roughness, roughness comes from the metallic texture too.
-    const roughnessTex = (m.metallicRoughnessPacked ? (m.metallicTexture || m.roughnessTexture) : m.roughnessTexture) || d.roughness;
-    const normalTex = m.normalTexture || d.normal;
-    const aoTex = m.aoTexture || d.ao;
-    const emissiveTex = m.emissiveTexture || d.emissive;
-    const alphaTex = m.alphaTexture || d.alpha;
+    const packedMrTex = m.metallicTexture || m.roughnessTexture;
+    const roughnessTex = pickTex(m.metallicRoughnessPacked ? packedMrTex : m.roughnessTexture, d.roughness);
+    const normalTex = pickTex(m.normalTexture, d.normal);
+    const aoTex = pickTex(m.aoTexture, d.ao);
+    const emissiveTex = pickTex(m.emissiveTexture, d.emissive);
+    const alphaTex = pickTex(m.alphaTexture, d.alpha);
 
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, baseTex);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, metallicTex);
@@ -2541,6 +2549,7 @@ export default class Renderer {
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, aoTex);
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, emissiveTex);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, alphaTex);
+    gl.activeTexture(gl.TEXTURE0);
 
     if (u?.metallicRoughnessPacked) gl.uniform1i(u.metallicRoughnessPacked, m.metallicRoughnessPacked ? 1 : 0);
 

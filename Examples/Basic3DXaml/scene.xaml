@@ -82,6 +82,8 @@
             source="../../Model/GoofyTICube.gltf"/>
       <Mesh name="GlowingCube"
             source="../../Model/GlowingCube.gltf"/>
+      <Mesh name="HalfGlowingCube"
+            source="../../Model/HalfGlowingCube.gltf"/>
       <MeshNode name="RobotNode"
                 source="GoofySphere"
                 x="-1.5"
@@ -95,6 +97,11 @@
       <MeshNode name="GlowingCubeNode"
                 source="GlowingCube"
                 x="4.5"
+                y="0"
+                z="-5"/>
+      <MeshNode name="HalfGlowingCubeNode"
+                source="HalfGlowingCube"
+                x="7.5"
                 y="0"
                 z="-5"/>
 
