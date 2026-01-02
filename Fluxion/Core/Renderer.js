@@ -149,6 +149,11 @@ export default class Renderer {
     this._shadowAtlasAlloc = []; // [{id,type,x,y,size}]
     this._shadowAtlasId = 1;
     this._shadowAtlasDebug = false;
+
+    // Real-time lights (PBR): use fixed-size uniform arrays for speed.
+    // NOTE: This must be set before allocating any MAX_LIGHTS-dependent uniform buffers.
+    this.maxPbrLights = 8;
+
     // Packed atlas rects for cascades and lights (offset.xy, scale.zw in UV)
     this._csmRectData = new Float32Array(4 * 4);
     this._spotShadowRectData = new Float32Array(this.maxPbrLights * 4);
@@ -204,8 +209,6 @@ export default class Renderer {
     // Environment lighting (IBL via skybox)
     this.pbrEnvIntensity = 1.0;
 
-    // Real-time lights (PBR): use fixed-size uniform arrays for speed.
-    this.maxPbrLights = 8;
     /** @type {any[]} */
     this._sceneLights = [];
     /** @type {any[] | null} */
@@ -1118,6 +1121,8 @@ export default class Renderer {
               emissiveMap: this.gl.getUniformLocation(this.program3D, 'u_emissiveMap'),
               alphaMap: this.gl.getUniformLocation(this.program3D, 'u_alphaMap'),
 
+              metallicRoughnessPacked: this.gl.getUniformLocation(this.program3D, 'u_metallicRoughnessPacked'),
+
               // Environment reflections (IBL split-sum)
               irradianceMap: this.gl.getUniformLocation(this.program3D, 'u_irradianceMap'),
               prefilterMap: this.gl.getUniformLocation(this.program3D, 'u_prefilterMap'),
@@ -1186,6 +1191,9 @@ export default class Renderer {
             if (this._program3DUniforms.aoMap) this.gl.uniform1i(this._program3DUniforms.aoMap, 4);
             if (this._program3DUniforms.emissiveMap) this.gl.uniform1i(this._program3DUniforms.emissiveMap, 5);
             if (this._program3DUniforms.alphaMap) this.gl.uniform1i(this._program3DUniforms.alphaMap, 6);
+
+            // Default: legacy separate metallic/roughness (read R channel)
+            if (this._program3DUniforms.metallicRoughnessPacked) this.gl.uniform1i(this._program3DUniforms.metallicRoughnessPacked, 0);
             // IBL samplers
             if (this._program3DUniforms.irradianceMap) this.gl.uniform1i(this._program3DUniforms.irradianceMap, 7);
             if (this._program3DUniforms.prefilterMap) this.gl.uniform1i(this._program3DUniforms.prefilterMap, 8);
@@ -2515,7 +2523,8 @@ export default class Renderer {
 
     const baseTex = m.baseColorTexture || m.albedoTexture || d.baseColor;
     const metallicTex = m.metallicTexture || d.metallic;
-    const roughnessTex = m.roughnessTexture || d.roughness;
+    // If the material uses glTF packed metallic-roughness, roughness comes from the metallic texture too.
+    const roughnessTex = (m.metallicRoughnessPacked ? (m.metallicTexture || m.roughnessTexture) : m.roughnessTexture) || d.roughness;
     const normalTex = m.normalTexture || d.normal;
     const aoTex = m.aoTexture || d.ao;
     const emissiveTex = m.emissiveTexture || d.emissive;
@@ -2528,6 +2537,8 @@ export default class Renderer {
     gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, aoTex);
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D, emissiveTex);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, alphaTex);
+
+    if (u?.metallicRoughnessPacked) gl.uniform1i(u.metallicRoughnessPacked, m.metallicRoughnessPacked ? 1 : 0);
 
     // Draw call
     mesh.draw();

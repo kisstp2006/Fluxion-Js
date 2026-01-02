@@ -20,6 +20,10 @@ import { Mat4, Vector3 } from './Math3D.js';
 export async function loadGLTF(url, gl, renderer) {
     return new Promise(async (resolve, reject) => {
         try {
+            if (typeof url === 'string' && url.toLowerCase().endsWith('.glb')) {
+                reject(new Error('GLB (.glb) is not supported by the current minimal-gltf-loader integration. Please export as .gltf (JSON) + .bin + images, or switch to a GLB-capable loader.'));
+                return;
+            }
             let glTFLoader;
             
             // Check if loader is already available globally
@@ -111,7 +115,7 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
     if (glTF.materials) {
         for (let i = 0; i < glTF.materials.length; i++) {
             const gltfMat = glTF.materials[i];
-            const mat = convertGLTFMaterial(gltfMat, renderer);
+            const mat = convertGLTFMaterial(glTF, gltfMat, renderer);
             const name = gltfMat.name || `Material_${i}`;
             materials.set(name, mat);
         }
@@ -121,7 +125,7 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
     if (glTF.meshes) {
         for (let i = 0; i < glTF.meshes.length; i++) {
             const gltfMesh = glTF.meshes[i];
-            const fluxionMeshes = convertGLTFMesh(gltfMesh, gl);
+            const fluxionMeshes = convertGLTFMesh(gltfMesh, glTF, gl);
             const baseName = gltfMesh.name || `Mesh_${i}`;
             
             // If mesh has multiple primitives, create multiple meshes
@@ -136,16 +140,17 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
         }
     }
 
-    // Convert scene nodes to MeshNodes
+    // Convert scene nodes to MeshNodes.
+    // NOTE: Fluxion's MeshNode does not currently inherit parent transforms when drawing children,
+    // so we compute WORLD transforms here by traversing the glTF scene graph.
     if (glTF.scenes && glTF.scenes.length > 0) {
-        const scene = glTF.scenes[0]; // Use first scene
+        const scene = glTF.scenes[0];
         if (scene.nodes) {
+            const identity = Mat4.identity();
             for (const nodeId of scene.nodes) {
                 const node = glTF.nodes[nodeId];
-                if (node) {
-                    const meshNodes = convertGLTFNode(node, glTF, meshes, materials);
-                    nodes.push(...meshNodes);
-                }
+                if (!node) continue;
+                _convertGLTFNodeRecursive(node, glTF, meshes, materials, identity, nodes);
             }
         }
     }
@@ -153,13 +158,117 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
     return { meshes, materials, nodes };
 }
 
+function _clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
+
+function _decomposeMat4TRSEuler(m) {
+    // Column-major mat4.
+    const tx = m[12], ty = m[13], tz = m[14];
+
+    const sx = Math.hypot(m[0], m[1], m[2]);
+    const sy = Math.hypot(m[4], m[5], m[6]);
+    const sz = Math.hypot(m[8], m[9], m[10]);
+
+    const invSx = sx > 1e-8 ? 1.0 / sx : 1.0;
+    const invSy = sy > 1e-8 ? 1.0 / sy : 1.0;
+    const invSz = sz > 1e-8 ? 1.0 / sz : 1.0;
+
+    // Normalized rotation matrix columns
+    const c0x = m[0] * invSx, c0y = m[1] * invSx, c0z = m[2] * invSx;
+    const c1x = m[4] * invSy, c1y = m[5] * invSy, c1z = m[6] * invSy;
+    const c2x = m[8] * invSz, c2y = m[9] * invSz, c2z = m[10] * invSz;
+
+    // Convert to row-major entries for formulas (R = Rz * Ry * Rx)
+    const R00 = c0x, R01 = c1x, R02 = c2x;
+    const R10 = c0y, R11 = c1y, R12 = c2y;
+    const R20 = c0z, R21 = c1z, R22 = c2z;
+
+    // Extract Euler angles matching MeshNode composition: T * Rz * Ry * Rx * S
+    const y = Math.asin(_clamp(-R20, -1.0, 1.0));
+    const cy = Math.cos(y);
+    let x = 0.0;
+    let z = 0.0;
+    if (Math.abs(cy) > 1e-6) {
+        x = Math.atan2(R21, R22);
+        z = Math.atan2(R10, R00);
+    } else {
+        // Gimbal lock
+        x = Math.atan2(-R12, R11);
+        z = 0.0;
+    }
+
+    return {
+        position: [tx, ty, tz],
+        rotation: [x, y, z],
+        scale: [sx, sy, sz]
+    };
+}
+
+function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorld, outNodes) {
+    const local = gltfNode.matrix ? gltfNode.matrix : Mat4.identity();
+    const world = Mat4.multiply(parentWorld, local, new Float32Array(16));
+
+    // If this node has a mesh, create one MeshNode per primitive mesh key.
+    if (gltfNode.mesh) {
+        const gltfMesh = glTF.meshes[gltfNode.mesh.meshID];
+        if (gltfMesh) {
+            const baseName = gltfMesh.name || `Mesh_${gltfNode.mesh.meshID}`;
+            const meshKeys = Array.from(meshes.keys()).filter(k => k === baseName || k.startsWith(`${baseName}_Primitive_`));
+
+            const trs = _decomposeMat4TRSEuler(world);
+            for (const meshKey of meshKeys) {
+                const meshObj = meshes.get(meshKey);
+                if (!meshObj) continue;
+
+                const meshNode = new MeshNode();
+                meshNode.name = gltfNode.name || meshKey;
+                meshNode.x = trs.position[0];
+                meshNode.y = trs.position[1];
+                meshNode.z = trs.position[2];
+                meshNode.scaleX = trs.scale[0];
+                meshNode.scaleY = trs.scale[1];
+                meshNode.scaleZ = trs.scale[2];
+                meshNode.rotX = trs.rotation[0];
+                meshNode.rotY = trs.rotation[1];
+                meshNode.rotZ = trs.rotation[2];
+
+                // IMPORTANT: store the actual mesh object (MeshNode expects def.mesh).
+                meshNode.setMeshDefinition({ type: 'gltf', mesh: meshObj });
+
+                // Pick the correct glTF primitive material for this meshKey
+                let primIndex = 0;
+                const m = /_Primitive_(\d+)$/.exec(meshKey);
+                if (m) primIndex = parseInt(m[1], 10) || 0;
+
+                const prim = (gltfMesh.primitives && gltfMesh.primitives[primIndex]) ? gltfMesh.primitives[primIndex] : (gltfMesh.primitives ? gltfMesh.primitives[0] : null);
+                const gltfMat = prim?.material || null;
+                if (gltfMat) {
+                    const matName = gltfMat.name || `Material_${glTF.materials ? glTF.materials.indexOf(gltfMat) : 0}`;
+                    const mat = materials.get(matName);
+                    if (mat) meshNode.setMaterial(mat);
+                }
+
+                outNodes.push(meshNode);
+            }
+        }
+    }
+
+    // Recurse children
+    if (gltfNode.children) {
+        for (const child of gltfNode.children) {
+            if (!child) continue;
+            _convertGLTFNodeRecursive(child, glTF, meshes, materials, world, outNodes);
+        }
+    }
+}
+
 /**
  * Convert a GLTF mesh to Fluxion Mesh objects.
  * @param {Object} gltfMesh - GLTF mesh object
+ * @param {Object} glTF - Full GLTF object (needed to resolve index accessor IDs)
  * @param {WebGLRenderingContext|WebGL2RenderingContext} gl - WebGL context
  * @returns {Array<Mesh>} Array of Fluxion Mesh objects (one per primitive)
  */
-function convertGLTFMesh(gltfMesh, gl) {
+function convertGLTFMesh(gltfMesh, glTF, gl) {
     const fluxionMeshes = [];
 
     if (!gltfMesh.primitives || gltfMesh.primitives.length === 0) {
@@ -172,7 +281,12 @@ function convertGLTFMesh(gltfMesh, gl) {
         const positionAccessor = primitive.attributes.POSITION;
         const normalAccessor = primitive.attributes.NORMAL;
         const texCoordAccessor = primitive.attributes.TEXCOORD_0 || primitive.attributes.TEXCOORD;
-        const indicesAccessor = primitive.indices;
+        // minimal-gltf-loader keeps `primitive.indices` as an accessor ID (number)
+        // and only hooks up attributes to accessor objects.
+        const indicesRef = primitive.indices;
+        const indicesAccessor = (typeof indicesRef === 'number')
+            ? (glTF?.accessors ? glTF.accessors[indicesRef] : null)
+            : indicesRef;
 
         if (!positionAccessor) {
             console.warn('GLTF primitive missing POSITION attribute, skipping');
@@ -233,8 +347,12 @@ function convertGLTFMesh(gltfMesh, gl) {
         // Convert indices
         let indices = null;
         if (indicesData) {
-            // Determine index type based on max index value
-            const maxIndex = Math.max(...Array.from(indicesData));
+            // Determine index type based on max index value (avoid spreading huge arrays)
+            let maxIndex = 0;
+            for (let i = 0; i < indicesData.length; i++) {
+                const v = indicesData[i] | 0;
+                if (v > maxIndex) maxIndex = v;
+            }
             if (maxIndex > 65535) {
                 indices = new Uint32Array(indicesData);
             } else {
@@ -265,81 +383,7 @@ function convertGLTFMesh(gltfMesh, gl) {
  * @param {Map<string, Material>} materials - Map of converted materials
  * @returns {Array<MeshNode>} Array of MeshNode objects
  */
-function convertGLTFNode(gltfNode, glTF, meshes, materials) {
-    const meshNodes = [];
-
-    // If this node has a mesh, create a MeshNode for it
-    if (gltfNode.mesh) {
-        const gltfMesh = glTF.meshes[gltfNode.mesh.meshID];
-        if (gltfMesh) {
-            const baseName = gltfMesh.name || `Mesh_${gltfNode.mesh.meshID}`;
-            
-            // Create a MeshNode for each primitive (or single if only one)
-            const meshKeys = Array.from(meshes.keys()).filter(k => k.startsWith(baseName));
-            
-            for (const meshKey of meshKeys) {
-                const meshNode = new MeshNode();
-                meshNode.name = gltfNode.name || meshKey;
-                
-                // Set transform from GLTF node
-                if (gltfNode.translation) {
-                    meshNode.x = gltfNode.translation[0] || 0;
-                    meshNode.y = gltfNode.translation[1] || 0;
-                    meshNode.z = gltfNode.translation[2] || 0;
-                }
-                
-                if (gltfNode.scale) {
-                    meshNode.scaleX = gltfNode.scale[0] || 1;
-                    meshNode.scaleY = gltfNode.scale[1] || 1;
-                    meshNode.scaleZ = gltfNode.scale[2] || 1;
-                }
-                
-                if (gltfNode.rotation) {
-                    // Convert quaternion to Euler (simplified - just use Y rotation)
-                    // For full quaternion support, you'd need a quat-to-euler conversion
-                    const q = gltfNode.rotation;
-                    // Simple approximation: extract Y rotation from quaternion
-                    const yaw = Math.atan2(2 * (q[3] * q[1] + q[0] * q[2]), 1 - 2 * (q[1] * q[1] + q[2] * q[2]));
-                    meshNode.rotY = yaw;
-                }
-                
-                // Set mesh reference (will be resolved by MeshNode._ensureMesh)
-                meshNode.source = meshKey;
-                meshNode.meshDefinition = { type: 'gltf', meshKey };
-                
-                // Set material if available
-                if (gltfMesh.primitives && gltfMesh.primitives[0]) {
-                    const materialId = gltfMesh.primitives[0].material;
-                    if (materialId !== undefined && glTF.materials) {
-                        const gltfMat = glTF.materials[materialId];
-                        if (gltfMat) {
-                            const matName = gltfMat.name || `Material_${materialId}`;
-                            const mat = materials.get(matName);
-                            if (mat) {
-                                meshNode.setMaterial(mat);
-                            }
-                        }
-                    }
-                }
-                
-                meshNodes.push(meshNode);
-            }
-        }
-    }
-
-    // Recursively process children
-    if (gltfNode.children) {
-        for (const childId of gltfNode.children) {
-            const childNode = glTF.nodes[childId];
-            if (childNode) {
-                const childMeshNodes = convertGLTFNode(childNode, glTF, meshes, materials);
-                meshNodes.push(...childMeshNodes);
-            }
-        }
-    }
-
-    return meshNodes;
-}
+// Legacy convertGLTFNode removed in favor of _convertGLTFNodeRecursive (world transform traversal).
 
 /**
  * Convert a GLTF material to Fluxion Material.
@@ -347,7 +391,7 @@ function convertGLTFNode(gltfNode, glTF, meshes, materials) {
  * @param {Object} renderer - Renderer instance
  * @returns {Material} Fluxion Material object
  */
-function convertGLTFMaterial(gltfMat, renderer) {
+function convertGLTFMaterial(glTF, gltfMat, renderer) {
     const mat = new Material();
 
     // PBR Metallic-Roughness workflow
@@ -372,10 +416,46 @@ function convertGLTFMaterial(gltfMat, renderer) {
             mat.roughnessFactor = pbr.roughnessFactor;
         }
 
-        // Textures (would need to be loaded from GLTF images)
-        // For now, we'll just store references - full texture loading would require
-        // accessing glTF.images and converting to WebGL textures
-        // TODO: Implement texture loading from GLTF
+        // Textures
+        const baseColorTexInfo = pbr.baseColorTexture;
+        if (baseColorTexInfo && glTF.textures && glTF.textures[baseColorTexInfo.index]) {
+            const img = glTF.textures[baseColorTexInfo.index]?.source;
+            const tex = _createGLTFTexture(renderer, img, `gltf:baseColor:${baseColorTexInfo.index}`);
+            if (tex) mat.baseColorTexture = tex;
+        }
+
+        const mrTexInfo = pbr.metallicRoughnessTexture;
+        if (mrTexInfo && glTF.textures && glTF.textures[mrTexInfo.index]) {
+            const img = glTF.textures[mrTexInfo.index]?.source;
+            const tex = _createGLTFTexture(renderer, img, `gltf:metallicRoughness:${mrTexInfo.index}`);
+            if (tex) {
+                mat.metallicTexture = tex;
+                mat.roughnessTexture = tex;
+                mat.metallicRoughnessPacked = true;
+            }
+        }
+    }
+    // Normal
+    if (gltfMat.normalTexture && glTF.textures && glTF.textures[gltfMat.normalTexture.index]) {
+        const img = glTF.textures[gltfMat.normalTexture.index]?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:normal:${gltfMat.normalTexture.index}`);
+        if (tex) mat.normalTexture = tex;
+        if (typeof gltfMat.normalTexture.scale === 'number') mat.normalScale = gltfMat.normalTexture.scale;
+    }
+
+    // Occlusion
+    if (gltfMat.occlusionTexture && glTF.textures && glTF.textures[gltfMat.occlusionTexture.index]) {
+        const img = glTF.textures[gltfMat.occlusionTexture.index]?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:occlusion:${gltfMat.occlusionTexture.index}`);
+        if (tex) mat.aoTexture = tex;
+        if (typeof gltfMat.occlusionTexture.strength === 'number') mat.aoStrength = gltfMat.occlusionTexture.strength;
+    }
+
+    // Emissive
+    if (gltfMat.emissiveTexture && glTF.textures && glTF.textures[gltfMat.emissiveTexture.index]) {
+        const img = glTF.textures[gltfMat.emissiveTexture.index]?.source;
+        const tex = _createGLTFTexture(renderer, img, `gltf:emissive:${gltfMat.emissiveTexture.index}`);
+        if (tex) mat.emissiveTexture = tex;
     }
 
     // Emissive
@@ -396,6 +476,54 @@ function convertGLTFMaterial(gltfMat, renderer) {
     }
 
     return mat;
+}
+
+function _createGLTFTexture(renderer, image, cacheKey) {
+    const gl = renderer?.gl;
+    if (!gl || !image) return null;
+
+    // Basic caching for glTF textures (keyed by glTF texture index + semantic).
+    if (cacheKey && renderer.textureCache && renderer.textureCache.has(cacheKey)) {
+        return renderer.textureCache.get(cacheKey).texture;
+    }
+
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+
+    // glTF expects UNPACK_FLIP_Y_WEBGL for correct UV orientation in WebGL.
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    const isPowerOf2 = (value) => (value & (value - 1)) === 0;
+    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    } else {
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+    if (isPowerOf2(image.width) && isPowerOf2(image.height)) {
+        gl.generateMipmap(gl.TEXTURE_2D);
+    }
+
+    // Restore defaults
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    // Best-effort cache (if renderer cache infra exists)
+    if (cacheKey && renderer._setCacheEntry && renderer._estimateTextureBytes) {
+        const bytes = renderer._estimateTextureBytes(image.width, image.height);
+        renderer._setCacheEntry(cacheKey, texture, bytes);
+        if (renderer._evictIfNeeded) renderer._evictIfNeeded();
+    }
+
+    return texture;
 }
 
 /**

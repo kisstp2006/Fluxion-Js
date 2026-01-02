@@ -137,6 +137,18 @@ export default class MeshNode {
   }
 
   static _cacheByGl = new WeakMap();
+  static _gltfMeshIds = new WeakMap();
+  static _gltfMeshIdCounter = 1;
+
+  /** @param {import('./Mesh.js').default} mesh */
+  static _getGltfMeshId(mesh) {
+    let id = MeshNode._gltfMeshIds.get(mesh);
+    if (!id) {
+      id = MeshNode._gltfMeshIdCounter++;
+      MeshNode._gltfMeshIds.set(mesh, id);
+    }
+    return id;
+  }
 
   /**
    * @param {WebGLRenderingContext|WebGL2RenderingContext} gl
@@ -172,7 +184,7 @@ export default class MeshNode {
     // Cache meshes by geometry only (materials/colors should not create new meshes).
     // For GLTF, use the mesh object itself as part of the key
     const key = (def?.type === 'gltf' && def.mesh) 
-      ? `gltf:${def.mesh.vertexCount}:${def.mesh.indexCount || 0}`
+      ? `gltf:${MeshNode._getGltfMeshId(def.mesh)}`
       : JSON.stringify({ type, params: def?.params || null });
     if (this._mesh && this._meshKey === key) return;
 

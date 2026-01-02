@@ -59,6 +59,12 @@ export default class Material {
     /** @type {WebGLTexture|null} */ this.emissiveTexture = null;
     /** @type {WebGLTexture|null} */ this.alphaTexture = null;
 
+    // glTF commonly packs roughness (G) + metallic (B) into one texture.
+    // When true, the renderer/shader will read roughness from G and metallic from B
+    // (instead of reading both from the R channel).
+    /** @type {boolean} */
+    this.metallicRoughnessPacked = false;
+
     // Track acquired cache keys so we can release them.
     /** @type {Set<string>} */
     this._textureKeys = new Set();

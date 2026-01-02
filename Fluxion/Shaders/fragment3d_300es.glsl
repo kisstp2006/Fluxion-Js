@@ -135,6 +135,11 @@ uniform sampler2D u_aoMap;         // linear grayscale in R
 uniform sampler2D u_emissiveMap;   // sRGB
 uniform sampler2D u_alphaMap;      // linear grayscale in R
 
+// glTF commonly packs roughness (G) + metallic (B) into one texture.
+// 0: use R channel from u_metallicMap / u_roughnessMap (legacy)
+// 1: use u_metallicMap.G for roughness and u_metallicMap.B for metallic
+uniform int u_metallicRoughnessPacked;
+
 out vec4 outColor;
 
 const float PI = 3.1415926535897932384626433832795;
@@ -516,8 +521,14 @@ void main() {
     alpha = 1.0;
   }
 
-  float metallic = clamp(texture(u_metallicMap, v_uv).r * u_metallicFactor, 0.0, 1.0);
-  float roughness = clamp(texture(u_roughnessMap, v_uv).r * u_roughnessFactor, 0.04, 1.0);
+  vec4 mr = texture(u_metallicMap, v_uv);
+  vec4 rr = texture(u_roughnessMap, v_uv);
+  float metallic = (u_metallicRoughnessPacked == 1)
+    ? clamp(mr.b * u_metallicFactor, 0.0, 1.0)
+    : clamp(mr.r * u_metallicFactor, 0.0, 1.0);
+  float roughness = (u_metallicRoughnessPacked == 1)
+    ? clamp(mr.g * u_roughnessFactor, 0.04, 1.0)
+    : clamp(rr.r * u_roughnessFactor, 0.04, 1.0);
 
   float aoValue = texture(u_aoMap, v_uv).r;
   float aoStrength = clamp(u_aoStrength, 0.0, 1.0);
