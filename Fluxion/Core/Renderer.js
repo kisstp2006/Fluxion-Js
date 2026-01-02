@@ -3583,6 +3583,17 @@ export default class Renderer {
   end3D() {
     if (!this._in3DPass) return;
     const gl = this.gl;
+
+    // Render queued 3D debug primitives at the end of the 3D pass.
+    // This mirrors how 2D debug is rendered automatically in endFrame().
+    if (this.debug && typeof this.debug.render3D === 'function') {
+      try {
+        this.debug.render3D(this._last3DCamera || this._defaultCamera3D);
+      } catch (e) {
+        console.warn('DebugRenderer.render3D failed:', e);
+      }
+    }
+
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);

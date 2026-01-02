@@ -38,6 +38,9 @@ export default class DebugRenderer {
     this._circleCommands = [];
     this._pointCommands = [];
     this._textCommands = [];
+
+    // 3D command queue (cleared each frame)
+    this._line3DCommands = [];
     
     // Create a 1x1 white texture for drawing shapes
     this._whiteTexture = null;
@@ -52,6 +55,12 @@ export default class DebugRenderer {
     this.defaultCircleColor = [0, 0, 255, 128]; // Blue with transparency
     this.defaultPointColor = [255, 255, 0, 255]; // Yellow
     this.defaultTextColor = [255, 255, 255, 255]; // White
+
+    // 3D GPU resources (lazy init)
+    this._line3DProgram = null;
+    this._line3DUniforms = null;
+    this._line3DVao = null;
+    this._line3DVbo = null;
   }
 
   /**
@@ -134,6 +143,8 @@ export default class DebugRenderer {
     this._circleCommands.length = 0;
     this._pointCommands.length = 0;
     this._textCommands.length = 0;
+
+    this._line3DCommands.length = 0;
   }
 
   /**
@@ -251,6 +262,209 @@ export default class DebugRenderer {
       color: color || this.defaultTextColor,
       fontSize: Math.max(8, fontSize)
     });
+  }
+
+  /**
+   * Draw a world-space 3D line.
+   * 
+   * Note: line thickness support depends on the platform/driver (WebGL lineWidth is often 1).
+   * 
+   * @param {number} x1
+   * @param {number} y1
+   * @param {number} z1
+   * @param {number} x2
+   * @param {number} y2
+   * @param {number} z2
+   * @param {number[]} [color=[255,0,0,255]] - RGBA 0-255
+   * @param {number} [thickness=1]
+   * @param {boolean} [depthTest=false] - If true, line is depth-tested against scene.
+   */
+  drawLine3D(x1, y1, z1, x2, y2, z2, color = null, thickness = 1, depthTest = false) {
+    if (!this.enabled) return;
+    this._line3DCommands.push({
+      x1, y1, z1,
+      x2, y2, z2,
+      color: color || this.defaultLineColor,
+      thickness: Math.max(1, thickness),
+      depthTest: !!depthTest,
+    });
+  }
+
+  _initLine3DResources() {
+    const r = this.renderer;
+    if (!r || !r.isReady || !r.gl || !r.isWebGL2) return false;
+
+    const gl = r.gl;
+
+    const compile = (type, source) => {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, source);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        const msg = gl.getShaderInfoLog(sh) || 'Unknown shader error';
+        gl.deleteShader(sh);
+        throw new Error(msg);
+      }
+      return sh;
+    };
+
+    const link = (vs, fs) => {
+      const prog = gl.createProgram();
+      gl.attachShader(prog, vs);
+      gl.attachShader(prog, fs);
+      gl.linkProgram(prog);
+      if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+        const msg = gl.getProgramInfoLog(prog) || 'Unknown program link error';
+        gl.deleteProgram(prog);
+        throw new Error(msg);
+      }
+      return prog;
+    };
+
+    try {
+      const vsSource = `#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aColor;
+uniform mat4 uViewProj;
+out vec4 vColor;
+void main(){
+  vColor = aColor;
+  gl_Position = uViewProj * vec4(aPos, 1.0);
+}`;
+
+      const fsSource = `#version 300 es
+precision highp float;
+in vec4 vColor;
+out vec4 outColor;
+void main(){
+  outColor = vColor;
+}`;
+
+      const vs = compile(gl.VERTEX_SHADER, vsSource);
+      const fs = compile(gl.FRAGMENT_SHADER, fsSource);
+      const prog = link(vs, fs);
+      gl.deleteShader(vs);
+      gl.deleteShader(fs);
+
+      const vao = gl.createVertexArray();
+      const vbo = gl.createBuffer();
+
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+
+      const stride = 7 * 4;
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 3 * 4);
+
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
+      this._line3DProgram = prog;
+      this._line3DUniforms = {
+        viewProj: gl.getUniformLocation(prog, 'uViewProj'),
+      };
+      this._line3DVao = vao;
+      this._line3DVbo = vbo;
+      return true;
+    } catch (e) {
+      console.warn('Failed to init 3D debug line renderer:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Render queued 3D debug primitives for the current frame.
+   * Called automatically by the renderer at the end of the 3D pass.
+   * @param {import('./Camera3D.js').default | null | undefined} camera3D
+   */
+  render3D(camera3D) {
+    if (!this.enabled || !this.renderer || !this.renderer.isReady) return;
+    if (!this.renderer.isWebGL2) return;
+    if (!this._line3DCommands || this._line3DCommands.length === 0) return;
+
+    if (!this._line3DProgram || !this._line3DVao || !this._line3DVbo) {
+      if (!this._initLine3DResources()) return;
+    }
+
+    const r = this.renderer;
+    const gl = r.gl;
+    const cam = camera3D || r._last3DCamera || r._defaultCamera3D;
+    if (!cam) return;
+
+    const viewProj = cam.getViewProjectionMatrix();
+
+    // Batch by depthTest (two passes max).
+    const depthOn = [];
+    const depthOff = [];
+    for (const cmd of this._line3DCommands) {
+      (cmd.depthTest ? depthOn : depthOff).push(cmd);
+    }
+
+    const drawBatch = (cmds, depthTest) => {
+      if (cmds.length === 0) return;
+
+      // 2 vertices per line, 7 floats per vertex.
+      const floatsPerVert = 7;
+      const vertCount = cmds.length * 2;
+      const data = new Float32Array(vertCount * floatsPerVert);
+
+      let o = 0;
+      for (const cmd of cmds) {
+        const c = cmd.color;
+        const rCol = (Number(c?.[0]) || 0) / 255;
+        const gCol = (Number(c?.[1]) || 0) / 255;
+        const bCol = (Number(c?.[2]) || 0) / 255;
+        const aCol = (c?.[3] === undefined ? 255 : Number(c?.[3])) / 255;
+
+        data[o++] = Number(cmd.x1) || 0;
+        data[o++] = Number(cmd.y1) || 0;
+        data[o++] = Number(cmd.z1) || 0;
+        data[o++] = rCol;
+        data[o++] = gCol;
+        data[o++] = bCol;
+        data[o++] = aCol;
+
+        data[o++] = Number(cmd.x2) || 0;
+        data[o++] = Number(cmd.y2) || 0;
+        data[o++] = Number(cmd.z2) || 0;
+        data[o++] = rCol;
+        data[o++] = gCol;
+        data[o++] = bCol;
+        data[o++] = aCol;
+      }
+
+      if (depthTest) gl.enable(gl.DEPTH_TEST);
+      else gl.disable(gl.DEPTH_TEST);
+
+      gl.useProgram(this._line3DProgram);
+      if (this._line3DUniforms?.viewProj) gl.uniformMatrix4fv(this._line3DUniforms.viewProj, false, viewProj);
+
+      gl.bindVertexArray(this._line3DVao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._line3DVbo);
+      gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+
+      // Best-effort thickness (often clamped to 1 by WebGL implementations)
+      let width = 1;
+      for (const cmd of cmds) width = Math.max(width, cmd.thickness | 0);
+      try { gl.lineWidth(width); } catch { /* ignore */ }
+
+      gl.drawArrays(gl.LINES, 0, vertCount);
+
+      try { gl.lineWidth(1); } catch { /* ignore */ }
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+
+    // Draw depth-tested lines first, then overlay lines.
+    drawBatch(depthOn, true);
+    drawBatch(depthOff, false);
+
+    // Leave GL in a reasonable state for the rest of the pipeline.
+    gl.useProgram(r.program3D);
+    gl.enable(gl.DEPTH_TEST);
   }
 
   /**
