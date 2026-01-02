@@ -160,10 +160,20 @@ export default class MeshNode {
 
     const def = this.meshDefinition;
     const type = (def?.type || def?.source || this.source || 'Cube');
-    const params = def?.params || null;
+    
+    // For GLTF meshes, the mesh is stored directly in def.mesh, not in params
+    // For primitive meshes, params contains the geometry parameters
+    let params = def?.params || null;
+    if (def?.type === 'gltf' && def.mesh) {
+      // GLTF mesh: pass the entire def object so _createMeshFromType can access def.mesh
+      params = def;
+    }
 
     // Cache meshes by geometry only (materials/colors should not create new meshes).
-    const key = JSON.stringify({ type, params });
+    // For GLTF, use the mesh object itself as part of the key
+    const key = (def?.type === 'gltf' && def.mesh) 
+      ? `gltf:${def.mesh.vertexCount}:${def.mesh.indexCount || 0}`
+      : JSON.stringify({ type, params: def?.params || null });
     if (this._mesh && this._meshKey === key) return;
 
     const cache = MeshNode._getCache(gl);
@@ -179,6 +189,20 @@ export default class MeshNode {
       cache.set(key, mesh);
       this._mesh = mesh;
       this._meshKey = key;
+      if (def?.type === 'gltf') {
+        console.log(`MeshNode "${this.name}": Successfully created GLTF mesh`, { 
+          vertexCount: mesh.vertexCount, 
+          indexCount: mesh.indexCount || 0,
+          source: this.source
+        });
+      }
+    } else {
+      console.warn('MeshNode: Failed to create mesh', { 
+        type, 
+        source: this.source,
+        meshDefinition: def,
+        params 
+      });
     }
   }
 
@@ -190,6 +214,23 @@ export default class MeshNode {
   static _createMeshFromType(gl, type, params) {
     const t = String(type || '').toLowerCase();
     const p = params || {};
+
+    // GLTF mesh (already converted, stored directly)
+    // For GLTF, params is the entire mesh definition object with .mesh property
+    if (t === 'gltf') {
+      if (p.mesh && p.mesh instanceof Mesh) {
+        return p.mesh; // Return the pre-converted Mesh object
+      } else {
+        console.error('GLTF: Mesh definition missing or invalid mesh object', { 
+          type, 
+          hasMesh: !!p.mesh,
+          meshType: typeof p.mesh,
+          meshConstructor: p.mesh?.constructor?.name
+        });
+        // Fallback to cube instead of returning null (which would cause issues)
+        return Mesh.createCube(gl, 2, 2, 2);
+      }
+    }
 
     if (t === 'quad') {
       return Mesh.createQuad(gl, p.width ?? 1, p.height ?? 1);

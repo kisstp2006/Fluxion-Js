@@ -71,6 +71,8 @@
               source="Ball"
               material="BallMat"
               z="-6"/>
+    <Mesh name="GoofySphere" source="../../Model/GoofySphere.gltf" />
+    <MeshNode name="RobotNode" source="GoofySphere" x="0" y="0" z="-5" />
 
     <!-- 2D overlay (renderLayer 1) -->
     <Text name="Title"

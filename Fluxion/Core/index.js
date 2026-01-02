@@ -40,6 +40,7 @@ export { Vector3, Mat4 } from './Math3D.js';
 export { default as Material } from './Material.js';
 export { default as Skybox } from './Skybox.js';
 export { LightType, DirectionalLight, PointLight, SpotLight } from './Lights.js';
+export { loadGLTF, convertGLTFToFluxion } from './GLTFLoader.js';
 
 // Text Rendering
 export { default as Text } from './Text.js';

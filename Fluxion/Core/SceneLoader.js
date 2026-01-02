@@ -10,6 +10,7 @@ import MeshNode from './MeshNode.js';
 import Material from './Material.js';
 import Skybox from './Skybox.js';
 import { DirectionalLight, PointLight, SpotLight } from './Lights.js';
+import { loadGLTF } from './GLTFLoader.js';
 
 /**
  * Utility class for loading scenes from XML files.
@@ -38,6 +39,19 @@ export default class SceneLoader {
                 scene.name = sceneNode.getAttribute("name");
             }
 
+            // Resolve base URL for relative path resolution
+            let baseUrl;
+            try {
+                // Try to create absolute URL from the scene URL
+                const sceneUrl = new URL(url, window.location.href);
+                baseUrl = new URL('.', sceneUrl).toString();
+            } catch (e) {
+                // Fallback: use document.baseURI or window.location
+                baseUrl = (typeof document !== 'undefined' && document.baseURI) 
+                    ? document.baseURI 
+                    : (typeof window !== 'undefined' ? window.location.href : '');
+            }
+
             const children = Array.from(sceneNode.children);
 
             // Pass 1: register named mesh resources (top-level <Mesh ... />) and materials
@@ -45,7 +59,65 @@ export default class SceneLoader {
                 if (child.tagName === 'Mesh') {
                     const name = child.getAttribute('name') || '';
                     const type = child.getAttribute('type') || child.getAttribute('source') || child.getAttribute('mesh') || '';
-                    if (!name || !type) continue;
+                    if (!name) continue;
+
+                    // Check if this is a GLTF file
+                    const source = child.getAttribute('source') || child.getAttribute('src') || '';
+                    const isGLTF = source.toLowerCase().endsWith('.gltf') || source.toLowerCase().endsWith('.glb');
+                    
+                    if (isGLTF && source) {
+                        // GLTF file - load asynchronously
+                        // Resolve relative to scene file URL (same as materials do)
+                        let gltfUrl;
+                        try {
+                            // First, resolve the scene file URL to absolute
+                            const sceneUrl = new URL(url, window.location.href);
+                            // Get the directory of the scene file
+                            const base = new URL('.', sceneUrl).toString();
+                            // Resolve the GLTF path relative to the scene file directory
+                            gltfUrl = new URL(source, base).toString();
+                        } catch (e) {
+                            // Fallback: use document.baseURI or window.location.href
+                            const base = (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+                            try {
+                                gltfUrl = new URL(source, base).toString();
+                            } catch (e2) {
+                                // Last resort: use source as-is
+                                gltfUrl = source;
+                            }
+                        }
+                        
+                        const loadPromise = (async () => {
+                            try {
+                                const result = await loadGLTF(gltfUrl, renderer.gl, renderer);
+                                // Register all meshes from GLTF with their GLTF names
+                                for (const [meshName, mesh] of result.meshes.entries()) {
+                                    scene.registerMesh(meshName, { type: 'gltf', mesh });
+                                }
+                                // Also register the XAML mesh name to point to the first GLTF mesh
+                                // This allows <MeshNode source="XamlName" /> to work
+                                if (result.meshes.size > 0) {
+                                    const firstMesh = Array.from(result.meshes.values())[0];
+                                    scene.registerMesh(name, { type: 'gltf', mesh: firstMesh });
+                                }
+                                // Register all materials from GLTF
+                                for (const [matName, mat] of result.materials.entries()) {
+                                    scene.registerMaterial(matName, mat);
+                                }
+                                return result;
+                            } catch (err) {
+                                console.error(`Failed to load GLTF ${gltfUrl}:`, err);
+                                return null;
+                            }
+                        })();
+                        
+                        renderer?.trackAssetPromise?.(loadPromise);
+                        // Store promise for later resolution (will be replaced with actual mesh when loaded)
+                        scene.registerMesh(name, { type: 'gltf', promise: loadPromise, url: gltfUrl });
+                        continue;
+                    }
+
+                    if (!type) continue;
 
                     const color = this._parseColor(child.getAttribute('color'));
                     const params = this._parseMeshParams(child);
@@ -211,7 +283,38 @@ export default class SceneLoader {
                 // Resolve named mesh resources onto mesh nodes.
                 if (obj instanceof MeshNode) {
                     const def = scene.getMeshDefinition(obj.source);
-                    if (def) obj.setMeshDefinition(def);
+                    if (def) {
+                        // Check if this is a GLTF promise that needs to be awaited
+                        if (def.type === 'gltf' && def.promise) {
+                            try {
+                                const gltfResult = await def.promise;
+                                // After promise resolves, the mesh should be registered with the XAML name
+                                // Re-fetch the definition to get the actual mesh
+                                const resolvedDef = scene.getMeshDefinition(obj.source);
+                                if (resolvedDef && resolvedDef.type === 'gltf' && resolvedDef.mesh) {
+                                    console.log(`GLTF: Resolved mesh "${obj.source}" for MeshNode "${obj.name}"`, resolvedDef);
+                                    obj.setMeshDefinition(resolvedDef);
+                                } else if (gltfResult && gltfResult.meshes && gltfResult.meshes.size > 0) {
+                                    // Fallback: use first mesh from GLTF
+                                    const gltfMesh = Array.from(gltfResult.meshes.values())[0];
+                                    console.log(`GLTF: Using fallback mesh for MeshNode "${obj.name}"`, gltfMesh);
+                                    obj.setMeshDefinition({ type: 'gltf', mesh: gltfMesh });
+                                } else {
+                                    console.warn(`GLTF: No mesh found for "${obj.source}" after promise resolved`);
+                                }
+                            } catch (e) {
+                                console.warn('Failed to resolve GLTF mesh', obj.source, e);
+                            }
+                        } else if (def.type === 'gltf' && def.mesh) {
+                            // GLTF mesh already loaded
+                            console.log(`GLTF: Using already-loaded mesh for MeshNode "${obj.name}"`, def);
+                            obj.setMeshDefinition(def);
+                        } else {
+                            obj.setMeshDefinition(def);
+                        }
+                    } else {
+                        console.warn(`MeshNode "${obj.name}": No mesh definition found for source "${obj.source}"`);
+                    }
 
                     // Resolve material reference if present
                     if (obj.material) {
