@@ -18,9 +18,25 @@
 			"name":"Sphere"
 		}
 	],
+	"materials":[
+		{
+			"doubleSided":true,
+			"name":"Material.002",
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0,
+					0.24007947742938995,
+					0.8016026020050049,
+					1
+				],
+				"metallicFactor":0.6904761791229248,
+				"roughnessFactor":0.8253968358039856
+			}
+		}
+	],
 	"meshes":[
 		{
-			"name":"Sphere",
+			"name":"Sphere.001",
 			"primitives":[
 				{
 					"attributes":{
@@ -28,7 +44,8 @@
 						"NORMAL":1,
 						"TEXCOORD_0":2
 					},
-					"indices":3
+					"indices":3,
+					"material":0
 				}
 			]
 		}
@@ -37,29 +54,29 @@
 		{
 			"bufferView":0,
 			"componentType":5126,
-			"count":1984,
+			"count":2020,
 			"max":[
-				0.9999997019767761,
+				1.4039214849472046,
 				1,
-				0.9999993443489075
+				1.403921127319336
 			],
 			"min":[
-				-0.9999990463256836,
+				-1.4039206504821777,
 				-1,
-				-1
+				-1.4039218425750732
 			],
 			"type":"VEC3"
 		},
 		{
 			"bufferView":1,
 			"componentType":5126,
-			"count":1984,
+			"count":2020,
 			"type":"VEC3"
 		},
 		{
 			"bufferView":2,
 			"componentType":5126,
-			"count":1984,
+			"count":2020,
 			"type":"VEC2"
 		},
 		{
@@ -72,32 +89,32 @@
 	"bufferViews":[
 		{
 			"buffer":0,
-			"byteLength":23808,
+			"byteLength":24240,
 			"byteOffset":0,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":23808,
-			"byteOffset":23808,
+			"byteLength":24240,
+			"byteOffset":24240,
 			"target":34962
 		},
 		{
 			"buffer":0,
-			"byteLength":15872,
-			"byteOffset":47616,
+			"byteLength":16160,
+			"byteOffset":48480,
 			"target":34962
 		},
 		{
 			"buffer":0,
 			"byteLength":5760,
-			"byteOffset":63488,
+			"byteOffset":64640,
 			"target":34963
 		}
 	],
 	"buffers":[
 		{
-			"byteLength":69248,
+			"byteLength":70400,
 			"uri":"GoofySphere.bin"
 		}
 	]

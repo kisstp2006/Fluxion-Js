@@ -88,6 +88,15 @@ function _loadGLTF(glTFLoader, url, gl, renderer, resolve, reject) {
             }
             
             const result = convertGLTFToFluxion(glTF, gl, renderer);
+
+            // Optional: emit a metadata file in Electron builds.
+            // Uses the existing preload IPC hook (saved under Electron userData/Debug).
+            try {
+                _maybeWriteGLTFMetadataFile(url, glTF, result);
+            } catch (e) {
+                console.warn('GLTF: Failed to write metadata file', e);
+            }
+
             resolve(result);
         } catch (err) {
             reject(new Error(`Failed to convert GLTF: ${err.message}`));
@@ -97,6 +106,173 @@ function _loadGLTF(glTFLoader, url, gl, renderer, resolve, reject) {
     // Note: The minimal-gltf-loader handles .bin file loading automatically
     // It extracts the base URI from the GLTF file path and loads all buffers
     // referenced in the JSON. No additional code needed here.
+}
+
+function _safeNumber(n, fallback = 0) {
+    const v = Number(n);
+    return Number.isFinite(v) ? v : fallback;
+}
+
+function _pickFileStemFromUrl(url) {
+    try {
+        const u = new URL(url, (typeof window !== 'undefined' ? window.location.href : undefined));
+        const parts = decodeURIComponent(u.pathname).split('/').filter(Boolean);
+        const file = parts.length ? parts[parts.length - 1] : 'model.gltf';
+        return file.replace(/\.[^/.]+$/, '');
+    } catch {
+        const s = String(url || 'model.gltf');
+        const last = s.split('/').pop() || s;
+        return last.replace(/\.[^/.]+$/, '');
+    }
+}
+
+function _fileUrlToAbsolutePath(sourceUrl) {
+    try {
+        const u = new URL(sourceUrl, (typeof window !== 'undefined' ? window.location.href : undefined));
+        if (u.protocol !== 'file:') return null;
+
+        // URL pathname is forward-slash separated; decode percent-escapes.
+        let p = decodeURIComponent(u.pathname || '');
+
+        // Windows file URLs look like: /C:/path/to/file
+        if (p.startsWith('/') && /^[A-Za-z]:\//.test(p.slice(1))) {
+            p = p.slice(1);
+        }
+
+        return p;
+    } catch {
+        return null;
+    }
+}
+
+function _dirnameFromPath(p) {
+    const s = String(p || '');
+    const i = s.lastIndexOf('/');
+    if (i <= 0) return '';
+    return s.slice(0, i);
+}
+
+function _buildGLTFMetadata(sourceUrl, glTF, converted) {
+    const meshes = converted?.meshes;
+    const materials = converted?.materials;
+    const nodes = converted?.nodes;
+
+    const meshList = [];
+    if (meshes && typeof meshes.forEach === 'function') {
+        meshes.forEach((mesh, key) => {
+            if (!mesh) return;
+            meshList.push({
+                key,
+                vertexCount: _safeNumber(mesh.vertexCount, 0),
+                indexCount: _safeNumber(mesh.indexCount, 0),
+                indexed: !!(mesh.indices && mesh.indexCount > 0),
+            });
+        });
+    }
+
+    const materialList = [];
+    if (materials && typeof materials.forEach === 'function') {
+        materials.forEach((mat, key) => {
+            if (!mat) return;
+            materialList.push({
+                key,
+                baseColorFactor: Array.isArray(mat.baseColorFactor) ? mat.baseColorFactor.slice(0, 4) : undefined,
+                metallicFactor: _safeNumber(mat.metallicFactor, 0),
+                roughnessFactor: _safeNumber(mat.roughnessFactor, 1),
+                emissiveFactor: Array.isArray(mat.emissiveFactor) ? mat.emissiveFactor.slice(0, 3) : undefined,
+                alphaMode: mat.alphaMode || 'OPAQUE',
+                alphaCutoff: _safeNumber(mat.alphaCutoff, 0.5),
+                metallicRoughnessPacked: !!mat.metallicRoughnessPacked,
+                textures: {
+                    baseColor: !!mat.baseColorTexture,
+                    normal: !!mat.normalTexture,
+                    metallic: !!mat.metallicTexture,
+                    roughness: !!mat.roughnessTexture,
+                    ao: !!mat.aoTexture,
+                    emissive: !!mat.emissiveTexture,
+                    alpha: !!mat.alphaTexture,
+                },
+            });
+        });
+    }
+
+    const totalVerts = meshList.reduce((a, m) => a + (m.vertexCount | 0), 0);
+    const totalIdx = meshList.reduce((a, m) => a + (m.indexCount | 0), 0);
+
+    return {
+        type: 'gltf-metadata',
+        version: 1,
+        sourceUrl: String(sourceUrl || ''),
+        timestamp: new Date().toISOString(),
+
+        gltf: {
+            asset: glTF?.asset || null,
+            sceneCount: Array.isArray(glTF?.scenes) ? glTF.scenes.length : 0,
+            nodeCount: Array.isArray(glTF?.nodes) ? glTF.nodes.length : 0,
+            meshCount: Array.isArray(glTF?.meshes) ? glTF.meshes.length : 0,
+            materialCount: Array.isArray(glTF?.materials) ? glTF.materials.length : 0,
+            imageCount: Array.isArray(glTF?.images) ? glTF.images.length : 0,
+            textureCount: Array.isArray(glTF?.textures) ? glTF.textures.length : 0,
+            bufferCount: Array.isArray(glTF?.buffers) ? glTF.buffers.length : 0,
+            bufferViewCount: Array.isArray(glTF?.bufferViews) ? glTF.bufferViews.length : 0,
+            accessorCount: Array.isArray(glTF?.accessors) ? glTF.accessors.length : 0,
+        },
+
+        fluxion: {
+            meshEntries: meshList.length,
+            materialEntries: materialList.length,
+            nodeEntries: Array.isArray(nodes) ? nodes.length : 0,
+            totalVertices: totalVerts,
+            totalIndices: totalIdx,
+            meshes: meshList,
+            materials: materialList,
+        },
+    };
+}
+
+function _maybeWriteGLTFMetadataFile(sourceUrl, glTF, converted) {
+    // Only possible in the Electron app (preload exposes `window.electronAPI`).
+    const api = (typeof window !== 'undefined') ? window.electronAPI : null;
+    if (!api) return;
+
+    const meta = _buildGLTFMetadata(sourceUrl, glTF, converted);
+    const stem = _pickFileStemFromUrl(sourceUrl);
+
+    // Prefer writing next to the .gltf when we have a local file URL and the IPC hook.
+    const absGltfPath = _fileUrlToAbsolutePath(sourceUrl);
+    if (absGltfPath && typeof api.saveProjectFile === 'function') {
+        const dir = _dirnameFromPath(absGltfPath);
+        const outPath = `${dir}/${stem}.metadata.json`;
+        api.saveProjectFile(outPath, JSON.stringify(meta, null, 2))
+            .then((res) => {
+                if (res && res.ok) {
+                    console.log('GLTF: Metadata saved next to model:', res.path || outPath);
+                } else {
+                    console.warn('GLTF: Failed to save metadata next to model; falling back to Debug.', res?.error);
+                    if (typeof api.saveDebugFile === 'function') {
+                        const filename = `GLTF/${stem}.metadata.json`;
+                        api.saveDebugFile(filename, JSON.stringify(meta, null, 2));
+                        console.log('GLTF: Metadata saved (Debug):', filename);
+                    }
+                }
+            })
+            .catch((e) => {
+                console.warn('GLTF: saveProjectFile threw; falling back to Debug.', e);
+                if (typeof api.saveDebugFile === 'function') {
+                    const filename = `GLTF/${stem}.metadata.json`;
+                    api.saveDebugFile(filename, JSON.stringify(meta, null, 2));
+                    console.log('GLTF: Metadata saved (Debug):', filename);
+                }
+            });
+        return;
+    }
+
+    // Fallback: Debug folder
+    if (typeof api.saveDebugFile === 'function') {
+        const filename = `GLTF/${stem}.metadata.json`;
+        api.saveDebugFile(filename, JSON.stringify(meta, null, 2));
+        console.log('GLTF: Metadata saved (Debug):', filename);
+    }
 }
 
 /**
@@ -110,6 +286,13 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
     const meshes = new Map();
     const materials = new Map();
     const nodes = [];
+    const meshMaterials = new Map();
+
+    // Always have a fallback material for primitives that don't specify one.
+    // (Some exporters omit materials entirely; Fluxion still needs something to bind.)
+    if (!materials.has('__gltf_default__')) {
+        materials.set('__gltf_default__', new Material());
+    }
 
     // Convert materials
     if (glTF.materials) {
@@ -127,6 +310,26 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
             const gltfMesh = glTF.meshes[i];
             const fluxionMeshes = convertGLTFMesh(gltfMesh, glTF, gl);
             const baseName = gltfMesh.name || `Mesh_${i}`;
+
+            // Record default material per primitive mesh key so scene mesh resources can auto-assign.
+            const primCount = Array.isArray(gltfMesh.primitives) ? gltfMesh.primitives.length : 0;
+            for (let pIdx = 0; pIdx < primCount; pIdx++) {
+                const key = (fluxionMeshes.length === 1) ? baseName : `${baseName}_Primitive_${pIdx}`;
+                const prim = gltfMesh.primitives[pIdx];
+                const gltfMat = prim?.material || null;
+
+                let matKey = '__gltf_default__';
+                if (gltfMat) {
+                    const named = gltfMat.name;
+                    if (named && materials.has(named)) {
+                        matKey = named;
+                    } else {
+                        const midx = Array.isArray(glTF.materials) ? glTF.materials.indexOf(gltfMat) : -1;
+                        if (midx >= 0) matKey = `Material_${midx}`;
+                    }
+                }
+                meshMaterials.set(key, matKey);
+            }
             
             // If mesh has multiple primitives, create multiple meshes
             if (fluxionMeshes.length === 1) {
@@ -155,7 +358,7 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
         }
     }
 
-    return { meshes, materials, nodes };
+    return { meshes, materials, nodes, meshMaterials };
 }
 
 function _clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
@@ -243,8 +446,15 @@ function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorl
                 const gltfMat = prim?.material || null;
                 if (gltfMat) {
                     const matName = gltfMat.name || `Material_${glTF.materials ? glTF.materials.indexOf(gltfMat) : 0}`;
-                    const mat = materials.get(matName);
-                    if (mat) meshNode.setMaterial(mat);
+                    const mat = materials.get(matName) || null;
+                    if (mat) {
+                        meshNode.setMaterial(mat);
+                    } else {
+                        // Shouldn't normally happen, but keep imports resilient.
+                        meshNode.setMaterial(materials.get('__gltf_default__'));
+                    }
+                } else {
+                    meshNode.setMaterial(materials.get('__gltf_default__'));
                 }
 
                 outNodes.push(meshNode);
@@ -401,10 +611,10 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
         // Base color
         if (pbr.baseColorFactor) {
             mat.baseColorFactor = [
-                pbr.baseColorFactor[0] || 1,
-                pbr.baseColorFactor[1] || 1,
-                pbr.baseColorFactor[2] || 1,
-                pbr.baseColorFactor[3] || 1
+                Number(pbr.baseColorFactor[0] ?? 1),
+                Number(pbr.baseColorFactor[1] ?? 1),
+                Number(pbr.baseColorFactor[2] ?? 1),
+                Number(pbr.baseColorFactor[3] ?? 1)
             ];
         }
 
@@ -461,9 +671,9 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     // Emissive
     if (gltfMat.emissiveFactor) {
         mat.emissiveFactor = [
-            gltfMat.emissiveFactor[0] || 0,
-            gltfMat.emissiveFactor[1] || 0,
-            gltfMat.emissiveFactor[2] || 0
+            Number(gltfMat.emissiveFactor[0] ?? 0),
+            Number(gltfMat.emissiveFactor[1] ?? 0),
+            Number(gltfMat.emissiveFactor[2] ?? 0)
         ];
     }
 

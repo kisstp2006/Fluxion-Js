@@ -92,13 +92,17 @@ export default class SceneLoader {
                                 const result = await loadGLTF(gltfUrl, renderer.gl, renderer);
                                 // Register all meshes from GLTF with their GLTF names
                                 for (const [meshName, mesh] of result.meshes.entries()) {
-                                    scene.registerMesh(meshName, { type: 'gltf', mesh });
+                                    const matKey = result.meshMaterials?.get(meshName);
+                                    scene.registerMesh(meshName, { type: 'gltf', mesh, material: matKey || '__gltf_default__' });
                                 }
                                 // Also register the XAML mesh name to point to the first GLTF mesh
                                 // This allows <MeshNode source="XamlName" /> to work
                                 if (result.meshes.size > 0) {
-                                    const firstMesh = Array.from(result.meshes.values())[0];
-                                    scene.registerMesh(name, { type: 'gltf', mesh: firstMesh });
+                                    const firstEntry = Array.from(result.meshes.entries())[0];
+                                    const firstMeshName = firstEntry[0];
+                                    const firstMesh = firstEntry[1];
+                                    const matKey = result.meshMaterials?.get(firstMeshName);
+                                    scene.registerMesh(name, { type: 'gltf', mesh: firstMesh, material: matKey || '__gltf_default__' });
                                 }
                                 // Register all materials from GLTF
                                 for (const [matName, mat] of result.materials.entries()) {
@@ -314,6 +318,25 @@ export default class SceneLoader {
                         }
                     } else {
                         console.warn(`MeshNode "${obj.name}": No mesh definition found for source "${obj.source}"`);
+                    }
+
+                    // If the mesh definition provides a default material and the node didn't specify one,
+                    // auto-apply it (keeps GLTF imports from rendering pure white).
+                    if (!obj.material && obj.meshDefinition && obj.meshDefinition.type === 'gltf' && obj.meshDefinition.material) {
+                        const hint = obj.meshDefinition.material;
+                        const mdef = (typeof hint === 'string') ? scene.getMaterialDefinition(hint) : hint;
+                        if (mdef) {
+                            if (typeof mdef.then === 'function') {
+                                try {
+                                    const mat = await mdef;
+                                    if (mat) obj.setMaterial(mat);
+                                } catch (e) {
+                                    console.warn('Failed to resolve GLTF default material', hint, e);
+                                }
+                            } else {
+                                obj.setMaterial(mdef);
+                            }
+                        }
                     }
 
                     // Resolve material reference if present
