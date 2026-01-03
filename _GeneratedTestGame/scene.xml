@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scene name="Main">
+  <Camera x="0" y="0" zoom="1" rotation="0" width="1280" height="720" />
+</Scene>

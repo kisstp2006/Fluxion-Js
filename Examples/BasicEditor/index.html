@@ -14,21 +14,62 @@
   </script>
 </head>
 <body>
-  <div class="app">
-    <aside class="panel" id="leftPanel">
+  <div class="shell">
+    <header class="topbar" role="menubar" aria-label="Editor Menu">
+      <div class="menuRoot">
+        <button id="fileMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">File</button>
+        <div id="fileMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="file.createProject">Create Project...</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="viewMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">View</button>
+        <div id="viewMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="view.mode2d">Mode: 2D</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="view.mode3d">Mode: 3D</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="sceneMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Scene</button>
+        <div id="sceneMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="scene.focusSelection">Focus Selection (F)</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="helpMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Help</button>
+        <div id="helpMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="help.about">About</button>
+        </div>
+      </div>
+
+      <div class="topbarSpacer" aria-hidden="true"></div>
+
+      <div class="menuRoot">
+        <button id="debugMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Debug</button>
+        <div id="debugMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
+        </div>
+      </div>
+
+      <button id="topReloadBtn" class="menuBtn" type="button">Reload (Ctrl+R)</button>
+    </header>
+
+    <div class="app">
+      <aside class="panel" id="leftPanel">
       <div class="panelHeader">
         <div class="title">Basic Editor</div>
         <div class="subtitle">Scene tree + inspector</div>
-      </div>
-
-      <div class="section">
-        <div class="sectionTitle">Scene</div>
-        <div class="row">
-          <select id="sceneSelect" class="input">
-            <option value="../Basic3DXaml/scene.xaml">Basic3DXaml (scene.xaml)</option>
-          </select>
-          <button id="reloadBtn" class="btn">Reload</button>
-        </div>
       </div>
 
       <div class="section">
@@ -51,17 +92,17 @@
           - WASD/QE + mouse to fly (from the loaded scene’s game logic, if present).
         </div>
       </div>
-    </aside>
+      </aside>
 
-    <main class="viewport">
-      <canvas id="gameCanvas"></canvas>
-      <div class="viewportOverlay" id="overlay">
-        <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
-        <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
-      </div>
-    </main>
+      <main class="viewport">
+        <canvas id="gameCanvas"></canvas>
+        <div class="viewportOverlay" id="overlay">
+          <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
+          <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
+        </div>
+      </main>
 
-    <aside class="panel" id="rightPanel">
+      <aside class="panel" id="rightPanel">
       <div class="panelHeader">
         <div class="title">Inspector</div>
         <div class="subtitle" id="inspectorSubtitle">No selection</div>
@@ -83,7 +124,55 @@
         <label class="checkRow"><input type="checkbox" id="dbgShowAabb" checked /> Show AABB (approx)</label>
         <label class="checkRow"><input type="checkbox" id="dbgDepthTest" checked /> Depth-test debug</label>
       </div>
-    </aside>
+      </aside>
+    </div>
+
+    <footer class="assetBrowser" aria-label="Asset Browser">
+      <div class="assetHeader">
+        <div class="assetTitle">Assets</div>
+        <button id="assetUpBtn" class="assetToolBtn" type="button">Up</button>
+        <div id="assetPath" class="assetPath">.</div>
+      </div>
+      <div class="assetBody">
+        <div id="assetFolders" class="assetFolders" aria-label="Asset Folders"></div>
+        <div id="assetGrid" class="assetGrid" aria-label="Asset Items"></div>
+      </div>
+    </footer>
+  </div>
+
+  <div id="aboutModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <div class="modalHeader">
+        <div id="aboutTitle" class="modalTitle">About</div>
+        <button id="aboutCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="aboutName">Fluxion - Basic Editor</div>
+        <div class="aboutMeta">Debug build</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="createProjectModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle">
+      <div class="modalHeader">
+        <div id="createProjectTitle" class="modalTitle">Create Project</div>
+        <button id="createProjectCancelBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="sectionTitle">Project Name</div>
+        <input id="createProjectNameInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+
+        <div class="sectionTitle" style="margin-top: 12px;">Location</div>
+        <div class="row">
+          <input id="createProjectPathInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Choose a folder..." />
+          <button id="createProjectBrowseBtn" class="btn" type="button">Browse...</button>
+        </div>
+      </div>
+      <div class="modalFooter">
+        <button id="createProjectOkBtn" class="btn" type="button">Create</button>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="game.js"></script>

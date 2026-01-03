@@ -1,12 +1,31 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D } from "../../Fluxion/index.js";
+import Scene from "../../Fluxion/Core/Scene.js";
+import { createAssetBrowser } from "./assetBrowser.js";
+import { createProjectDialog } from "./createProjectDialog.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
 const ui = {
-  sceneSelect: /** @type {HTMLSelectElement|null} */ (null),
-  reloadBtn: /** @type {HTMLButtonElement|null} */ (null),
+  topReloadBtn: /** @type {HTMLButtonElement|null} */ (null),
+  fileMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
+  viewMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
+  sceneMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
+  helpMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
+  debugMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
+  aboutModal: /** @type {HTMLDivElement|null} */ (null),
+  aboutCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createProjectModal: /** @type {HTMLDivElement|null} */ (null),
+  createProjectNameInput: /** @type {HTMLInputElement|null} */ (null),
+  createProjectPathInput: /** @type {HTMLInputElement|null} */ (null),
+  createProjectBrowseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createProjectOkBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createProjectCancelBtn: /** @type {HTMLButtonElement|null} */ (null),
+  assetUpBtn: /** @type {HTMLButtonElement|null} */ (null),
+  assetPath: /** @type {HTMLDivElement|null} */ (null),
+  assetFolders: /** @type {HTMLDivElement|null} */ (null),
+  assetGrid: /** @type {HTMLDivElement|null} */ (null),
   mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
   mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
   tree: /** @type {HTMLDivElement|null} */ (null),
@@ -42,6 +61,34 @@ const game = {
   /** @type {import("../../Fluxion/Core/Input.js").default | null} */
   _input: null,
 
+  /** @type {import("../../Fluxion/Core/Camera.js").default | null} */
+  _editorCamera2D: null,
+  /** @type {import("../../Fluxion/Core/Camera3D.js").default | null} */
+  _editorCamera3D: null,
+  /** @type {import("../../Fluxion/Core/Camera.js").default | null} */
+  _sceneCamera2D: null,
+  /** @type {import("../../Fluxion/Core/Camera3D.js").default | null} */
+  _sceneCamera3D: null,
+  _usingEditorCamera2D: false,
+  _usingEditorCamera3D: false,
+
+  _editorCam3DState: {
+    yaw: 0,
+    pitch: 0,
+    moveSpeed: 6, // units/sec
+  },
+
+  _wheelDeltaY: 0,
+
+  _editorPointerLocked: false,
+  /** @type {HTMLCanvasElement|null} */
+  _editorPointerLockCanvas: null,
+
+  _viewportQuality: {
+    scale: 1,
+    queued: false,
+  },
+
   _gizmo: {
     active: false,
     mode: /** @type {'translate'} */ ('translate'),
@@ -55,6 +102,23 @@ const game = {
 
   _helpVisible: true,
 
+  _closeTopbarMenus: /** @type {() => void} */ (() => {}),
+
+  _aboutOpen: false,
+
+  _createProjectDialog: /** @type {ReturnType<typeof createProjectDialog> | null} */ (null),
+
+  _assetBrowser: {
+    root: '.',
+    cwd: '.',
+    selected: /** @type {string|null} */ (null),
+  },
+
+  _assetBrowserCtl: /** @type {ReturnType<typeof createAssetBrowser> | null} */ (null),
+
+  /** @type {string|null} */
+  _scenePath: null,
+
   /** @param {Renderer} renderer */
   async init(renderer) {
     this._renderer = renderer;
@@ -64,9 +128,34 @@ const game = {
     // (Window resize is not enough in editor layouts; panels can affect canvas size.)
     this._setupViewportResize(renderer);
 
+    this._setupEditorCameraInput(renderer);
+
     // Wire DOM
-    ui.sceneSelect = /** @type {HTMLSelectElement} */ (document.getElementById("sceneSelect"));
-    ui.reloadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("reloadBtn"));
+    ui.topReloadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("topReloadBtn"));
+    ui.fileMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("fileMenuBtn"));
+    ui.viewMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("viewMenuBtn"));
+    ui.sceneMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("sceneMenuBtn"));
+    ui.helpMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("helpMenuBtn"));
+    ui.debugMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("debugMenuBtn"));
+    ui.aboutModal = /** @type {HTMLDivElement} */ (document.getElementById("aboutModal"));
+    ui.aboutCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("aboutCloseBtn"));
+    ui.createProjectModal = /** @type {HTMLDivElement} */ (document.getElementById("createProjectModal"));
+    ui.createProjectNameInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectNameInput"));
+    ui.createProjectPathInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectPathInput"));
+    ui.createProjectBrowseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectBrowseBtn"));
+    ui.createProjectOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectOkBtn"));
+    ui.createProjectCancelBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectCancelBtn"));
+    ui.assetUpBtn = /** @type {HTMLButtonElement} */ (document.getElementById("assetUpBtn"));
+    ui.assetPath = /** @type {HTMLDivElement} */ (document.getElementById("assetPath"));
+    ui.assetFolders = /** @type {HTMLDivElement} */ (document.getElementById("assetFolders"));
+    ui.assetGrid = /** @type {HTMLDivElement} */ (document.getElementById("assetGrid"));
+
+    // Ensure About starts closed.
+    if (ui.aboutModal) ui.aboutModal.hidden = true;
+    // Ensure Create Project starts closed.
+    if (ui.createProjectModal) ui.createProjectModal.hidden = true;
+
+    this._setupAssetBrowser();
     ui.mode2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode2dBtn"));
     ui.mode3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode3dBtn"));
     ui.tree = /** @type {HTMLDivElement} */ (document.getElementById("sceneTree"));
@@ -78,9 +167,25 @@ const game = {
     ui.dbgShowAabb = /** @type {HTMLInputElement} */ (document.getElementById("dbgShowAabb"));
     ui.dbgDepthTest = /** @type {HTMLInputElement} */ (document.getElementById("dbgDepthTest"));
 
-    ui.reloadBtn?.addEventListener("click", () => {
-      this.loadSelectedScene(renderer).catch(console.error);
+    ui.topReloadBtn?.addEventListener("click", () => {
+      window.location.reload();
     });
+
+    this._setupTopbarMenus(renderer);
+
+    // About modal close behavior
+    ui.aboutCloseBtn?.addEventListener('click', () => this._closeAbout());
+    ui.aboutModal?.addEventListener('mousedown', (e) => {
+      // Click outside the dialog closes.
+      if (e.target === ui.aboutModal) this._closeAbout();
+    });
+
+    // Create Project dialog
+    this._createProjectDialog = createProjectDialog({
+      ui: /** @type {any} */ (ui),
+      closeMenus: () => this._closeTopbarMenus(),
+    });
+    this._createProjectDialog.init();
 
     ui.mode2dBtn?.addEventListener('click', () => {
       this.setMode('2d');
@@ -90,6 +195,24 @@ const game = {
     });
 
     window.addEventListener("keydown", (e) => {
+      // Menu actions
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
+        // Match browser/Electron refresh behavior.
+        e.preventDefault();
+        window.location.reload();
+        return;
+      }
+      if (e.key === "Escape") {
+        const canvas = this._editorPointerLockCanvas;
+        if (canvas && document.pointerLockElement === canvas) {
+          e.preventDefault();
+          document.exitPointerLock?.();
+          return;
+        }
+        if (this._createProjectDialog?.isOpen()) this._createProjectDialog.cancel();
+        else if (this._aboutOpen) this._closeAbout();
+        else this._closeTopbarMenus();
+      }
       if (e.key === "F1") {
         e.preventDefault();
         this._helpVisible = !this._helpVisible;
@@ -104,6 +227,228 @@ const game = {
     this._applyRenderLayers();
 
     await this.loadSelectedScene(renderer);
+  },
+
+  _setupAssetBrowser() {
+    if (!this._assetBrowserCtl) {
+      this._assetBrowserCtl = createAssetBrowser({
+        ui,
+        root: this._assetBrowser.root,
+        onOpenFile: (pathRel) => this._tryOpenSceneFromAsset(pathRel),
+      });
+    }
+    this._assetBrowserCtl.init();
+  },
+
+  /** @param {string} pathRel */
+  async _tryOpenSceneFromAsset(pathRel) {
+    const ext = String(pathRel || '').toLowerCase();
+    const isScene = ext.endsWith('.xml') || ext.endsWith('.xaml');
+    if (!isScene) return;
+
+    const r = this._renderer;
+    if (!r) return;
+
+    const clean = String(pathRel || '').replace(/^\.(?:\/)?/, '');
+    this._scenePath = `../../${clean}`;
+    await this.loadSelectedScene(r);
+  },
+
+  /** @param {any} dbg @param {boolean} depth */
+  _draw3DViewportGrid(dbg, depth) {
+    if (!dbg || typeof dbg.drawLine3D !== 'function') return;
+    const cam3 = /** @type {any} */ (this.currentScene?.camera3D);
+    if (!cam3) return;
+
+    const posY = Math.abs(Number(cam3.position?.y) || 0);
+    let minor = 1;
+    if (posY > 40) minor = 10;
+    else if (posY > 18) minor = 5;
+    else if (posY > 8) minor = 2;
+    const major = minor * 5;
+
+    const halfSpan = minor * 50;
+    const y = 0;
+
+    const cMinor = [120, 120, 120, 70];
+    const cMajor = [160, 160, 160, 110];
+    const cAxisX = [255, 80, 80, 160];
+    const cAxisZ = [80, 160, 255, 160];
+
+    // X-parallel lines (varying Z)
+    for (let z = -halfSpan; z <= halfSpan; z += minor) {
+      const isMajor = (Math.round(z / minor) % 5) === 0;
+      const c = isMajor ? cMajor : cMinor;
+      dbg.drawLine3D(-halfSpan, y, z, halfSpan, y, z, c, 1, depth);
+    }
+
+    // Z-parallel lines (varying X)
+    for (let x = -halfSpan; x <= halfSpan; x += minor) {
+      const isMajor = (Math.round(x / minor) % 5) === 0;
+      const c = isMajor ? cMajor : cMinor;
+      dbg.drawLine3D(x, y, -halfSpan, x, y, halfSpan, c, 1, depth);
+    }
+
+    // World axes on the plane
+    dbg.drawLine3D(-halfSpan, y, 0, halfSpan, y, 0, cAxisX, 2, depth);
+    dbg.drawLine3D(0, y, -halfSpan, 0, y, halfSpan, cAxisZ, 2, depth);
+  },
+
+  /** @param {Renderer} renderer */
+  _setupTopbarMenus(renderer) {
+    const roots = Array.from(document.querySelectorAll('.topbar .menuRoot'));
+    /** @type {HTMLElement|null} */
+    let openRoot = null;
+
+    const closeAll = () => {
+      for (const r of roots) r.classList.remove('open');
+      for (const btn of [ui.fileMenuBtn, ui.viewMenuBtn, ui.sceneMenuBtn, ui.helpMenuBtn, ui.debugMenuBtn]) {
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+      }
+      openRoot = null;
+    };
+
+    /** @param {HTMLElement} root */
+    const open = (root) => {
+      if (!root) return;
+      closeAll();
+      root.classList.add('open');
+      const btn = root.querySelector('button.menuBtn');
+      if (btn) btn.setAttribute('aria-expanded', 'true');
+      openRoot = root;
+    };
+
+    /** @param {HTMLButtonElement | null} btn */
+    const toggleForBtn = (btn) => {
+      const root = /** @type {HTMLElement|null} */ (btn?.closest('.menuRoot'));
+      if (!root) return;
+      if (openRoot === root) closeAll();
+      else open(root);
+    };
+
+    ui.fileMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.fileMenuBtn); });
+    ui.viewMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.viewMenuBtn); });
+    ui.sceneMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.sceneMenuBtn); });
+    ui.helpMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.helpMenuBtn); });
+    ui.debugMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.debugMenuBtn); });
+
+    // Close on outside click
+    document.addEventListener('mousedown', (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      if (!t) return;
+      if (t.closest('.topbar .menuRoot')) return;
+      closeAll();
+    });
+
+    // Execute menu actions
+    document.addEventListener('click', (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const action = t?.getAttribute('data-action');
+      if (!action) return;
+
+      closeAll();
+
+      switch (action) {
+        case 'file.createProject':
+          this._createProjectDialog?.createProjectFromEditor().catch(console.error);
+          break;
+        case 'file.reloadScene':
+          this.loadSelectedScene(renderer).catch(console.error);
+          break;
+        case 'app.reload':
+          window.location.reload();
+          break;
+        case 'view.toggleHelp':
+          this._helpVisible = !this._helpVisible;
+          if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
+          break;
+        case 'scene.focusSelection':
+          this.focusSelection();
+          break;
+        case 'view.mode2d':
+          this.setMode('2d');
+          break;
+        case 'view.mode3d':
+          this.setMode('3d');
+          break;
+        case 'help.about':
+          this._openAbout();
+          break;
+      }
+    });
+
+    // Expose close helper for Escape key
+    this._closeTopbarMenus = closeAll;
+  },
+
+  _openAbout() {
+    if (!ui.aboutModal) return;
+    this._aboutOpen = true;
+    ui.aboutModal.hidden = false;
+    this._closeTopbarMenus();
+    ui.aboutCloseBtn?.focus();
+  },
+
+  _closeAbout() {
+    if (!ui.aboutModal) return;
+    this._aboutOpen = false;
+    ui.aboutModal.hidden = true;
+  },
+
+  /** @param {Renderer} renderer */
+  _setupEditorCameraInput(renderer) {
+    const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById('gameCanvas'));
+    if (!canvas) return;
+
+    this._editorPointerLockCanvas = canvas;
+
+    // Unity-like FPS camera: while holding RMB in 3D view, lock the mouse (pointer lock)
+    // so mouse movement uses movementX/movementY and the cursor can't leave the viewport.
+    try {
+      const onLockChange = () => {
+        this._editorPointerLocked = (document.pointerLockElement === canvas);
+      };
+      document.addEventListener('pointerlockchange', onLockChange);
+      onLockChange();
+
+      canvas.addEventListener('mousedown', (e) => {
+        if (e.button !== 2) return;
+        if (this.mode !== '3d') return;
+
+        // Only if the click started inside the canvas bounds.
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX, y = e.clientY;
+        if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+
+        e.preventDefault();
+        canvas.requestPointerLock?.();
+      });
+
+      window.addEventListener('mouseup', (e) => {
+        if (e.button !== 2) return;
+        if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+      });
+
+      window.addEventListener('blur', () => {
+        if (document.pointerLockElement === canvas) document.exitPointerLock?.();
+      });
+    } catch {
+      // Pointer lock may be unavailable; controls will still work without it.
+    }
+
+    // Avoid the browser context menu when using RMB orbit.
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // Mouse wheel zoom (2D zoom / 3D dolly).
+    canvas.addEventListener('wheel', (e) => {
+      // Only when hovering canvas.
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX, y = e.clientY;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+
+      e.preventDefault();
+      this._wheelDeltaY += e.deltaY;
+    }, { passive: false });
   },
 
   _applyRenderLayers() {
@@ -130,6 +475,7 @@ const game = {
       requestAnimationFrame(() => {
         queued = false;
         renderer.resizeCanvas();
+        this._syncActiveCameraSizes();
       });
     };
 
@@ -145,12 +491,176 @@ const game = {
     requestResize();
   },
 
+  _syncActiveCameraSizes() {
+    const r = this._renderer;
+    const scene = this.currentScene;
+    if (!r || !scene) return;
+
+    const cam2 = scene.camera;
+    if (cam2 && typeof cam2.setSize === 'function') {
+      cam2.setSize(r.targetWidth || 0, r.targetHeight || 0);
+    }
+  },
+
+  /** @param {any} cam2 @param {any|null|undefined} sceneCam2 */
+  _draw2DViewportOverlay(cam2, sceneCam2) {
+    const r = this._renderer;
+    const scene = this.currentScene;
+    if (!r || !scene) return;
+    const dbg = r.debug;
+    if (!dbg) return;
+
+    const zoom = Math.max(0.0001, Number(cam2?.zoom) || 1);
+    const qScale = Number.isFinite(Number(r.renderScale)) ? Number(r.renderScale) : 1;
+    // Supersample debug text when zoomed in to keep it sharp.
+    const textPpu = Math.max(1, Math.min(4, zoom * qScale));
+    const left = Number(cam2?.x) || 0;
+    const top = Number(cam2?.y) || 0;
+    const w = (r.targetWidth || 0) / zoom;
+    const h = (r.targetHeight || 0) / zoom;
+    if (w <= 0 || h <= 0) return;
+
+    const right = left + w;
+    const bottom = top + h;
+
+    // Grid settings (approximate Godot 2D editor feel)
+    // IMPORTANT: adapt spacing to zoom to avoid drawing thousands of lines when zoomed out.
+    const baseMinor = 32;
+    const minGridPx = 10; // minimum pixel spacing between minor lines
+    const maxGridLines = 240; // safety cap per axis
+
+    let minor = baseMinor;
+    // Keep minor spacing readable (>= minGridPx) when zoomed out.
+    while (minor * zoom < minGridPx) minor *= 2;
+    // Safety cap: if viewport covers a huge world span, increase minor further.
+    while ((w / minor) > maxGridLines || (h / minor) > maxGridLines) minor *= 2;
+
+    const major = minor * 2;
+    const startX = Math.floor(left / minor) * minor;
+    const endX = Math.ceil(right / minor) * minor;
+    const startY = Math.floor(top / minor) * minor;
+    const endY = Math.ceil(bottom / minor) * minor;
+
+    const cMinor = [255, 255, 255, 24];
+    const cMajor = [255, 255, 255, 46];
+    const cAxis = [120, 200, 255, 110];
+    const cFrame = [160, 180, 255, 180];
+    const cCam = [255, 230, 120, 230];
+    const cSceneFrame = [140, 255, 140, 170];
+    const cSceneCam = [140, 255, 140, 220];
+    const cText = [220, 220, 220, 200];
+
+    // Grid lines
+    for (let x = startX; x <= endX; x += minor) {
+      const isAxis = x === 0;
+      const isMajor = (x % major) === 0;
+      dbg.drawLine(x, startY, x, endY, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
+    }
+    for (let y = startY; y <= endY; y += minor) {
+      const isAxis = y === 0;
+      const isMajor = (y % major) === 0;
+      dbg.drawLine(startX, y, endX, y, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
+    }
+
+    // Camera frame (current viewport in world space)
+    dbg.drawRect(left, top, w, h, cFrame, 2, false);
+
+    // "CAM" marker at the frame origin (top-left)
+    const camMark = 10 / zoom;
+    dbg.drawLine(left - camMark, top, left + camMark, top, cCam, 2);
+    dbg.drawLine(left, top - camMark, left, top + camMark, cCam, 2);
+    // Text is CPU-expensive (generates textures). When zoomed out (or low render scale), reduce labels.
+    const showRulerLabels = (zoom * qScale) >= 0.25;
+    dbg.drawText('CAM', left + (14 / zoom), top + (8 / zoom), cCam, Math.max(8, Math.min(32, 12 / zoom)), textPpu);
+
+    // Also show the scene's authored 2D camera ("MainCamera") if present.
+    if (sceneCam2 && sceneCam2 !== cam2 && (typeof sceneCam2.x === 'number' || typeof sceneCam2.y === 'number') && typeof sceneCam2.zoom === 'number') {
+      const z2 = Math.max(0.0001, Number(sceneCam2.zoom) || 1);
+      const l2 = Number(sceneCam2.x) || 0;
+      const t2 = Number(sceneCam2.y) || 0;
+      const w2 = (r.targetWidth || 0) / z2;
+      const h2 = (r.targetHeight || 0) / z2;
+      if (w2 > 0 && h2 > 0) {
+        dbg.drawRect(l2, t2, w2, h2, cSceneFrame, 2, false);
+        const mk = 10 / zoom;
+        dbg.drawLine(l2 - mk, t2, l2 + mk, t2, cSceneCam, 2);
+        dbg.drawLine(l2, t2 - mk, l2, t2 + mk, cSceneCam, 2);
+        if (showRulerLabels) {
+          dbg.drawText('MainCamera', l2 + (14 / zoom), t2 + (8 / zoom), cSceneCam, Math.max(8, Math.min(32, 12 / zoom)), textPpu);
+        }
+      }
+    }
+
+    // Rulers (simple ticks + labels along top/left of the viewport)
+    const tickMinor = 6 / zoom;
+    const tickMajor = 12 / zoom;
+    const labelSize = Math.max(8, Math.min(32, 12 / zoom));
+
+    // Reduce label density when zoomed out (debug text is relatively expensive).
+    const minLabelPx = 90;
+    let labelStep = major;
+    while (labelStep * zoom < minLabelPx) labelStep *= 2;
+
+    // Top ruler
+    for (let x = startX; x <= right; x += minor) {
+      const isMajor = (x % major) === 0;
+      const t = isMajor ? tickMajor : tickMinor;
+      dbg.drawLine(x, top, x, top + t, cText, 1);
+      if (showRulerLabels && isMajor && (x % labelStep) === 0) {
+        dbg.drawText(String(x), x + (2 / zoom), top + (t + 2 / zoom), cText, labelSize, textPpu);
+      }
+    }
+
+    // Left ruler
+    for (let y = startY; y <= bottom; y += minor) {
+      const isMajor = (y % major) === 0;
+      const t = isMajor ? tickMajor : tickMinor;
+      dbg.drawLine(left, y, left + t, y, cText, 1);
+      if (showRulerLabels && isMajor && (y % labelStep) === 0) {
+        dbg.drawText(String(y), left + (t + 2 / zoom), y + (2 / zoom), cText, labelSize, textPpu);
+      }
+    }
+  },
+
+  /** @param {any} cam2 */
+  _update2DViewportQuality(cam2) {
+    const r = this._renderer;
+    if (!r || typeof r.setRenderScale !== 'function') return;
+
+    const z = Math.max(0.0001, Number(cam2?.zoom) || 1);
+    // Map zoom -> renderScale.
+    // - zoomed in (>=1): full quality
+    // - zoomed out (<1): progressively lower resolution for performance
+    const desired = Math.max(0.35, Math.min(1.0, 0.5 + 0.5 * Math.sqrt(z)));
+
+    if (Math.abs(desired - this._viewportQuality.scale) < 0.03) return;
+    this._viewportQuality.scale = desired;
+
+    if (this._viewportQuality.queued) return;
+    this._viewportQuality.queued = true;
+    requestAnimationFrame(() => {
+      this._viewportQuality.queued = false;
+      r.setRenderScale(this._viewportQuality.scale);
+      r.resizeCanvas();
+      this._syncActiveCameraSizes();
+    });
+  },
+
   /** @param {'2d' | '3d'} mode */
   setMode(mode) {
     if (this.mode === mode) return;
     this.mode = mode;
 
     this._applyRenderLayers();
+
+    // Restore full resolution for 3D, allow dynamic scaling in 2D.
+    const r = this._renderer;
+    if (r && typeof r.setRenderScale === 'function') {
+      const nextScale = (mode === '3d') ? 1.0 : this._viewportQuality.scale;
+      r.setRenderScale(nextScale);
+      r.resizeCanvas();
+      this._syncActiveCameraSizes();
+    }
 
     if (ui.mode2dBtn && ui.mode3dBtn) {
       ui.mode2dBtn.classList.toggle('active', mode === '2d');
@@ -167,28 +677,253 @@ const game = {
 
   /** @param {Renderer} renderer */
   async loadSelectedScene(renderer) {
-    const path = ui.sceneSelect?.value || "../Basic3DXaml/scene.xaml";
-    this.currentScene = await SceneLoader.load(path, renderer);
+    const path = this._scenePath;
+    if (!path) {
+      const empty = new Scene();
+      empty.name = 'Empty Scene';
+      this.currentScene = empty;
+    } else {
+      this.currentScene = await SceneLoader.load(path, renderer);
+    }
+
+    this._ensureEditorCameras();
 
     // Default selection follows editor mode.
-    this.selected = this._pickDefaultSelectionForMode();
+    this.selected = path ? this._pickDefaultSelectionForMode() : null;
 
     this.rebuildTree();
     this.rebuildInspector();
   },
 
+  _ensureEditorCameras() {
+    const scene = this.currentScene;
+    const r = this._renderer;
+    if (!scene || !r) return;
+
+    // Store authored cameras (if any), but always render using editor cameras.
+    this._sceneCamera2D = scene.camera || null;
+    this._sceneCamera3D = scene.camera3D || null;
+
+    if (!this._editorCamera2D) {
+      const cam2 = new Camera(0, 0, 1, 0, r.targetWidth || 0, r.targetHeight || 0);
+      // @ts-ignore - scenes often treat cameras as named objects
+      cam2.name = 'EditorCamera2D';
+      cam2.active = true;
+      this._editorCamera2D = cam2;
+    }
+
+    if (!this._editorCamera3D) {
+      const cam3 = new Camera3D();
+      // @ts-ignore - scenes often treat cameras as named objects
+      cam3.name = 'EditorCamera3D';
+      this._editorCamera3D = cam3;
+    }
+
+    // Reset FP state per scene load (simple + predictable).
+    this._editorCam3DState.yaw = 0;
+    this._editorCam3DState.pitch = 0;
+    this._editorCamera3D.position.x = 0;
+    this._editorCamera3D.position.y = 1.5;
+    this._editorCamera3D.position.z = 6;
+    this._updateEditorCamera3DTarget(this._editorCamera3D);
+
+    // Force the scene to render using editor cameras.
+    scene.setCamera(this._editorCamera2D);
+    scene.setCamera3D(this._editorCamera3D);
+    this._usingEditorCamera2D = true;
+    this._usingEditorCamera3D = true;
+
+    this._syncActiveCameraSizes();
+  },
+
+  /** @param {import("../../Fluxion/Core/Camera3D.js").default} cam3 */
+  _updateEditorCamera3DTarget(cam3) {
+    const st = this._editorCam3DState;
+    const yaw = st.yaw;
+    const pitch = st.pitch;
+
+    // Forward vector (yaw around Y, pitch around X). yaw=0 looks down -Z.
+    const cp = Math.cos(pitch);
+    const sp = Math.sin(pitch);
+    const sy = Math.sin(yaw);
+    const cy = Math.cos(yaw);
+    const fx = cp * sy;
+    const fy = sp;
+    const fz = -cp * cy;
+
+    cam3.target.x = cam3.position.x + fx;
+    cam3.target.y = cam3.position.y + fy;
+    cam3.target.z = cam3.position.z + fz;
+    cam3._dirty = true;
+  },
+
+  /** @param {number} dt */
+  _updateEditorCamera(dt) {
+    const scene = this.currentScene;
+    const r = this._renderer;
+    const input = this._input;
+    if (!scene || !r || !input) return;
+
+    // Don't move camera while dragging gizmos.
+    if (this._gizmo.active) {
+      this._wheelDeltaY = 0;
+      return;
+    }
+
+    const mouse = input.getMousePosition();
+    const pointerLocked = !!(this._editorPointerLockCanvas && document.pointerLockElement === this._editorPointerLockCanvas);
+    const overCanvas = pointerLocked || this._isPointInCanvas(mouse.x, mouse.y);
+    if (!overCanvas) {
+      this._wheelDeltaY = 0;
+      return;
+    }
+
+    // Apply wheel zoom (batched).
+    const wheel = this._wheelDeltaY;
+    this._wheelDeltaY = 0;
+
+    if (this.mode === '2d') {
+      const cam2 = /** @type {any} */ (scene.camera || scene.getObjectByName?.('MainCamera'));
+      if (!cam2) return;
+
+      // Pan with middle mouse drag.
+      if (input.getMouseButton(1)) {
+        const md = input.getMouseDelta();
+        const z = Number(cam2.zoom) || 1;
+        // Drag direction: move camera opposite mouse delta.
+        if (typeof cam2.x === 'number') cam2.x -= md.x / z;
+        if (typeof cam2.y === 'number') cam2.y -= md.y / z;
+      }
+
+      // Zoom with wheel.
+      if (wheel !== 0 && typeof cam2.zoom === 'number') {
+        const zoomFactor = wheel > 0 ? (1 / 1.1) : 1.1;
+        const next = Math.max(0.05, Math.min(50, cam2.zoom * zoomFactor));
+        cam2.zoom = next;
+      }
+
+      // Dynamic quality scaling based on zoom.
+      this._update2DViewportQuality(cam2);
+
+      return;
+    }
+
+    // 3D editor navigation (scene.camera3D is forced to the editor camera).
+    const cam3 = /** @type {any} */ (scene.camera3D);
+    if (!cam3 || !this._usingEditorCamera3D) return;
+
+    const key = (/** @type {string} */ k) => input.getKey(k) || input.getKey(String(k).toUpperCase());
+    const isRmb = input.getMouseButton(2);
+    const isMmb = input.getMouseButton(1);
+
+    // Mouse look (hold RMB)
+    if (isRmb) {
+      const md = input.getMouseDelta();
+      const rotSpeed = 0.003;
+      this._editorCam3DState.yaw += md.x * rotSpeed;
+      this._editorCam3DState.pitch -= md.y * rotSpeed;
+      // Clamp pitch to avoid flipping.
+      this._editorCam3DState.pitch = Math.max(-1.5, Math.min(1.5, this._editorCam3DState.pitch));
+    }
+
+    // Pan (hold MMB): move along camera right (XZ) + world up.
+    if (isMmb) {
+      const md = input.getMouseDelta();
+      const yaw = this._editorCam3DState.yaw;
+      const sy = Math.sin(yaw);
+      const cy = Math.cos(yaw);
+      const rX = cy;
+      const rZ = sy;
+
+      const speedBase = Number(this._editorCam3DState.moveSpeed) || 6;
+      const panScale = Math.max(0.0005, speedBase * 0.002);
+
+      cam3.position.x += (-md.x * rX) * panScale;
+      cam3.position.z += (-md.x * rZ) * panScale;
+      cam3.position.y += (md.y) * panScale;
+    }
+
+    // Fly movement (WASD + QE). Only active while RMB is held,
+    // so typing in the inspector doesn't move the camera.
+    const moveForward = (isRmb && key('w')) ? 1 : 0;
+    const moveBack = (isRmb && key('s')) ? 1 : 0;
+    const moveLeft = (isRmb && key('a')) ? 1 : 0;
+    const moveRight = (isRmb && key('d')) ? 1 : 0;
+    const moveUp = (isRmb && (key('e') || key(' '))) ? 1 : 0;
+    const moveDown = (isRmb && (key('q') || key('Control'))) ? 1 : 0;
+
+    const moveX = (moveRight - moveLeft);
+    const moveZ = (moveForward - moveBack);
+    const moveY = (moveUp - moveDown);
+
+    const speedBase = Number(this._editorCam3DState.moveSpeed) || 6;
+    const speedMul = input.getKey('Shift') ? 3 : (input.getKey('Alt') ? 0.35 : 1);
+    const speed = speedBase * speedMul;
+    const step = speed * Math.max(0, dt);
+
+    if (moveX !== 0 || moveZ !== 0 || moveY !== 0) {
+      const yaw = this._editorCam3DState.yaw;
+      const pitch = this._editorCam3DState.pitch;
+      const sy = Math.sin(yaw);
+      const cy = Math.cos(yaw);
+
+      // Forward direction follows where the camera looks (yaw + pitch).
+      // yaw=0 looks down -Z.
+      const cp = Math.cos(pitch);
+      const sp = Math.sin(pitch);
+      const fX = cp * sy;
+      const fY = sp;
+      const fZ = -cp * cy;
+
+      // Strafe stays horizontal (yaw only) for predictable editor feel.
+      const rX = cy;
+      const rZ = sy;
+
+      // Normalize diagonal
+      const len = Math.hypot(moveX, moveZ, moveY) || 1;
+      const nX = moveX / len;
+      const nZ = moveZ / len;
+      const nY = moveY / len;
+
+      cam3.position.x += (rX * nX + fX * nZ) * step;
+      cam3.position.z += (rZ * nX + fZ * nZ) * step;
+      cam3.position.y += (fY * nZ) * step;
+      cam3.position.y += nY * step;
+    }
+
+    // Wheel dolly along forward (scaled by delta magnitude; supports trackpads).
+    if (wheel !== 0) {
+      const yaw = this._editorCam3DState.yaw;
+      const pitch = this._editorCam3DState.pitch;
+      const sy = Math.sin(yaw);
+      const cy = Math.cos(yaw);
+      const cp = Math.cos(pitch);
+      const sp = Math.sin(pitch);
+      const fX = cp * sy;
+      const fY = sp;
+      const fZ = -cp * cy;
+      const wheelSteps = Math.max(-10, Math.min(10, (Number(wheel) || 0) / 100));
+      const amount = (wheelSteps) * (speedBase * 0.25);
+      cam3.position.x += fX * amount;
+      cam3.position.y += fY * amount;
+      cam3.position.z += fZ * amount;
+    }
+
+    this._updateEditorCamera3DTarget(cam3);
+  },
+
   _pickDefaultSelectionForMode() {
     const scene = this.currentScene;
     if (!scene) return null;
-    const camName = this.mode === '3d' ? 'MainCamera3D' : 'MainCamera';
-    const cam = scene.getObjectByName?.(camName);
-    if (cam) return cam;
-
     const objs = Array.isArray(scene.objects) ? scene.objects : [];
     for (const o of objs) {
       if (o && this._matchesMode(o)) return o;
     }
-    return objs[0] || null;
+
+    // Fall back to editor camera (always present after load).
+    return this.mode === '3d'
+      ? (scene.camera3D || null)
+      : (scene.camera || null);
   },
 
   /** @param {any} obj */
@@ -366,8 +1101,8 @@ const game = {
   focusSelection() {
     if (!this.currentScene || !this.selected) return;
     if (this.mode === '3d') {
-      const cam = /** @type {any} */ (this.currentScene.getObjectByName?.("MainCamera3D"));
-      if (!cam || !cam.position || typeof cam.lookAt !== "function") return;
+      const cam = /** @type {any} */ (this.currentScene.camera3D);
+      if (!cam || !cam.position) return;
 
       const p = this._getWorldPos(this.selected);
       if (!p) return;
@@ -375,12 +1110,27 @@ const game = {
       cam.position.x = p.x + 0.0;
       cam.position.y = p.y + 1.0;
       cam.position.z = p.z + 3.5;
-      cam.lookAt(new Vector3(p.x, p.y, p.z));
+
+      // Update yaw/pitch so the editor camera controller doesn't immediately
+      // override the focused direction next frame.
+      const dx = p.x - cam.position.x;
+      const dy = p.y - cam.position.y;
+      const dz = p.z - cam.position.z;
+      const len = Math.hypot(dx, dy, dz) || 1;
+      const fx = dx / len;
+      const fy = dy / len;
+      const fz = dz / len;
+
+      // Our convention: yaw=0 looks down -Z.
+      this._editorCam3DState.yaw = Math.atan2(fx, -fz);
+      this._editorCam3DState.pitch = Math.asin(Math.max(-1, Math.min(1, fy)));
+      this._editorCam3DState.pitch = Math.max(-1.5, Math.min(1.5, this._editorCam3DState.pitch));
+      this._updateEditorCamera3DTarget(cam);
       return;
     }
 
     // 2D focus: move the 2D camera to the selection.
-    const cam2 = /** @type {any} */ (this.currentScene.getObjectByName?.("MainCamera"));
+    const cam2 = /** @type {any} */ (this.currentScene.camera);
     if (!cam2) return;
     const p2 = this._get2DPos(this.selected);
     if (!p2) return;
@@ -730,6 +1480,9 @@ const game = {
   update(dt) {
     if (!this.currentScene) return;
 
+    // Editor camera navigation (fallback cameras, plus 2D pan/zoom).
+    this._updateEditorCamera(dt);
+
     // Gizmo manipulation (uses input + debug-drawn handles).
     this._updateGizmo();
 
@@ -746,8 +1499,42 @@ const game = {
     const dbg = renderer?.debug;
     const obj = this.selected;
 
-    if (dbg && obj) {
-      const depth = !!ui.dbgDepthTest?.checked;
+    if (!dbg) return;
+
+    const depth = !!ui.dbgDepthTest?.checked;
+
+    // Empty scenes short-circuit Scene.draw() before any 3D pass begins.
+    // But 3D debug primitives (grid/gizmos) are only rendered at end3D().
+    // So when the scene has no objects, we explicitly begin/end a minimal 3D pass
+    // to flush queued 3D debug lines.
+    const sceneHasNoObjects = !!(this.currentScene && Array.isArray(this.currentScene.objects) && this.currentScene.objects.length === 0);
+    const needsEmpty3DPass = (this.mode === '3d') && sceneHasNoObjects;
+    let didBeginEmpty3DPass = false;
+    if (needsEmpty3DPass && typeof renderer.begin3D === 'function' && typeof renderer.end3D === 'function') {
+      // Guard against internal state weirdness; Engine.endFrame() also forces end3D().
+      // @ts-ignore - internal flag
+      if (!renderer._in3DPass) {
+        didBeginEmpty3DPass = !!renderer.begin3D(/** @type {any} */ (this.currentScene?.camera3D));
+      }
+    }
+
+    // 2D viewport overlay (grid/rulers/frame) should show even with no selection.
+    if (this.mode === '2d') {
+      const cam2 = /** @type {any} */ (this.currentScene?.camera);
+      if (cam2) this._draw2DViewportOverlay(cam2, this._sceneCamera2D);
+    }
+
+    // 3D viewport grid should show regardless of selection and is not part of the scene.
+    if (this.mode === '3d') {
+      this._draw3DViewportGrid(dbg, depth);
+    }
+
+    if (didBeginEmpty3DPass) {
+      renderer.end3D();
+      didBeginEmpty3DPass = false;
+    }
+
+    if (obj) {
 
       // 2D debug (uses existing 2D debug renderer)
       if (this.mode === '2d') {

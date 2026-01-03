@@ -21,6 +21,7 @@ export { default as AnimatedSprite } from './AnimatedSprite.js';
 // Scene Management
 export { default as Scene } from './Scene.js';
 export { default as SceneLoader } from './SceneLoader.js';
+export { default as Project } from './Project.js';
 // Note: Layers.js doesn't have a default export - it's currently empty
 
 // Input and Interaction

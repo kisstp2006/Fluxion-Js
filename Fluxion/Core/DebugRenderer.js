@@ -92,10 +92,11 @@ export default class DebugRenderer {
    * Get a Text object from the pool or create a new one.
    * @private
    */
-  _getTextObject(text, x, y, fontSize, color) {
+  _getTextObject(text, x, y, fontSize, color, pixelsPerUnit = 1) {
     let textObj = this._textPool.pop();
     if (!textObj) {
       textObj = new Text(this.renderer, text, x, y, fontSize, 'Inter', color);
+      textObj.pixelsPerUnit = pixelsPerUnit;
     } else {
       // Reuse existing text object
       textObj.text = text;
@@ -103,7 +104,7 @@ export default class DebugRenderer {
       textObj.y = y;
       textObj.fontSize = fontSize;
       textObj.textColor = color;
-      textObj.updateTexture();
+      textObj.pixelsPerUnit = pixelsPerUnit;
     }
     return textObj;
   }
@@ -254,13 +255,14 @@ export default class DebugRenderer {
    * @param {number[]} [color=[255,255,255,255]] - Text color [R, G, B, A] (0-255).
    * @param {number} [fontSize=12] - Font size in pixels.
    */
-  drawText(text, x, y, color = null, fontSize = 12) {
+  drawText(text, x, y, color = null, fontSize = 12, pixelsPerUnit = 1) {
     if (!this.enabled) return;
     this._textCommands.push({
       text: String(text),
       x, y,
       color: color || this.defaultTextColor,
-      fontSize: Math.max(8, fontSize)
+      fontSize: Math.max(8, fontSize),
+      pixelsPerUnit: Math.max(1, Math.min(8, Number(pixelsPerUnit) || 1)),
     });
   }
 
@@ -527,7 +529,7 @@ void main(){
     // Render text (using Text class with object pooling)
     for (const cmd of this._textCommands) {
       const colorStr = `rgba(${cmd.color[0]},${cmd.color[1]},${cmd.color[2]},${cmd.color[3] / 255})`;
-      const textObj = this._getTextObject(cmd.text, cmd.x, cmd.y, cmd.fontSize, colorStr);
+      const textObj = this._getTextObject(cmd.text, cmd.x, cmd.y, cmd.fontSize, colorStr, cmd.pixelsPerUnit);
       textObj.draw();
       this._activeTextObjects.push(textObj);
     }
@@ -549,19 +551,30 @@ void main(){
       return;
     }
 
-    // Calculate angle
-    const angle = Math.atan2(dy, dx);
-    
-    // Calculate center
-    const cx = (x1 + x2) * 0.5;
-    const cy = (y1 + y2) * 0.5;
-    
-    // Draw line as a rotated rectangle
-    // For simplicity, we'll draw it as a series of small quads or use a single rotated quad
-    // Since we don't have rotation in drawQuad, we'll approximate with a thick line using multiple quads
-    const segments = Math.max(1, Math.ceil(length / thickness));
-    const segmentLength = length / segments;
-    
+    // Fast path for axis-aligned lines (common for grids/rulers/rects).
+    // This avoids O(length) segmentation in world units when zoomed out.
+    const eps = 1e-6;
+    if (Math.abs(dy) < eps) {
+      // Horizontal
+      const xMin = Math.min(x1, x2);
+      const w = Math.abs(dx);
+      this.renderer.drawQuad(this._whiteTexture, xMin, y1 - thickness * 0.5, Math.max(0.001, w), thickness, color);
+      return;
+    }
+    if (Math.abs(dx) < eps) {
+      // Vertical
+      const yMin = Math.min(y1, y2);
+      const h = Math.abs(dy);
+      this.renderer.drawQuad(this._whiteTexture, x1 - thickness * 0.5, yMin, thickness, Math.max(0.001, h), color);
+      return;
+    }
+
+    // Diagonal lines: keep the old approximation but cap segments.
+    // (The previous implementation scaled segments with *world length*, which can explode.)
+    const maxSegments = 64;
+    const targetSegLen = Math.max(thickness * 8, 8);
+    const segments = Math.max(1, Math.min(maxSegments, Math.ceil(length / targetSegLen)));
+
     for (let i = 0; i < segments; i++) {
       const t1 = i / segments;
       const t2 = (i + 1) / segments;
@@ -569,21 +582,13 @@ void main(){
       const sy1 = y1 + dy * t1;
       const sx2 = x1 + dx * t2;
       const sy2 = y1 + dy * t2;
-      
-      // Draw segment as a small rectangle
+
       const segDx = sx2 - sx1;
       const segDy = sy2 - sy1;
       const segLen = Math.sqrt(segDx * segDx + segDy * segDy);
-      
       if (segLen > 0.001) {
-        // Perpendicular vector for thickness
-        const perpX = -segDy / segLen * thickness;
-        const perpY = segDx / segLen * thickness;
-        
-        // Draw as a quad (approximation - not perfect rotation but good enough for debug)
         const midX = (sx1 + sx2) * 0.5;
         const midY = (sy1 + sy2) * 0.5;
-        
         this.renderer.drawQuad(
           this._whiteTexture,
           midX - thickness * 0.5,

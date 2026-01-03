@@ -60,6 +60,10 @@ export default class Renderer {
     // and will NOT overwrite canvas.style.width/height.
     this.respectCssSize = respectCssSize;
 
+    // Dynamic resolution scale for the drawing buffer.
+    // 1.0 = full devicePixelRatio; <1.0 reduces internal resolution for performance.
+    this.renderScale = 1.0;
+
     // Render layer enable/disable.
     // Convention:
     // - Layer 0: 3D pass
@@ -727,7 +731,9 @@ export default class Renderer {
    * we must size to the canvas' CSS box (clientWidth/clientHeight), not the window.
    */
   resizeCanvas() {
-    const dpi = window.devicePixelRatio || 1;
+    const baseDpi = window.devicePixelRatio || 1;
+    const s = Number(this.renderScale);
+    const dpi = baseDpi * (Number.isFinite(s) && s > 0 ? s : 1);
 
     // For fullscreen examples, the engine historically drives the canvas size.
     // For embedded layouts (e.g. the editor), let CSS define the on-page size.
@@ -772,9 +778,9 @@ export default class Renderer {
         viewportY = ((targetCssHeight - canvasHeight) / 2) * dpi;
       }
 
-      // Set canvas pixel size to full window
-      this.canvas.width = targetCssWidth * dpi;
-      this.canvas.height = targetCssHeight * dpi;
+      // Set canvas pixel size to full window (drawing buffer)
+      this.canvas.width = Math.max(1, Math.round(targetCssWidth * dpi));
+      this.canvas.height = Math.max(1, Math.round(targetCssHeight * dpi));
 
       // Only force DOM size when we're not respecting a layout-driven canvas.
       if (!this.respectCssSize) {
@@ -797,8 +803,8 @@ export default class Renderer {
       this.gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     } else {
       // Original stretching behavior
-      this.canvas.width = targetCssWidth * dpi;
-      this.canvas.height = targetCssHeight * dpi;
+      this.canvas.width = Math.max(1, Math.round(targetCssWidth * dpi));
+      this.canvas.height = Math.max(1, Math.round(targetCssHeight * dpi));
       if (!this.respectCssSize) {
         this.canvas.style.width = targetCssWidth + 'px';
         this.canvas.style.height = targetCssHeight + 'px';
@@ -814,6 +820,23 @@ export default class Renderer {
     }
     
     this.ensureMainScreenTargets();
+
+    // Keep post-processing ping-pong buffers in sync with canvas size.
+    // (In the editor, ResizeObserver may call resizeCanvas without a window resize event.)
+    if (this.enablePostProcessing && this.postProcessing) {
+      this.postProcessing.resize(this.canvas.width, this.canvas.height);
+    }
+  }
+
+  /**
+   * Sets the drawing-buffer resolution scale.
+   * @param {number} scale 0.25..1.0 (clamped)
+   */
+  setRenderScale(scale) {
+    const v = Number(scale);
+    if (!Number.isFinite(v)) return;
+    // Clamp aggressively: >1 can explode perf/memory; <0.25 gets too blurry.
+    this.renderScale = Math.max(0.25, Math.min(1.0, v));
   }
 
   /**
@@ -1690,7 +1713,8 @@ export default class Renderer {
 
       // Allocate scene targets to full canvas size, and init post-processing at that size
       this.ensureMainScreenTargets();
-      await this.postProcessing.init(this.canvas.width, this.canvas.height);
+      // NOTE: Screen-space shadows are intentionally disabled for now.
+      await this.postProcessing.init(this.canvas.width, this.canvas.height, { enableScreenSpaceShadows: false });
       console.log('Post-processing initialized');
     } else {
         // Even if PP is disabled, we need the main screen targets
@@ -1851,16 +1875,12 @@ export default class Renderer {
       gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     }
 
-    // Restore scissor state if it was enabled before beginFrame().
-    if (wasScissor) {
-      gl.enable(gl.SCISSOR_TEST);
-      gl.scissor(prevScissorBox[0], prevScissorBox[1], prevScissorBox[2], prevScissorBox[3]);
-    }
-    // Restore viewport in case callers rely on it (we already set the game viewport above).
-    // Keep this as a safety net for any external code that queries viewport after beginFrame.
-    if (prevViewport) {
-      // no-op: viewport is already set for the game; preserve intent and avoid extra state churn.
-    }
+    // Hard reset: keep scissor disabled for engine rendering.
+    // If a previous pass leaked scissor state, re-enabling it here can clip the frame
+    // and leave large stale regions (seen as black/old pixels when moving the camera).
+    gl.disable(gl.SCISSOR_TEST);
+
+    // Note: viewport is already set for the game above.
   }
 
   /**
@@ -1941,6 +1961,16 @@ export default class Renderer {
       // The output goes to the default framebuffer (null)
       const dims = this._textureDimensions.get(this.mainScreenTexture);
       if (dims && dims.width > 0 && dims.height > 0) {
+        // Defensive: ensure the default framebuffer is fully cleared and un-clipped.
+        // If any prior pass rendered/scissored into a smaller region, this prevents stale bands.
+        const gl = this.gl;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.disable(gl.SCISSOR_TEST);
+        gl.colorMask(true, true, true, true);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
         this.postProcessing.render(this.mainScreenTexture, null);
       }
     }
@@ -3097,10 +3127,11 @@ export default class Renderer {
 
   // Screen-space shadows (post-process)
   setScreenSpaceShadowsEnabled(enabled) {
-    this.screenSpaceShadowsEnabled = !!enabled;
+    // Screen-space shadows are disabled for now (effect is not loaded).
+    // Keep the API, but force the feature off.
+    this.screenSpaceShadowsEnabled = false;
     if (this.enablePostProcessing && this.postProcessing) {
-      if (this.screenSpaceShadowsEnabled) this.postProcessing.enableEffect('ss_shadows');
-      else this.postProcessing.disableEffect('ss_shadows');
+      this.postProcessing.disableEffect('ss_shadows');
     }
   }
   setScreenSpaceShadowStrength(v) { this.screenSpaceShadowStrength = Math.max(0.0, Math.min(1.0, Number(v) || 0.0)); }

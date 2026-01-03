@@ -82,11 +82,18 @@ export default class PostProcessing {
     }
   }
 
-  async init(width = 1, height = 1) {
+  /**
+   * @param {number} [width=1]
+   * @param {number} [height=1]
+   * @param {{ enableScreenSpaceShadows?: boolean }=} options
+   */
+  async init(width = 1, height = 1, options = {}) {
     // Load all available effects
     const effect = (name) => this.isWebGL2
       ? `../../Fluxion/Shaders/PostProcessing/${name}_300es.glsl`
       : `../../Fluxion/Shaders/PostProcessing/${name}.glsl`;
+
+    const enableSSS = !!options?.enableScreenSpaceShadows;
 
     await Promise.all([
       this.loadEffect('passthrough', effect('passthrough'), {}, { priority: 0 }),
@@ -94,7 +101,7 @@ export default class PostProcessing {
         resolution: { type: '2f', value: [width, height] }
       }, { priority: 10 }),
       // WebGL2-only: screen-space shadows (requires depth + normal buffers provided by Renderer)
-      ...(this.isWebGL2 ? [
+      ...(this.isWebGL2 && enableSSS ? [
         this.loadEffect('ss_shadows', effect('screen_space_shadows'), {
           depth: { type: 'tex2D', value: null, unit: 1 },
           normals: { type: 'tex2D', value: null, unit: 2 },

@@ -11,5 +11,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveDebugFile: (filename, content) => ipcRenderer.send('save-debug-file', filename, content),
   // Writes an absolute path within the project folder (dev mode). Returns {ok, path?, error?}.
   saveProjectFile: (absolutePath, content) => ipcRenderer.invoke('save-project-file', absolutePath, content),
-  getGPUInfo: () => ipcRenderer.invoke('get-gpu-info')
+  getGPUInfo: () => ipcRenderer.invoke('get-gpu-info'),
+
+  // Asset browser helpers (dev workflow). Returns {ok, path, entries, error?}.
+  listProjectDir: (relativePath) => ipcRenderer.invoke('list-project-dir', relativePath),
+
+  // Project creation helpers (editor workflow)
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts)
 }); 

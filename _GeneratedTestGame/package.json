@@ -1,0 +1,17 @@
+{
+  "name": "generated-test-game",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "gl-matrix": "^3.4.4",
+    "fluxionwebengine": "file:.."
+  },
+  "devDependencies": {
+    "electron": "^35.0.1"
+  }
+}
