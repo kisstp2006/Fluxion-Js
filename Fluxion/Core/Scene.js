@@ -243,8 +243,11 @@ export default class Scene {
             this._objectsDirty = false;
         }
 
+        const layer3DEnabled = renderer?.isRenderLayerEnabled ? renderer.isRenderLayerEnabled(0) : true;
+        const layer2DEnabled = renderer?.isRenderLayerEnabled ? renderer.isRenderLayerEnabled(1) : true;
+
         // 3D base pass
-        if (this._sorted3DObjects && this._sorted3DObjects.length > 0) {
+        if (layer3DEnabled && this._sorted3DObjects && this._sorted3DObjects.length > 0) {
             // Push scene lights into the renderer before beginning the 3D pass.
             if (renderer?.setSceneLights) renderer.setSceneLights(this.lights);
             else if (renderer?.setLights) renderer.setLights(this.lights);
@@ -281,9 +284,11 @@ export default class Scene {
         }
 
         // 2D pass (existing behavior)
-        for (const obj of this._sortedObjects) {
-            if (obj && obj.draw) {
-                obj.draw(renderer);
+        if (layer2DEnabled) {
+            for (const obj of this._sortedObjects) {
+                if (obj && obj.draw) {
+                    obj.draw(renderer);
+                }
             }
         }
     }

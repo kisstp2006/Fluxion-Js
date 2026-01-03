@@ -60,6 +60,13 @@ export default class Renderer {
     // and will NOT overwrite canvas.style.width/height.
     this.respectCssSize = respectCssSize;
 
+    // Render layer enable/disable.
+    // Convention:
+    // - Layer 0: 3D pass
+    // - Layer 1: 2D pass
+    /** @type {Record<number, boolean>} */
+    this._renderLayerEnabled = { 0: true, 1: true };
+
     // 3D pass (layer 0) groundwork
     this._in3DPass = false;
     this._defaultCamera3D = new Camera3D();
@@ -369,6 +376,28 @@ export default class Renderer {
       this.isReady = true;
     });
   } 
+
+  /**
+   * Enable/disable a render layer.
+   * Convention: 0 = 3D pass, 1 = 2D pass.
+   * @param {number} layerIndex
+   * @param {boolean} enabled
+   */
+  setRenderLayerEnabled(layerIndex, enabled) {
+    const k = layerIndex | 0;
+    this._renderLayerEnabled[k] = !!enabled;
+  }
+
+  /**
+   * Check whether a render layer is enabled.
+   * Unknown layers default to enabled.
+   * @param {number} layerIndex
+   */
+  isRenderLayerEnabled(layerIndex) {
+    const k = layerIndex | 0;
+    const v = this._renderLayerEnabled[k];
+    return (v === undefined) ? true : !!v;
+  }
 
   /**
    * Enable/disable MSAA for the main offscreen render target.
