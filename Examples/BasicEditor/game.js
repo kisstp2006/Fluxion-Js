@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite } from "../../Fluxion/index.js";
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
@@ -18,6 +18,17 @@ const ui = {
   aboutCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   aboutVersionsText: /** @type {HTMLTextAreaElement|null} */ (null),
   aboutCopyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpriteModal: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpriteSubtitle: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteAnimList: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteNameInput: /** @type {HTMLInputElement|null} */ (null),
+  animSpriteApplyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpritePreviewWrap: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteFrameLabel: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteFramePreview: /** @type {HTMLImageElement|null} */ (null),
+  animSpriteFramesStrip: /** @type {HTMLDivElement|null} */ (null),
+  animSpriteError: /** @type {HTMLDivElement|null} */ (null),
   createProjectModal: /** @type {HTMLDivElement|null} */ (null),
   createProjectNameInput: /** @type {HTMLInputElement|null} */ (null),
   createProjectPathInput: /** @type {HTMLInputElement|null} */ (null),
@@ -108,6 +119,18 @@ const game = {
 
   _aboutOpen: false,
 
+  _animSpriteOpen: false,
+  /** @type {any|null} */
+  _animSpriteTarget: null,
+  /** @type {string|null} */
+  _animSpriteAnimName: null,
+  /** @type {number|null} */
+  _animSpriteFrameIndex: null,
+  /** @type {{ animName: string|null, frameIndex: number, wasPlaying: boolean } | null} */
+  _animSpritePrevPlayback: null,
+
+  _inspectorAutoRefreshT: 0,
+
   _createProjectDialog: /** @type {ReturnType<typeof createProjectDialog> | null} */ (null),
 
   _assetBrowser: {
@@ -143,6 +166,18 @@ const game = {
     ui.aboutCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("aboutCloseBtn"));
     ui.aboutVersionsText = /** @type {HTMLTextAreaElement} */ (document.getElementById('aboutVersionsText'));
     ui.aboutCopyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('aboutCopyBtn'));
+
+    ui.animSpriteModal = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteModal'));
+    ui.animSpriteCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteCloseBtn'));
+    ui.animSpriteSubtitle = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteSubtitle'));
+    ui.animSpriteAnimList = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteAnimList'));
+    ui.animSpriteNameInput = /** @type {HTMLInputElement} */ (document.getElementById('animSpriteNameInput'));
+    ui.animSpriteApplyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteApplyBtn'));
+    ui.animSpritePreviewWrap = /** @type {HTMLDivElement} */ (document.getElementById('animSpritePreviewWrap'));
+    ui.animSpriteFrameLabel = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteFrameLabel'));
+    ui.animSpriteFramePreview = /** @type {HTMLImageElement} */ (document.getElementById('animSpriteFramePreview'));
+    ui.animSpriteFramesStrip = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteFramesStrip'));
+    ui.animSpriteError = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteError'));
     ui.createProjectModal = /** @type {HTMLDivElement} */ (document.getElementById("createProjectModal"));
     ui.createProjectNameInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectNameInput"));
     ui.createProjectPathInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectPathInput"));
@@ -156,6 +191,7 @@ const game = {
 
     // Ensure About starts closed.
     if (ui.aboutModal) ui.aboutModal.hidden = true;
+    if (ui.animSpriteModal) ui.animSpriteModal.hidden = true;
     // Ensure Create Project starts closed.
     if (ui.createProjectModal) ui.createProjectModal.hidden = true;
 
@@ -182,6 +218,20 @@ const game = {
     ui.aboutModal?.addEventListener('mousedown', (e) => {
       // Click outside the dialog closes.
       if (e.target === ui.aboutModal) this._closeAbout();
+    });
+
+    // AnimatedSprite modal close behavior
+    ui.animSpriteCloseBtn?.addEventListener('click', () => this._closeAnimSpriteEditor());
+    ui.animSpriteModal?.addEventListener('mousedown', (e) => {
+      if (e.target === ui.animSpriteModal) this._closeAnimSpriteEditor();
+    });
+
+    ui.animSpriteApplyBtn?.addEventListener('click', () => this._applyAnimSpriteRename());
+    ui.animSpriteNameInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        this._applyAnimSpriteRename();
+      }
     });
 
     ui.aboutCopyBtn?.addEventListener('click', () => {
@@ -220,6 +270,7 @@ const game = {
           return;
         }
         if (this._createProjectDialog?.isOpen()) this._createProjectDialog.cancel();
+        else if (this._animSpriteOpen) this._closeAnimSpriteEditor();
         else if (this._aboutOpen) this._closeAbout();
         else this._closeTopbarMenus();
       }
@@ -309,9 +360,37 @@ const game = {
     const r = this._renderer;
     if (!r) return;
 
-    const clean = String(pathRel || '').replace(/^\.(?:\/)?/, '');
-    this._scenePath = `../../${clean}`;
+    const clean = String(pathRel || '').replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
+    this._scenePath = `fluxion://workspace/${clean}`;
     await this.loadSelectedScene(r);
+  },
+
+  /**
+   * Pick any folder on disk and set it as the editor workspace root.
+   * @returns {Promise<boolean>}
+   */
+  async _openWorkspaceFolder() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.selectFolder !== 'function' || typeof electronAPI.setWorkspaceRoot !== 'function') {
+      alert('Open Folder is only available in the Electron editor.');
+      return false;
+    }
+
+    const pick = await electronAPI.selectFolder();
+    if (!pick || !pick.ok || pick.canceled) return false;
+
+    const abs = String(pick.path || '').trim();
+    if (!abs) return false;
+
+    const res = await electronAPI.setWorkspaceRoot(abs);
+    if (!res || !res.ok) {
+      alert(`Failed to set workspace root: ${res && res.error ? res.error : 'Unknown error'}`);
+      return false;
+    }
+
+    // Point asset browser at the new workspace root.
+    await this._setAssetBrowserRoot('.');
+    return true;
   },
 
   /** @param {any} dbg @param {boolean} depth */
@@ -413,16 +492,10 @@ const game = {
           this._createProjectDialog?.createProjectFromEditor().catch(console.error);
           break;
         case 'file.openProject':
-          // Currently equivalent to selecting a folder to become the asset root.
-          // (This editor runs inside the Fluxion-Js repo; opening outside is intentionally blocked.)
-          this._pickProjectRelativeFolder()
-            .then((rel) => (rel ? this._setAssetBrowserRoot(rel) : null))
-            .catch(console.error);
+          this._openWorkspaceFolder().catch(console.error);
           break;
         case 'file.openFolder':
-          this._pickProjectRelativeFolder()
-            .then((rel) => (rel ? this._setAssetBrowserRoot(rel) : null))
-            .catch(console.error);
+          this._openWorkspaceFolder().catch(console.error);
           break;
         case 'file.reloadScene':
           this.loadSelectedScene(renderer).catch(console.error);
@@ -460,6 +533,429 @@ const game = {
     this._populateAboutVersions().catch(console.error);
     this._closeTopbarMenus();
     ui.aboutCloseBtn?.focus();
+  },
+
+  /** @param {any} obj */
+  _isAnimatedSprite(obj) {
+    if (!obj) return false;
+    if (obj instanceof AnimatedSprite) return true;
+    // Fallback for cross-realm/module duplication: heuristic.
+    return (obj?.animations instanceof Map) && (typeof obj?.play === 'function') && (typeof obj?.stop === 'function');
+  },
+
+  _openAnimSpriteEditor() {
+    const obj = this.selected;
+    if (!this._isAnimatedSprite(obj)) return;
+    if (!ui.animSpriteModal) return;
+
+    this._animSpriteOpen = true;
+    this._animSpriteTarget = obj;
+    this._animSpriteAnimName = null;
+    this._animSpriteFrameIndex = null;
+
+    // Capture prior playback state so the editor can preview frames in the viewport
+    // without permanently changing the scene.
+    this._animSpritePrevPlayback = {
+      animName: (obj && typeof obj.currentAnimationName === 'string') ? obj.currentAnimationName : null,
+      frameIndex: Number(obj?.currentFrameIndex) || 0,
+      wasPlaying: !!obj?.isPlaying,
+    };
+
+    ui.animSpriteModal.hidden = false;
+    this._populateAnimSpriteEditor();
+    this._closeTopbarMenus();
+    ui.animSpriteCloseBtn?.focus();
+  },
+
+  _closeAnimSpriteEditor() {
+    if (!ui.animSpriteModal) return;
+
+    // Restore prior playback state if possible.
+    const sprite = this._animSpriteTarget;
+    const prev = this._animSpritePrevPlayback;
+    if (this._isAnimatedSprite(sprite) && prev) {
+      try {
+        if (prev.animName && (sprite.animations instanceof Map) && sprite.animations.has(prev.animName)) {
+          sprite.currentAnimationName = prev.animName;
+          sprite.currentAnimation = sprite.animations.get(prev.animName);
+        }
+        const fi = Number(prev.frameIndex);
+        sprite.currentFrameIndex = Number.isFinite(fi) ? Math.max(0, Math.trunc(fi)) : 0;
+        sprite.isPlaying = !!prev.wasPlaying;
+      } catch {}
+    }
+
+    this._animSpriteOpen = false;
+    this._animSpriteTarget = null;
+    this._animSpriteAnimName = null;
+    this._animSpriteFrameIndex = null;
+    this._animSpritePrevPlayback = null;
+    ui.animSpriteModal.hidden = true;
+  },
+
+  /** @param {string} msg */
+  _setAnimSpriteError(msg) {
+    if (!ui.animSpriteError) return;
+    ui.animSpriteError.textContent = msg ? String(msg) : '';
+  },
+
+  _updateAnimSpriteFramePreview() {
+    const sprite = this._animSpriteTarget;
+    const animName = this._animSpriteAnimName;
+
+    /** @param {string} label */
+    const setEmpty = (label) => {
+      if (ui.animSpriteFrameLabel) ui.animSpriteFrameLabel.textContent = label;
+      if (ui.animSpriteFramePreview) ui.animSpriteFramePreview.removeAttribute('src');
+    };
+
+    if (!this._isAnimatedSprite(sprite) || !animName) {
+      setEmpty('No frame');
+      return;
+    }
+
+    const anims = sprite.animations;
+    if (!(anims instanceof Map)) {
+      setEmpty('No frame');
+      return;
+    }
+
+    const anim = anims.get(animName);
+    if (!anim || !Array.isArray(anim.frames) || anim.frames.length === 0) {
+      setEmpty('No frame');
+      return;
+    }
+
+    let idx = Number(this._animSpriteFrameIndex);
+    if (!Number.isFinite(idx) || idx < 0 || idx >= anim.frames.length) idx = 0;
+    this._animSpriteFrameIndex = idx;
+
+    const frame = anim.frames[idx];
+    if (ui.animSpriteFrameLabel) ui.animSpriteFrameLabel.textContent = `Frame ${idx}`;
+
+    if (typeof frame === 'string') {
+      const src = String(frame || '').trim();
+      if (ui.animSpriteFramePreview) {
+        if (src) ui.animSpriteFramePreview.src = src;
+        else ui.animSpriteFramePreview.removeAttribute('src');
+      }
+
+      // While the editor modal is open, force the sprite to display the selected frame
+      // so it's visible in the main viewport.
+      if (this._animSpriteOpen && this._isAnimatedSprite(sprite) && (sprite.animations instanceof Map)) {
+        const anim = sprite.animations.get(animName);
+        if (anim) {
+          sprite.currentAnimationName = animName;
+          sprite.currentAnimation = anim;
+          sprite.currentFrameIndex = idx;
+          // Pause playback during manual frame inspection.
+          sprite.isPlaying = false;
+        }
+      }
+    } else {
+      // Preview is only meaningful for image-path frames.
+      if (ui.animSpriteFrameLabel) ui.animSpriteFrameLabel.textContent = `Frame ${idx} (no image preview)`;
+      if (ui.animSpriteFramePreview) ui.animSpriteFramePreview.removeAttribute('src');
+    }
+  },
+
+  _populateAnimSpriteEditor() {
+    const sprite = this._animSpriteTarget;
+    if (!ui.animSpriteAnimList || !ui.animSpriteFramesStrip || !ui.animSpriteNameInput) return;
+
+    if (!this._isAnimatedSprite(sprite)) {
+      if (ui.animSpriteSubtitle) ui.animSpriteSubtitle.textContent = 'No selection';
+      ui.animSpriteAnimList.innerHTML = '';
+      ui.animSpriteFramesStrip.innerHTML = '';
+      ui.animSpriteNameInput.value = '';
+      this._animSpriteFrameIndex = null;
+      this._updateAnimSpriteFramePreview();
+      this._setAnimSpriteError('Select an AnimatedSprite to edit its animations.');
+      return;
+    }
+
+    const name = sprite?.name ? String(sprite.name) : (sprite?.constructor?.name || 'AnimatedSprite');
+    if (ui.animSpriteSubtitle) ui.animSpriteSubtitle.textContent = name;
+
+    const anims = sprite.animations;
+    if (!(anims instanceof Map)) {
+      ui.animSpriteAnimList.innerHTML = '';
+      ui.animSpriteFramesStrip.innerHTML = '';
+      ui.animSpriteNameInput.value = '';
+      this._setAnimSpriteError('This sprite has no animations map.');
+      return;
+    }
+
+    /** @type {string[]} */
+    const keys = Array.from(anims.keys()).map((k) => String(k));
+
+    const preferred = (sprite.currentAnimationName && anims.has(sprite.currentAnimationName))
+      ? String(sprite.currentAnimationName)
+      : (keys.length ? keys[0] : null);
+
+    if (!this._animSpriteAnimName || !anims.has(this._animSpriteAnimName)) {
+      this._animSpriteAnimName = preferred;
+    }
+
+    ui.animSpriteAnimList.innerHTML = '';
+    for (const k of keys) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'animListItem' + (k === this._animSpriteAnimName ? ' active' : '');
+      btn.textContent = k;
+      btn.addEventListener('click', () => {
+        this._animSpriteAnimName = k;
+        this._animSpriteFrameIndex = null;
+        this._populateAnimSpriteEditor();
+      });
+      ui.animSpriteAnimList.appendChild(btn);
+    }
+
+    if (!this._animSpriteAnimName) {
+      ui.animSpriteNameInput.value = '';
+      ui.animSpriteFramesStrip.innerHTML = '';
+      this._animSpriteFrameIndex = null;
+      this._updateAnimSpriteFramePreview();
+      this._setAnimSpriteError('No animations found on this sprite.');
+      return;
+    }
+
+    ui.animSpriteNameInput.value = this._animSpriteAnimName;
+    this._setAnimSpriteError('');
+    this._renderAnimSpriteFrames();
+  },
+
+  _applyAnimSpriteRename() {
+    const sprite = this._animSpriteTarget;
+    if (!this._isAnimatedSprite(sprite)) return;
+    if (!ui.animSpriteNameInput) return;
+    const anims = sprite.animations;
+    if (!(anims instanceof Map)) return;
+
+    const oldName = this._animSpriteAnimName;
+    const newName = String(ui.animSpriteNameInput.value || '').trim();
+    if (!oldName) return;
+    if (!newName) {
+      this._setAnimSpriteError('Animation name cannot be empty.');
+      ui.animSpriteNameInput.value = oldName;
+      return;
+    }
+    if (newName === oldName) {
+      this._setAnimSpriteError('');
+      return;
+    }
+    if (anims.has(newName)) {
+      this._setAnimSpriteError('An animation with that name already exists.');
+      ui.animSpriteNameInput.value = oldName;
+      return;
+    }
+
+    const anim = anims.get(oldName);
+    if (!anim) return;
+    anims.delete(oldName);
+    anims.set(newName, anim);
+
+    if (sprite.currentAnimationName === oldName) {
+      sprite.currentAnimationName = newName;
+    }
+
+    this._animSpriteAnimName = newName;
+    this._setAnimSpriteError('');
+    this._populateAnimSpriteEditor();
+    this.rebuildInspector();
+  },
+
+  _renderAnimSpriteFrames() {
+    const sprite = this._animSpriteTarget;
+    const animName = this._animSpriteAnimName;
+    if (!this._isAnimatedSprite(sprite) || !animName) return;
+    if (!ui.animSpriteFramesStrip) return;
+
+    const anims = sprite.animations;
+    if (!(anims instanceof Map)) return;
+    const anim = anims.get(animName);
+    if (!anim || !Array.isArray(anim.frames)) {
+      ui.animSpriteFramesStrip.innerHTML = '';
+      this._setAnimSpriteError('This animation has no frames array.');
+      return;
+    }
+
+    const frames = anim.frames;
+    const isImageFrames = frames.length > 0 && typeof frames[0] === 'string';
+
+    if (frames.length === 0) {
+      this._animSpriteFrameIndex = null;
+      this._updateAnimSpriteFramePreview();
+      return;
+    }
+
+    // Default to the sprite's current frame when editing its current animation.
+    if (this._animSpriteFrameIndex === null || this._animSpriteFrameIndex === undefined) {
+      const preferredIdx = (sprite.currentAnimationName === animName)
+        ? Number(sprite.currentFrameIndex)
+        : 0;
+      this._animSpriteFrameIndex = Number.isFinite(preferredIdx)
+        ? Math.max(0, Math.min(frames.length - 1, Math.trunc(preferredIdx)))
+        : 0;
+    }
+
+    let selectedIndex = Number(this._animSpriteFrameIndex);
+    if (!Number.isFinite(selectedIndex) || selectedIndex < 0 || selectedIndex >= frames.length) selectedIndex = 0;
+    this._animSpriteFrameIndex = selectedIndex;
+    if (isImageFrames && !Array.isArray(anim.images)) {
+      anim.images = new Array(frames.length).fill(null);
+    }
+    if (isImageFrames && !Array.isArray(anim._frameKeys)) {
+      anim._frameKeys = frames.slice();
+    }
+
+    ui.animSpriteFramesStrip.className = isImageFrames
+      ? 'framesStrip framesStripImage'
+      : 'framesStrip framesStripGrid';
+    ui.animSpriteFramesStrip.innerHTML = '';
+
+    /** @param {number} index */
+    const ensureImage = (index) => {
+      const src = String(frames[index] || '');
+      if (!src) return;
+      if (sprite.renderer?.hasCachedTexture?.(src)) {
+        anim.images[index] = sprite.renderer.acquireTexture?.(src) || sprite.renderer.getCachedTexture?.(src) || anim.images[index];
+        return;
+      }
+
+      const img = new Image();
+      const loadPromise = new Promise((resolve) => {
+        img.onload = () => {
+          if (sprite._disposed) {
+            resolve(false);
+            return;
+          }
+          anim.images[index] = sprite.renderer?.createAndAcquireTexture?.(img, src) || sprite.renderer?.createTexture?.(img, src) || null;
+          resolve(true);
+        };
+        img.onerror = () => resolve(false);
+      });
+      sprite.renderer?.trackAssetPromise?.(loadPromise);
+      img.src = src;
+    };
+
+    for (let i = 0; i < frames.length; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'frameCell' + (i === selectedIndex ? ' active' : '');
+      cell.dataset.index = String(i);
+      cell.addEventListener('click', () => {
+        this._animSpriteFrameIndex = i;
+        const strip = ui.animSpriteFramesStrip;
+        if (strip) {
+          for (const el of Array.from(strip.children)) {
+            if (!(el instanceof HTMLElement)) continue;
+            el.classList.toggle('active', el.dataset.index === String(i));
+          }
+        }
+        this._updateAnimSpriteFramePreview();
+      });
+
+      const idx = document.createElement('div');
+      idx.className = 'frameIdx';
+      idx.textContent = `Frame ${i}`;
+      cell.appendChild(idx);
+
+      const frame = frames[i];
+
+      if (typeof frame === 'number') {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '1';
+        input.value = String(frame);
+        input.addEventListener('input', () => {
+          const v = Number(input.value);
+          if (!Number.isFinite(v)) return;
+          frames[i] = Math.trunc(v);
+        });
+        cell.appendChild(input);
+      } else if (typeof frame === 'string') {
+        const thumb = document.createElement('img');
+        thumb.className = 'frameThumb';
+        thumb.loading = 'lazy';
+        thumb.decoding = 'async';
+        thumb.alt = `Frame ${i}`;
+        thumb.src = String(frame);
+        cell.appendChild(thumb);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = String(frame);
+        input.placeholder = 'image path';
+        input.addEventListener('input', () => {
+          const v = String(input.value || '').trim();
+          frames[i] = v;
+          if (Array.isArray(anim._frameKeys)) anim._frameKeys[i] = v;
+          if (Array.isArray(anim.images)) anim.images[i] = null;
+          thumb.src = v;
+          if (this._animSpriteFrameIndex === i) this._updateAnimSpriteFramePreview();
+        });
+        input.addEventListener('change', () => {
+          // Re-load texture on commit.
+          ensureImage(i);
+        });
+        cell.appendChild(input);
+      } else if (frame && typeof frame === 'object') {
+        const fx = document.createElement('input');
+        fx.type = 'number';
+        fx.step = '1';
+        fx.value = String(Number(frame.x) || 0);
+        fx.placeholder = 'x';
+
+        const fy = document.createElement('input');
+        fy.type = 'number';
+        fy.step = '1';
+        fy.value = String(Number(frame.y) || 0);
+        fy.placeholder = 'y';
+
+        const fw = document.createElement('input');
+        fw.type = 'number';
+        fw.step = '1';
+        fw.value = String(Number(frame.w ?? frame.width) || 0);
+        fw.placeholder = 'w';
+
+        const fh = document.createElement('input');
+        fh.type = 'number';
+        fh.step = '1';
+        fh.value = String(Number(frame.h ?? frame.height) || 0);
+        fh.placeholder = 'h';
+
+        const applyObj = () => {
+          const nx = Number(fx.value);
+          const ny = Number(fy.value);
+          const nw = Number(fw.value);
+          const nh = Number(fh.value);
+          if (!Number.isFinite(nx) || !Number.isFinite(ny) || !Number.isFinite(nw) || !Number.isFinite(nh)) return;
+          frames[i] = { x: Math.trunc(nx), y: Math.trunc(ny), w: Math.trunc(nw), h: Math.trunc(nh) };
+        };
+        fx.addEventListener('input', applyObj);
+        fy.addEventListener('input', applyObj);
+        fw.addEventListener('input', applyObj);
+        fh.addEventListener('input', applyObj);
+
+        cell.appendChild(fx);
+        cell.appendChild(fy);
+        cell.appendChild(fw);
+        cell.appendChild(fh);
+      } else {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = '';
+        input.placeholder = 'frame';
+        input.addEventListener('input', () => {
+          frames[i] = String(input.value || '');
+        });
+        cell.appendChild(input);
+      }
+
+      ui.animSpriteFramesStrip.appendChild(cell);
+    }
+
+    this._updateAnimSpriteFramePreview();
   },
 
   /** @param {string} text */
@@ -736,7 +1232,16 @@ const game = {
 
     const cam2 = scene.camera;
     if (cam2 && typeof cam2.setSize === 'function') {
-      cam2.setSize(r.targetWidth || 0, r.targetHeight || 0);
+      // If the authored scene camera specified a logical resolution (XML width/height),
+      // keep it stable in the editor. Only fall back to renderer target resolution when
+      // no explicit camera size was provided.
+      const authored = this._sceneCamera2D;
+      const aw = Number(authored?.width);
+      const ah = Number(authored?.height);
+      const hasAuthoredSize = Number.isFinite(aw) && Number.isFinite(ah) && aw > 0 && ah > 0;
+      const w = hasAuthoredSize ? aw : (r.targetWidth || 0);
+      const h = hasAuthoredSize ? ah : (r.targetHeight || 0);
+      cam2.setSize(w, h);
     }
   },
 
@@ -865,23 +1370,15 @@ const game = {
     const r = this._renderer;
     if (!r || typeof r.setRenderScale !== 'function') return;
 
-    const z = Math.max(0.0001, Number(cam2?.zoom) || 1);
-    // Map zoom -> renderScale.
-    // - zoomed in (>=1): full quality
-    // - zoomed out (<1): progressively lower resolution for performance
-    const desired = Math.max(0.35, Math.min(1.0, 0.5 + 0.5 * Math.sqrt(z)));
-
-    if (Math.abs(desired - this._viewportQuality.scale) < 0.03) return;
-    this._viewportQuality.scale = desired;
-
-    if (this._viewportQuality.queued) return;
-    this._viewportQuality.queued = true;
-    requestAnimationFrame(() => {
-      this._viewportQuality.queued = false;
-      r.setRenderScale(this._viewportQuality.scale);
+    // Editor: keep viewport resolution stable (no auto downscaling).
+    // Scene loads can change camera zoom; dynamic scaling would otherwise make the viewport
+    // appear to change resolution when opening a scene.
+    if (this._viewportQuality.scale !== 1) this._viewportQuality.scale = 1;
+    if (Number(r.renderScale) !== 1) {
+      r.setRenderScale(1.0);
       r.resizeCanvas();
       this._syncActiveCameraSizes();
-    });
+    }
   },
 
   /** @param {'2d' | '3d'} mode */
@@ -891,11 +1388,10 @@ const game = {
 
     this._applyRenderLayers();
 
-    // Restore full resolution for 3D, allow dynamic scaling in 2D.
+    // Keep full resolution in both modes inside the editor.
     const r = this._renderer;
     if (r && typeof r.setRenderScale === 'function') {
-      const nextScale = (mode === '3d') ? 1.0 : this._viewportQuality.scale;
-      r.setRenderScale(nextScale);
+      r.setRenderScale(1.0);
       r.resizeCanvas();
       this._syncActiveCameraSizes();
     }
@@ -926,6 +1422,13 @@ const game = {
 
     this._ensureEditorCameras();
 
+    // Ensure viewport resolution doesn't change due to scene camera zoom or editor heuristics.
+    if (renderer && typeof renderer.setRenderScale === 'function') {
+      renderer.setRenderScale(1.0);
+      renderer.resizeCanvas();
+      this._syncActiveCameraSizes();
+    }
+
     // Default selection follows editor mode.
     this.selected = path ? this._pickDefaultSelectionForMode() : null;
 
@@ -942,12 +1445,28 @@ const game = {
     this._sceneCamera2D = scene.camera || null;
     this._sceneCamera3D = scene.camera3D || null;
 
+    const authoredW = Number(this._sceneCamera2D?.width);
+    const authoredH = Number(this._sceneCamera2D?.height);
+    const hasAuthoredSize = Number.isFinite(authoredW) && Number.isFinite(authoredH) && authoredW > 0 && authoredH > 0;
+    const desiredCamW = hasAuthoredSize ? authoredW : (r.targetWidth || 0);
+    const desiredCamH = hasAuthoredSize ? authoredH : (r.targetHeight || 0);
+
     if (!this._editorCamera2D) {
-      const cam2 = new Camera(0, 0, 1, 0, r.targetWidth || 0, r.targetHeight || 0);
+      const cam2 = new Camera(0, 0, 1, 0, desiredCamW, desiredCamH);
       // @ts-ignore - scenes often treat cameras as named objects
       cam2.name = 'EditorCamera2D';
       cam2.active = true;
       this._editorCamera2D = cam2;
+    } else {
+      // Update editor camera logical size to match authored camera (if provided).
+      if (typeof this._editorCamera2D.setSize === 'function') {
+        this._editorCamera2D.setSize(desiredCamW, desiredCamH);
+      } else {
+        // @ts-ignore
+        this._editorCamera2D.width = desiredCamW;
+        // @ts-ignore
+        this._editorCamera2D.height = desiredCamH;
+      }
     }
 
     if (!this._editorCamera3D) {
@@ -1202,6 +1721,17 @@ const game = {
     }
   },
 
+  _isEditingInspector() {
+    const el = /** @type {HTMLElement|null} */ (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    if (!el) return false;
+
+    const tag = String(el.tagName || '').toLowerCase();
+    const isEditor = tag === 'input' || tag === 'textarea' || tag === 'select';
+    if (!isEditor) return false;
+
+    return !!(el.closest('#inspectorCommon') || el.closest('#inspectorTransform'));
+  },
+
   rebuildInspector() {
     const obj = this.selected;
 
@@ -1219,6 +1749,15 @@ const game = {
     this._addReadonly(ui.common, "type", obj.constructor?.name || "unknown");
     this._addToggle(ui.common, "active", obj, "active");
     this._addToggle(ui.common, "visible", obj, "visible");
+
+    if (this._isAnimatedSprite(obj)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn';
+      btn.textContent = 'Animations...';
+      btn.addEventListener('click', () => this._openAnimSpriteEditor());
+      this._addField(ui.common, 'animations', btn);
+    }
 
     // Transform fields (mode-specific)
     if (this.mode === '2d') {
@@ -1278,7 +1817,7 @@ const game = {
     input.type = 'number';
     input.step = '1';
     input.value = String(Number(obj.layer) || 0);
-    input.addEventListener('change', () => {
+    const apply = () => {
       const v = Number(input.value);
       if (!Number.isFinite(v)) return;
       obj.layer = v;
@@ -1287,7 +1826,9 @@ const game = {
         // @ts-ignore - internal optimization flag
         this.currentScene._objectsDirty = true;
       }
-    });
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
 
     this._addField(container, 'layer', input);
   },
@@ -1368,10 +1909,23 @@ const game = {
     input.type = "number";
     input.step = "0.01";
     input.value = String(Number(obj[key]) || 0);
-    input.addEventListener("change", () => {
+    const apply = () => {
       const v = Number(input.value);
-      if (Number.isFinite(v)) obj[key] = v;
-    });
+      if (!Number.isFinite(v)) return;
+      obj[key] = v;
+      // Some engine objects cache matrices (e.g. Camera3D).
+      if (obj && typeof obj === 'object' && ('_dirty' in obj)) {
+        // @ts-ignore
+        obj._dirty = true;
+      }
+      const sel = /** @type {any} */ (this.selected);
+      if (sel && sel !== obj && typeof sel === 'object' && ('_dirty' in sel)) {
+        // @ts-ignore
+        sel._dirty = true;
+      }
+    };
+    input.addEventListener("input", apply);
+    input.addEventListener("change", apply);
     this._addField(container, label, input);
   },
 
@@ -1764,11 +2318,29 @@ const game = {
     this._updateGizmo();
 
     // Keep the loaded scene running normally.
-    this.currentScene.update(dt);
+    // IMPORTANT: In the editor we render with an editor camera, but game logic (including
+    // Sprite.followCamera) should use the authored scene camera, not the editor camera.
+    const scene = this.currentScene;
+    const prevCam2D = scene.camera;
+    const authoredCam2D = this._sceneCamera2D;
+    try {
+      if (authoredCam2D && prevCam2D && authoredCam2D !== prevCam2D) {
+        scene.camera = authoredCam2D;
+      }
+      scene.update(dt);
+    } finally {
+      // Restore editor camera for rendering/picking.
+      if (prevCam2D) scene.camera = prevCam2D;
+    }
 
-    // Keep inspector values reasonably fresh (but don’t fight user input while typing).
-    // Minimal: rebuild every frame if selection exists.
-    if (this.selected) this.rebuildInspector();
+    // Keep inspector values reasonably fresh, but don’t fight user input while typing.
+    if (this.selected && !this._isEditingInspector()) {
+      this._inspectorAutoRefreshT += dt;
+      if (this._inspectorAutoRefreshT >= 0.2) {
+        this._inspectorAutoRefreshT = 0;
+        this.rebuildInspector();
+      }
+    }
   },
 
   /** @param {Renderer} renderer */
@@ -1893,7 +2465,7 @@ const game = {
   },
 };
 
-new Engine("gameCanvas", game, 1280, 720, true, true, {
+new Engine("gameCanvas", game, 1280, 720, false, true, {
   renderer: {
     webglVersion: 2,
     allowFallback: true,

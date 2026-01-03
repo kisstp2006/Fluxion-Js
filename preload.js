@@ -16,6 +16,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Asset browser helpers (dev workflow). Returns {ok, path, entries, error?}.
   listProjectDir: (relativePath) => ipcRenderer.invoke('list-project-dir', relativePath),
 
+  // Workspace root (lets the editor browse/load files outside this repo)
+  setWorkspaceRoot: (absolutePath) => ipcRenderer.invoke('set-workspace-root', absolutePath),
+  getWorkspaceRoot: () => ipcRenderer.invoke('get-workspace-root'),
+
   // Project creation helpers (editor workflow)
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts),

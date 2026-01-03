@@ -1,6 +1,21 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol } = require("electron");
 const path = require("path");
 const fs = require("fs");
+
+// Must be called BEFORE app is ready.
+// This enables Chromium features (like fetch()) for our custom scheme.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'fluxion',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true,
+      stream: true,
+    },
+  },
+]);
 
 function parseNpmVersionFromEnv() {
   try {
@@ -54,6 +69,28 @@ function writeFile(filePath, content) {
 let mainWindow;
 const iconPath = "./Fluxion/Icon/Fluxion_icon.ico";
 
+// Filesystem root used by the editor for browsing/loading assets.
+// Defaults to this repo, but can be changed to any folder via IPC.
+let workspaceRootAbs = path.resolve(__dirname);
+
+function setWorkspaceRootAbs(p) {
+  workspaceRootAbs = path.resolve(String(p || __dirname));
+}
+
+function getWorkspaceRootAbs() {
+  return workspaceRootAbs;
+}
+
+function resolveUnderWorkspace(relPathFromUrl) {
+  const rel = String(relPathFromUrl || '').replace(/^\/+/, '');
+  // URL paths always use '/'
+  const relFs = rel.split('/').join(path.sep);
+  const abs = path.resolve(getWorkspaceRootAbs(), relFs);
+  const relCheck = path.relative(getWorkspaceRootAbs(), abs);
+  const inside = (relCheck === '' || (!relCheck.startsWith('..') && !path.isAbsolute(relCheck)));
+  return inside ? abs : null;
+}
+
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
@@ -68,6 +105,21 @@ if (!gotTheLock) {
   app.commandLine.appendSwitch("enable-zero-copy");
 
   app.whenReady().then(() => {
+    // Allow loading arbitrary files from the selected workspace folder via fetch/Image.
+    // Example: fluxion://workspace/Scenes/scene.xml
+    protocol.registerFileProtocol('fluxion', (request, callback) => {
+      try {
+        const u = new URL(request.url);
+        if (u.hostname !== 'workspace') return callback({ error: -6 });
+        const decodedPath = decodeURIComponent(u.pathname || '');
+        const abs = resolveUnderWorkspace(decodedPath);
+        if (!abs) return callback({ error: -6 });
+        return callback({ path: abs });
+      } catch (err) {
+        return callback({ error: -324 });
+      }
+    });
+
     mainWindow = new BrowserWindow({
       icon: iconPath,
       width: 1280,
@@ -156,7 +208,7 @@ if (!gotTheLock) {
         return { ok: false, error: 'App is packaged; project directory is not writable. Use Debug output instead.' };
       }
 
-      const projectRoot = path.resolve(__dirname);
+      const projectRoot = getWorkspaceRootAbs();
       const targetPath = path.resolve(String(absolutePath || ''));
 
       // Basic path traversal protection: only allow writes under the project root.
@@ -218,7 +270,7 @@ if (!gotTheLock) {
   // Returns {ok, path, entries, error?} where path is normalized with forward slashes.
   ipcMain.handle('list-project-dir', async (event, relativePath) => {
     try {
-      const projectRoot = path.resolve(__dirname);
+      const projectRoot = getWorkspaceRootAbs();
       const relIn = String(relativePath ?? '.');
       const abs = path.resolve(projectRoot, relIn);
 
@@ -268,6 +320,28 @@ if (!gotTheLock) {
 
       const outPath = (rel === '' ? '.' : rel).split(path.sep).join('/');
       return { ok: true, path: outPath, entries };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Switch the workspace root used by list-project-dir and fluxion://workspace/ loading.
+  ipcMain.handle('set-workspace-root', async (event, absolutePath) => {
+    try {
+      const abs = path.resolve(String(absolutePath || ''));
+      if (!abs) return { ok: false, error: 'Missing path.' };
+      const st = await fs.promises.stat(abs);
+      if (!st.isDirectory()) return { ok: false, error: 'Selected path is not a directory.' };
+      setWorkspaceRootAbs(abs);
+      return { ok: true, path: getWorkspaceRootAbs() };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  ipcMain.handle('get-workspace-root', async () => {
+    try {
+      return { ok: true, path: getWorkspaceRootAbs() };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }
