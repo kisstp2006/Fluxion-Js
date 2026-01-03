@@ -25,6 +25,15 @@ export function createAssetBrowser(opts) {
     root: String(opts.root || 'Model'),
     cwd: String(opts.root || 'Model'),
     selected: /** @type {string|null} */ (null),
+    clipboard: /** @type {string|null} */ (null),
+  };
+
+  const ctx = {
+    menu: /** @type {HTMLDivElement|null} */ (null),
+    visible: false,
+    targetPath: /** @type {string|null} */ (null),
+    targetIsDir: false,
+    pasteDestDir: /** @type {string|null} */ (null),
   };
 
   /** @param {string} pathRel */
@@ -94,6 +103,187 @@ export function createAssetBrowser(opts) {
     }
   }
 
+  function ensureContextMenu() {
+    if (ctx.menu) return;
+    const menu = document.createElement('div');
+    menu.className = 'menu contextMenu';
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    ctx.menu = menu;
+
+    document.addEventListener('click', () => hideContextMenu());
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideContextMenu();
+    });
+    window.addEventListener('blur', () => hideContextMenu());
+  }
+
+  function hideContextMenu() {
+    if (!ctx.menu || !ctx.visible) return;
+    ctx.visible = false;
+    ctx.menu.classList.remove('open');
+  }
+
+  /** @param {number} x @param {number} y */
+  function positionContextMenu(x, y) {
+    if (!ctx.menu) return;
+    // Start at click position
+    ctx.menu.style.left = `${Math.max(4, x)}px`;
+    ctx.menu.style.top = `${Math.max(4, y)}px`;
+
+    // Clamp to viewport after layout
+    requestAnimationFrame(() => {
+      if (!ctx.menu) return;
+      const r = ctx.menu.getBoundingClientRect();
+      const maxX = Math.max(4, window.innerWidth - r.width - 4);
+      const maxY = Math.max(4, window.innerHeight - r.height - 4);
+      const nextX = Math.min(Math.max(4, x), maxX);
+      const nextY = Math.min(Math.max(4, y), maxY);
+      ctx.menu.style.left = `${nextX}px`;
+      ctx.menu.style.top = `${nextY}px`;
+    });
+  }
+
+  /** @param {{ label: string, enabled?: boolean, onClick?: (() => void | Promise<void>) | null }} item */
+  function addMenuItem(item) {
+    if (!ctx.menu) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'menuItem';
+    btn.textContent = item.label;
+    const enabled = item.enabled !== false;
+    if (!enabled) {
+      btn.disabled = true;
+      btn.style.opacity = '0.5';
+      btn.style.cursor = 'default';
+    }
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!enabled) return;
+      hideContextMenu();
+      Promise.resolve(item.onClick ? item.onClick() : undefined).catch(console.error);
+    });
+    ctx.menu.appendChild(btn);
+  }
+
+  function addMenuSep() {
+    if (!ctx.menu) return;
+    const sep = document.createElement('div');
+    sep.className = 'menuSep';
+    ctx.menu.appendChild(sep);
+  }
+
+  async function doDeleteSelected() {
+    const p = ctx.targetPath;
+    if (!p) return;
+    if (!confirm(`Delete "${p}"?`)) return;
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const res = await electronAPI.deleteProjectPath(p);
+    if (!res || !res.ok) {
+      alert(res && res.error ? res.error : 'Delete failed');
+      return;
+    }
+    // If we deleted the currently selected item, clear selection.
+    if (state.selected === p) state.selected = null;
+    render().catch(console.error);
+  }
+
+  async function doOpenExternal() {
+    const p = ctx.targetPath;
+    if (!p) return;
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const res = await electronAPI.openProjectPathExternal(p);
+    if (!res || !res.ok) {
+      alert(res && res.error ? res.error : 'Open failed');
+    }
+  }
+
+  async function doRevealInExplorer() {
+    const p = ctx.targetPath;
+    if (!p) return;
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const res = await electronAPI.revealProjectPathInExplorer(p, ctx.targetIsDir);
+    if (!res || !res.ok) {
+      alert(res && res.error ? res.error : 'Reveal failed');
+    }
+  }
+
+  function doCopy() {
+    const p = ctx.targetPath;
+    if (!p) return;
+    state.clipboard = p;
+  }
+
+  async function doPaste() {
+    const src = state.clipboard;
+    const destDir = ctx.pasteDestDir || state.cwd;
+    if (!src || !destDir) return;
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const res = await electronAPI.copyProjectPathToDir(src, destDir);
+    if (!res || !res.ok) {
+      alert(res && res.error ? res.error : 'Paste failed');
+      return;
+    }
+    render().catch(console.error);
+  }
+
+  async function doOpenItem() {
+    const p = ctx.targetPath;
+    if (!p) return;
+    if (ctx.targetIsDir) {
+      state.cwd = p;
+      state.selected = null;
+      render().catch(console.error);
+      return;
+    }
+    state.selected = p;
+    if (onOpenFile) {
+      await onOpenFile(p);
+    }
+    render().catch(console.error);
+  }
+
+  /** @param {MouseEvent} e */
+  function onGridContextMenu(e) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canUse = !!(electronAPI && typeof electronAPI.listProjectDir === 'function');
+    if (!canUse) return;
+
+    ensureContextMenu();
+    if (!ctx.menu) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+    const item = t?.closest('.assetItem');
+    const targetPath = item?.getAttribute('data-path') || null;
+    const targetIsDir = item?.getAttribute('data-isdir') === '1';
+
+    ctx.targetPath = targetPath;
+    ctx.targetIsDir = !!targetIsDir;
+    // Paste destination: if right-clicked a folder, paste into that folder; otherwise paste into current folder.
+    ctx.pasteDestDir = (targetPath && targetIsDir) ? targetPath : state.cwd;
+
+    // Build menu
+    ctx.menu.innerHTML = '';
+
+    const hasTarget = !!targetPath;
+    addMenuItem({ label: 'Open', enabled: hasTarget, onClick: hasTarget ? doOpenItem : null });
+    addMenuItem({ label: 'Open in External Editor', enabled: hasTarget, onClick: hasTarget ? doOpenExternal : null });
+    addMenuItem({ label: 'Open in File Explorer', enabled: hasTarget, onClick: hasTarget ? doRevealInExplorer : null });
+    addMenuSep();
+    addMenuItem({ label: 'Copy', enabled: hasTarget, onClick: hasTarget ? doCopy : null });
+    addMenuItem({ label: 'Paste', enabled: !!state.clipboard, onClick: state.clipboard ? doPaste : null });
+    addMenuSep();
+    addMenuItem({ label: 'Delete', enabled: hasTarget, onClick: hasTarget ? doDeleteSelected : null });
+
+    positionContextMenu(e.clientX, e.clientY);
+    ctx.visible = true;
+    ctx.menu.classList.add('open');
+  }
+
   function navigateUp() {
     const root = state.root;
     const cwd = state.cwd;
@@ -153,6 +343,7 @@ export function createAssetBrowser(opts) {
 
     ui.assetUpBtn?.addEventListener('click', () => navigateUp());
     ui.assetGrid?.addEventListener('click', (e) => onGridClick(e).catch(console.error));
+    ui.assetGrid?.addEventListener('contextmenu', onGridContextMenu);
 
     // Initial render
     render().catch(console.error);

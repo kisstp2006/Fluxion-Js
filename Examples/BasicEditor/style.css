@@ -66,6 +66,16 @@ body {
   display: block;
 }
 
+.contextMenu {
+  position: fixed;
+  display: none;
+  z-index: 120;
+}
+
+.contextMenu.open {
+  display: block;
+}
+
 .menuItem {
   width: 100%;
   text-align: left;

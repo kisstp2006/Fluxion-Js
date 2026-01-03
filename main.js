@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol, shell } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
@@ -89,6 +89,15 @@ function resolveUnderWorkspace(relPathFromUrl) {
   const relCheck = path.relative(getWorkspaceRootAbs(), abs);
   const inside = (relCheck === '' || (!relCheck.startsWith('..') && !path.isAbsolute(relCheck)));
   return inside ? abs : null;
+}
+
+function resolveWorkspaceRelPath(relativePath) {
+  const projectRoot = getWorkspaceRootAbs();
+  const relIn = String(relativePath ?? '.');
+  const abs = path.resolve(projectRoot, relIn);
+  const rel = path.relative(projectRoot, abs);
+  const isInside = rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return isInside ? abs : null;
 }
 
 const gotTheLock = app.requestSingleInstanceLock();
@@ -320,6 +329,99 @@ if (!gotTheLock) {
 
       const outPath = (rel === '' ? '.' : rel).split(path.sep).join('/');
       return { ok: true, path: outPath, entries };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Open a file/folder with the OS default application.
+  ipcMain.handle('open-project-path-external', async (event, relativePath) => {
+    try {
+      const abs = resolveWorkspaceRelPath(relativePath);
+      if (!abs) return { ok: false, error: 'Refusing to open outside workspace root.' };
+      const st = await fs.promises.stat(abs);
+      if (!st.isFile() && !st.isDirectory()) return { ok: false, error: 'Target is not a file or directory.' };
+      const res = await shell.openPath(abs);
+      if (res) return { ok: false, error: String(res) };
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Reveal a file in explorer, or open a folder in explorer.
+  ipcMain.handle('reveal-project-path-in-explorer', async (event, payload) => {
+    try {
+      const p = (payload && typeof payload === 'object') ? payload : {};
+      const relPath = String(p.relativePath ?? '');
+      const isDir = !!p.isDir;
+      const abs = resolveWorkspaceRelPath(relPath);
+      if (!abs) return { ok: false, error: 'Refusing to reveal outside workspace root.' };
+      const st = await fs.promises.stat(abs);
+      if (isDir || st.isDirectory()) {
+        const res = await shell.openPath(abs);
+        if (res) return { ok: false, error: String(res) };
+        return { ok: true };
+      }
+
+      shell.showItemInFolder(abs);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Delete a file or folder under the workspace root.
+  ipcMain.handle('delete-project-path', async (event, relativePath) => {
+    try {
+      const abs = resolveWorkspaceRelPath(relativePath);
+      if (!abs) return { ok: false, error: 'Refusing to delete outside workspace root.' };
+      const rel = String(relativePath ?? '');
+      if (rel === '' || rel === '.' || rel === '/') {
+        return { ok: false, error: 'Refusing to delete workspace root.' };
+      }
+
+      // Ensure the target exists before attempting rm.
+      await fs.promises.stat(abs);
+      await fs.promises.rm(abs, { recursive: true, force: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Copy a file or folder under the workspace root into a destination directory under the workspace root.
+  // payload: { srcRelativePath: string, destDirRelativePath: string }
+  ipcMain.handle('copy-project-path-to-dir', async (event, payload) => {
+    try {
+      const p = (payload && typeof payload === 'object') ? payload : {};
+      const srcRel = String(p.srcRelativePath ?? '');
+      const dstDirRel = String(p.destDirRelativePath ?? '');
+      if (!srcRel) return { ok: false, error: 'Missing source path.' };
+      if (!dstDirRel) return { ok: false, error: 'Missing destination directory.' };
+
+      const srcAbs = resolveWorkspaceRelPath(srcRel);
+      const dstDirAbs = resolveWorkspaceRelPath(dstDirRel);
+      if (!srcAbs || !dstDirAbs) return { ok: false, error: 'Refusing to copy outside workspace root.' };
+
+      const srcSt = await fs.promises.stat(srcAbs);
+      const dstDirSt = await fs.promises.stat(dstDirAbs);
+      if (!dstDirSt.isDirectory()) return { ok: false, error: 'Destination is not a directory.' };
+      if (!srcSt.isFile() && !srcSt.isDirectory()) return { ok: false, error: 'Source is not a file or directory.' };
+
+      const dstAbs = path.join(dstDirAbs, path.basename(srcAbs));
+      if (fs.existsSync(dstAbs)) {
+        return { ok: false, error: 'Destination already contains an item with the same name.' };
+      }
+
+      // Node/Electron supports fs.promises.cp on modern versions.
+      if (fs.promises.cp) {
+        await fs.promises.cp(srcAbs, dstAbs, { recursive: true, errorOnExist: true });
+      } else {
+        return { ok: false, error: 'Copy is not supported by this runtime.' };
+      }
+
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }

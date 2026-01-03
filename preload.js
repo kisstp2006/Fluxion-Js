@@ -16,6 +16,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Asset browser helpers (dev workflow). Returns {ok, path, entries, error?}.
   listProjectDir: (relativePath) => ipcRenderer.invoke('list-project-dir', relativePath),
 
+  // Asset actions (editor workflow)
+  openProjectPathExternal: (relativePath) => ipcRenderer.invoke('open-project-path-external', relativePath),
+  revealProjectPathInExplorer: (relativePath, isDir) => ipcRenderer.invoke('reveal-project-path-in-explorer', { relativePath, isDir: !!isDir }),
+  deleteProjectPath: (relativePath) => ipcRenderer.invoke('delete-project-path', relativePath),
+  copyProjectPathToDir: (srcRelativePath, destDirRelativePath) => ipcRenderer.invoke('copy-project-path-to-dir', { srcRelativePath, destDirRelativePath }),
+
   // Workspace root (lets the editor browse/load files outside this repo)
   setWorkspaceRoot: (absolutePath) => ipcRenderer.invoke('set-workspace-root', absolutePath),
   getWorkspaceRoot: () => ipcRenderer.invoke('get-workspace-root'),
