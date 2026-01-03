@@ -346,6 +346,20 @@ export default class Renderer {
     };
     window.addEventListener("resize", this._resizeHandler);
 
+    // In embedded layouts (like the editor), the canvas can change size without a window resize.
+    // Track element resizes so the letterboxed viewport stays correct.
+    this._resizeObserver = null;
+    if (this.respectCssSize && typeof ResizeObserver !== 'undefined') {
+      try {
+        this._resizeObserver = new ResizeObserver(() => {
+          this._resizeHandler();
+        });
+        this._resizeObserver.observe(this.canvas);
+      } catch {
+        // ignore - ResizeObserver may be unavailable or blocked
+      }
+    }
+
     this.canvas.addEventListener('webglcontextlost', (e) => {
       e.preventDefault();
       console.warn('WebGL context lost! Attempting to restore...');

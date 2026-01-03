@@ -1451,6 +1451,22 @@ const game = {
     const desiredCamW = hasAuthoredSize ? authoredW : (r.targetWidth || 0);
     const desiredCamH = hasAuthoredSize ? authoredH : (r.targetHeight || 0);
 
+    // In the editor, the canvas is embedded in a resizable panel.
+    // To avoid stretched scenes (especially fixed-resolution UI scenes), letterbox to the authored camera aspect.
+    if (r) {
+      r.maintainAspectRatio = true;
+      // IMPORTANT: renderer shaders use targetWidth/targetHeight as the logical world resolution.
+      // If we only change aspect ratio but keep targetWidth/Height at the engine defaults (e.g. 1280x720),
+      // 2D scenes authored for 1920x1080 will appear offset (often “pushed down”).
+      const logicW = (Number.isFinite(desiredCamW) && desiredCamW > 0) ? desiredCamW : Number(r.targetWidth) || 0;
+      const logicH = (Number.isFinite(desiredCamH) && desiredCamH > 0) ? desiredCamH : Number(r.targetHeight) || 0;
+      if (Number.isFinite(logicW) && Number.isFinite(logicH) && logicW > 0 && logicH > 0) {
+        r.targetWidth = logicW;
+        r.targetHeight = logicH;
+        r.targetAspectRatio = logicW / logicH;
+      }
+    }
+
     if (!this._editorCamera2D) {
       const cam2 = new Camera(0, 0, 1, 0, desiredCamW, desiredCamH);
       // @ts-ignore - scenes often treat cameras as named objects
@@ -2465,7 +2481,7 @@ const game = {
   },
 };
 
-new Engine("gameCanvas", game, 1280, 720, false, true, {
+new Engine("gameCanvas", game, 1280, 720, true, true, {
   renderer: {
     webglVersion: 2,
     allowFallback: true,

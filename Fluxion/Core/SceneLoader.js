@@ -16,6 +16,27 @@ import { loadGLTF } from './GLTFLoader.js';
  * Utility class for loading scenes from XML files.
  */
 export default class SceneLoader {
+        /**
+         * Resolve a resource URL found in a scene.
+         *
+         * Rules:
+         * - Absolute URLs (http/https/fluxion/etc) are returned as-is.
+         * - Relative paths are resolved against the scene file directory (baseUrl).
+         *
+         * @param {string} p
+         * @param {string} baseUrl
+         */
+        static _resolveSceneResourceUrl(p, baseUrl) {
+            const src = String(p || '').trim();
+            if (!src) return src;
+
+            // Already an absolute URL (scheme://...)
+            if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(src)) return src;
+
+            // Resolve relative to the scene file directory.
+            try { return new URL(src, baseUrl).toString(); } catch { return src; }
+        }
+
     /**
      * Loads a scene from an XML file.
      * @param {string} url - The URL of the XML file.
@@ -295,7 +316,7 @@ export default class SceneLoader {
                     continue;
                 }
 
-                const obj = await this.parseObject(child, renderer);
+                const obj = await this.parseObject(child, renderer, baseUrl);
                 if (!obj) continue;
 
                 if (obj instanceof Camera) {
@@ -581,6 +602,9 @@ export default class SceneLoader {
      * @returns {Promise<Object|null>} The parsed object, or null if unknown.
      */
     static async parseObject(node, renderer) {
+        // NOTE: baseUrl is passed from SceneLoader.load() and is used to resolve asset paths.
+        // Relative paths (e.g. 'Assets/foo.png') resolve against the scene file directory.
+        const baseUrl = arguments.length >= 3 ? arguments[2] : '';
         const tagName = node.tagName;
         let obj = null;
         
@@ -600,7 +624,8 @@ export default class SceneLoader {
         const getBool = (name, def = false) => node.getAttribute(name) === "true";
 
         if (tagName === "Sprite") {
-            const src = getString("imageSrc");
+            const srcRaw = getString("imageSrc");
+            const src = SceneLoader._resolveSceneResourceUrl(srcRaw, baseUrl);
             const x = getFloat("x");
             const y = getFloat("y");
             const w = getFloat("width", 1);
@@ -612,7 +637,8 @@ export default class SceneLoader {
         }
         
         else if (tagName === "AnimatedSprite") {
-            const src = getString("imageSrc");
+            const srcRaw = getString("imageSrc");
+            const src = SceneLoader._resolveSceneResourceUrl(srcRaw, baseUrl);
             const x = getFloat("x");
             const y = getFloat("y");
             const w = getFloat("width", 1);
@@ -639,7 +665,11 @@ export default class SceneLoader {
                         // Check if frames are numeric indices or file paths
                         // If any part is not a number, treat as paths
                         if (/[^0-9,\s]/.test(framesStr)) {
-                            frames = framesStr.split(',').map(s => s.trim());
+                            frames = framesStr
+                                .split(',')
+                                .map(s => s.trim())
+                                .filter(Boolean)
+                                .map((p) => SceneLoader._resolveSceneResourceUrl(p, baseUrl));
                         } else {
                             frames = framesStr.split(',').map(s => parseInt(s.trim()));
                         }
@@ -720,7 +750,8 @@ export default class SceneLoader {
         }
 
         else if (tagName === "Audio") {
-            const src = getString("src");
+            const srcRaw = getString("src");
+            const src = SceneLoader._resolveSceneResourceUrl(srcRaw, baseUrl);
             const loop = getBool("loop", false);
             const volume = getFloat("volume", 1.0);
             const autoplay = getBool("autoplay", false);
@@ -949,7 +980,7 @@ export default class SceneLoader {
         if (obj && obj.addChild) {
              for (const childNode of node.children) {
                  if (childNode.tagName === "Animation") continue;
-                 const childObj = await this.parseObject(childNode, renderer);
+                 const childObj = await this.parseObject(childNode, renderer, baseUrl);
                  if (childObj) {
                      obj.addChild(childObj);
                  }
