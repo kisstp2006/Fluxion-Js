@@ -18,5 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Project creation helpers (editor workflow)
   selectFolder: () => ipcRenderer.invoke('select-folder'),
-  createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts)
+  createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts),
+
+  // Version helpers (About dialog)
+  getVersions: () => ipcRenderer.invoke('get-versions')
 }); 

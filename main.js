@@ -2,6 +2,36 @@ const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
+function parseNpmVersionFromEnv() {
+  try {
+    const ua = String(process.env.npm_config_user_agent || '');
+    const m = /npm\/(\d+(?:\.\d+){0,3})/i.exec(ua);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function readFluxionEngineVersion() {
+  try {
+    const p = path.join(__dirname, 'Fluxion', 'version.py');
+    const txt = fs.readFileSync(p, 'utf8');
+    const get = (key) => {
+      const re = new RegExp(`^\\s*${key}\\s*=\\s*\"([^\"]*)\"`, 'm');
+      const m = re.exec(txt);
+      return m ? m[1] : null;
+    };
+    return {
+      name: get('ENGINE_NAME'),
+      version: get('VERSION'),
+      codename: get('CODENAME'),
+      license: get('LICENSE'),
+    };
+  } catch {
+    return { name: null, version: null, codename: null, license: null };
+  }
+}
+
 function normSlashes(p) {
   return String(p || '').split(path.sep).join('/');
 }
@@ -158,6 +188,30 @@ if (!gotTheLock) {
       return gpuInfo;
     }
     return null;
+  });
+
+  // Runtime/app version info for About dialog.
+  ipcMain.handle('get-versions', async () => {
+    try {
+      const pkgPath = path.join(__dirname, 'package.json');
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      const engine = readFluxionEngineVersion();
+      return {
+        ok: true,
+        app: {
+          name: pkg && pkg.name ? String(pkg.name) : null,
+          version: pkg && pkg.version ? String(pkg.version) : null,
+        },
+        electron: process.versions.electron || null,
+        chrome: process.versions.chrome || null,
+        node: process.versions.node || null,
+        v8: process.versions.v8 || null,
+        npm: parseNpmVersionFromEnv(),
+        engine,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
   });
 
   // List a directory inside the project root (dev workflow).

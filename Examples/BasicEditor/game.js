@@ -16,6 +16,8 @@ const ui = {
   debugMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
   aboutModal: /** @type {HTMLDivElement|null} */ (null),
   aboutCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  aboutVersionsText: /** @type {HTMLTextAreaElement|null} */ (null),
+  aboutCopyBtn: /** @type {HTMLButtonElement|null} */ (null),
   createProjectModal: /** @type {HTMLDivElement|null} */ (null),
   createProjectNameInput: /** @type {HTMLInputElement|null} */ (null),
   createProjectPathInput: /** @type {HTMLInputElement|null} */ (null),
@@ -139,6 +141,8 @@ const game = {
     ui.debugMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("debugMenuBtn"));
     ui.aboutModal = /** @type {HTMLDivElement} */ (document.getElementById("aboutModal"));
     ui.aboutCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("aboutCloseBtn"));
+    ui.aboutVersionsText = /** @type {HTMLTextAreaElement} */ (document.getElementById('aboutVersionsText'));
+    ui.aboutCopyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('aboutCopyBtn'));
     ui.createProjectModal = /** @type {HTMLDivElement} */ (document.getElementById("createProjectModal"));
     ui.createProjectNameInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectNameInput"));
     ui.createProjectPathInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectPathInput"));
@@ -178,6 +182,12 @@ const game = {
     ui.aboutModal?.addEventListener('mousedown', (e) => {
       // Click outside the dialog closes.
       if (e.target === ui.aboutModal) this._closeAbout();
+    });
+
+    ui.aboutCopyBtn?.addEventListener('click', () => {
+      const text = String(ui.aboutVersionsText?.value || '').trim();
+      if (!text) return;
+      this._copyTextToClipboard(text).catch(console.error);
     });
 
     // Create Project dialog
@@ -256,10 +266,11 @@ const game = {
     const pick = await electronAPI.selectFolder();
     if (!pick || !pick.ok || pick.canceled) return null;
 
-    // Newer Electron host returns projectRel + insideProjectRoot.
-    if (pick.projectRel != null) {
+    // Newer Electron host returns insideProjectRoot + projectRel (projectRel may be null when outside root).
+    const hasWorkspaceInfo = (pick && (Object.prototype.hasOwnProperty.call(pick, 'insideProjectRoot') || Object.prototype.hasOwnProperty.call(pick, 'projectRel')));
+    if (hasWorkspaceInfo) {
       if (pick.insideProjectRoot === false) {
-        alert('That folder is outside the current editor workspace.\n\nFor now, Open Folder/Project can only target folders inside this Fluxion-Js repo.');
+        alert('That folder is outside the current editor workspace.\n\nOpen Folder/Project currently only supports folders inside this Fluxion-Js repo.');
         return null;
       }
 
@@ -267,8 +278,8 @@ const game = {
       return rel || '.';
     }
 
-    // Older host: cannot safely derive a relative folder in the renderer.
-    alert('Open Folder/Project requires an updated Electron host (select-folder IPC needs to return projectRel).');
+    // Older host: cannot safely derive a project-root-relative folder in the renderer.
+    alert('Open Folder/Project requires an updated Electron host.\n\nPlease restart after pulling the latest changes (select-folder IPC must return insideProjectRoot/projectRel).');
     return null;
   },
 
@@ -446,8 +457,76 @@ const game = {
     if (!ui.aboutModal) return;
     this._aboutOpen = true;
     ui.aboutModal.hidden = false;
+    this._populateAboutVersions().catch(console.error);
     this._closeTopbarMenus();
     ui.aboutCloseBtn?.focus();
+  },
+
+  /** @param {string} text */
+  async _copyTextToClipboard(text) {
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(String(text));
+        return;
+      }
+    } catch {}
+
+    // Fallback: select textarea content and use execCommand.
+    const ta = ui.aboutVersionsText;
+    if (ta) {
+      ta.focus();
+      ta.select();
+      document.execCommand?.('copy');
+    }
+  },
+
+  async _populateAboutVersions() {
+    if (!ui.aboutVersionsText) return;
+
+    ui.aboutVersionsText.value = 'Loading...';
+
+    /** @type {string[]} */
+    const lines = [];
+
+    let engine = null;
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (electronAPI && typeof electronAPI.getVersions === 'function') {
+      const res = await electronAPI.getVersions();
+      if (res && res.ok) {
+        engine = res.engine || null;
+        if (res.app && (res.app.name || res.app.version)) {
+          lines.push(`App: ${String(res.app.name || 'Fluxion')}${res.app.version ? ' ' + String(res.app.version) : ''}`);
+        }
+        if (res.electron) lines.push(`Electron: ${String(res.electron)}`);
+        if (res.npm) lines.push(`npm: ${String(res.npm)}`);
+        if (res.node) lines.push(`Node: ${String(res.node)}`);
+        if (res.chrome) lines.push(`Chrome: ${String(res.chrome)}`);
+      }
+    }
+
+    // Fallback for engine version if not provided via IPC.
+    if (!engine) {
+      try {
+        const r = await fetch('../../Fluxion/version.py');
+        if (r.ok) {
+          const txt = await r.text();
+          const mVer = /^\s*VERSION\s*=\s*\"([^\"]*)\"/m.exec(txt);
+          const mCode = /^\s*CODENAME\s*=\s*\"([^\"]*)\"/m.exec(txt);
+          engine = { version: mVer ? mVer[1] : null, codename: mCode ? mCode[1] : null };
+        }
+      } catch {}
+    }
+
+    if (engine && (engine.version || engine.codename)) {
+      const tag = `${engine.version ? String(engine.version) : ''}${engine.codename ? ' (' + String(engine.codename) + ')' : ''}`.trim();
+      lines.unshift(`Engine: ${tag}`);
+    }
+
+    if (lines.length === 0) {
+      lines.push('Version info unavailable in this runtime.');
+    }
+
+    ui.aboutVersionsText.value = lines.join('\n');
   },
 
   _closeAbout() {
