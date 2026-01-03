@@ -131,6 +131,11 @@ const game = {
 
   _inspectorAutoRefreshT: 0,
 
+  // When the inspector auto-refreshes, it rebuilds DOM. If that happens between
+  // pointer down/up, the browser may not fire a click on the original element.
+  // Use a short cooldown after interactions inside the inspector.
+  _inspectorRefreshBlockT: 0,
+
   _createProjectDialog: /** @type {ReturnType<typeof createProjectDialog> | null} */ (null),
 
   _assetBrowser: {
@@ -143,6 +148,8 @@ const game = {
 
   /** @type {string|null} */
   _scenePath: null,
+
+  _lastSceneSaveOkT: 0,
 
   /** @param {Renderer} renderer */
   async init(renderer) {
@@ -207,6 +214,9 @@ const game = {
     ui.dbgShowAabb = /** @type {HTMLInputElement} */ (document.getElementById("dbgShowAabb"));
     ui.dbgDepthTest = /** @type {HTMLInputElement} */ (document.getElementById("dbgDepthTest"));
 
+    // Avoid inspector auto-refresh fighting clicks.
+    this._setupInspectorInteractionGuards();
+
     ui.topReloadBtn?.addEventListener("click", () => {
       window.location.reload();
     });
@@ -260,6 +270,15 @@ const game = {
         // Match browser/Electron refresh behavior.
         e.preventDefault();
         window.location.reload();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        // Save currently open scene (editor workflow).
+        if (this._scenePath) {
+          e.preventDefault();
+          this.saveCurrentScene().catch(console.error);
+        }
         return;
       }
       if (e.key === "Escape") {
@@ -500,6 +519,9 @@ const game = {
         case 'file.reloadScene':
           this.loadSelectedScene(renderer).catch(console.error);
           break;
+        case 'file.saveScene':
+          this.saveCurrentScene().catch(console.error);
+          break;
         case 'app.reload':
           window.location.reload();
           break;
@@ -524,6 +546,572 @@ const game = {
 
     // Expose close helper for Escape key
     this._closeTopbarMenus = closeAll;
+  },
+
+  /**
+   * Save the currently open scene back to its XML file.
+   * Uses Electron IPC (dev workflow) and refuses to write outside the workspace root.
+   */
+  async saveCurrentScene() {
+    const scene = this.currentScene;
+    if (!scene) return;
+
+    const sceneUrl = String(this._scenePath || '').trim();
+    if (!sceneUrl) {
+      alert('No scene is currently open.');
+      return;
+    }
+
+    const rel = this._scenePathToProjectRel(sceneUrl);
+    if (!rel) {
+      alert(`Can't save this scene URL: ${sceneUrl}`);
+      return;
+    }
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.saveProjectFile !== 'function') {
+      alert('Save Scene is only available in the Electron editor.');
+      return;
+    }
+
+    const rootRes = await electronAPI.getWorkspaceRoot();
+    if (!rootRes || !rootRes.ok || !rootRes.path) {
+      alert(`Failed to resolve workspace root: ${rootRes && rootRes.error ? rootRes.error : 'Unknown error'}`);
+      return;
+    }
+
+    const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
+    const relClean = String(rel || '').replace(/^\.(?:\\|\/)?/, '').replace(/^\/+/, '');
+    const absPath = `${rootAbs}/${relClean}`;
+
+    const xml = this._serializeSceneToXml();
+    const res = await electronAPI.saveProjectFile(absPath, xml);
+    if (!res || !res.ok) {
+      alert(`Failed to save scene: ${res && res.error ? res.error : 'Unknown error'}`);
+      return;
+    }
+
+    this._lastSceneSaveOkT = 1.25;
+    console.log('Scene saved:', res.path || absPath);
+  },
+
+  /** @param {string} sceneUrl */
+  _scenePathToProjectRel(sceneUrl) {
+    const u = String(sceneUrl || '').trim();
+    const prefix = 'fluxion://workspace/';
+    if (!u.startsWith(prefix)) return null;
+    const rel = u.slice(prefix.length);
+    return rel ? rel : null;
+  },
+
+  _serializeSceneToXml() {
+    const scene = this.currentScene;
+    if (!scene) return '<Scene name="Untitled" />\n';
+
+    /** @type {any} */
+    const sceneAny = /** @type {any} */ (scene);
+
+    /** @param {any} v */
+    const esc = (v) => this._xmlEscapeAttr(v);
+    /** @param {any} n */
+    const fmtNum = (n) => {
+      const x = Number(n);
+      if (!Number.isFinite(x)) return null;
+      // Keep authored precision (avoid rounding aggressively).
+      return String(x);
+    };
+    /**
+     * @param {string[]} parts
+     * @param {string} k
+     * @param {any} v
+     * @param {{ allowEmpty?: boolean }=} opts
+     */
+    const addAttr = (parts, k, v, opts = {}) => {
+      const allowEmpty = !!opts.allowEmpty;
+      if (v === undefined || v === null) return;
+      const s = String(v);
+      if (!allowEmpty && s === '') return;
+      parts.push(`${k}="${esc(s)}"`);
+    };
+    /** @param {string[]} parts @param {string} k @param {any} v */
+    const addNumAttr = (parts, k, v) => {
+      const s = fmtNum(v);
+      if (s === null) return;
+      parts.push(`${k}="${esc(s)}"`);
+    };
+
+    /** @type {string[]} */
+    const lines = [];
+    const sceneName = scene.name ? String(scene.name) : 'Untitled';
+    lines.push(`<Scene name="${esc(sceneName)}">`);
+
+    // Cameras: use authored cameras if available (editor forces rendering cameras).
+    const cam2 = /** @type {any} */ (this._sceneCamera2D || null);
+    if (cam2) {
+      /** @type {string[]} */
+      const parts = [];
+      addAttr(parts, 'name', cam2.name || 'MainCamera');
+      addNumAttr(parts, 'x', cam2.x ?? 0);
+      addNumAttr(parts, 'y', cam2.y ?? 0);
+      addNumAttr(parts, 'zoom', cam2.zoom ?? 1);
+      // Rotation is optional in many scenes.
+      if (Number.isFinite(Number(cam2.rotation)) && Number(cam2.rotation) !== 0) addNumAttr(parts, 'rotation', cam2.rotation);
+      addNumAttr(parts, 'width', cam2.width ?? 1920);
+      addNumAttr(parts, 'height', cam2.height ?? 1080);
+      lines.push(`    <Camera ${parts.join(' ')} />`);
+      lines.push('');
+    }
+
+    const cam3 = /** @type {any} */ (this._sceneCamera3D || null);
+    if (cam3) {
+      /** @type {string[]} */
+      const parts = [];
+      addAttr(parts, 'name', cam3.name || 'Camera3D');
+      addNumAttr(parts, 'x', cam3.position?.x);
+      addNumAttr(parts, 'y', cam3.position?.y);
+      addNumAttr(parts, 'z', cam3.position?.z);
+      addNumAttr(parts, 'targetX', cam3.target?.x);
+      addNumAttr(parts, 'targetY', cam3.target?.y);
+      addNumAttr(parts, 'targetZ', cam3.target?.z);
+      if (Number.isFinite(Number(cam3.fovY))) addNumAttr(parts, 'fovY', cam3.fovY);
+      if (Number.isFinite(Number(cam3.near))) addNumAttr(parts, 'near', cam3.near);
+      if (Number.isFinite(Number(cam3.far))) addNumAttr(parts, 'far', cam3.far);
+      lines.push(`    <Camera3D ${parts.join(' ')} />`);
+      lines.push('');
+    }
+
+    // Optional font declarations (if loaded via <Font> support).
+    const fonts = /** @type {any[]} */ (Array.isArray(sceneAny.fonts) ? sceneAny.fonts : []);
+    if (fonts.length > 0) {
+      for (const f of fonts) {
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'family', f?.family);
+        addAttr(parts, 'src', f?.src);
+        if (parts.length > 0) lines.push(`    <Font ${parts.join(' ')} />`);
+      }
+      lines.push('');
+    }
+
+    // Optional mesh/material declarations (top-level <Mesh/> and <Material/> tags).
+    const meshesXml = /** @type {any[]} */ (Array.isArray(sceneAny._meshXml) ? sceneAny._meshXml : []);
+    if (meshesXml.length > 0) {
+      for (const m of meshesXml) {
+        if (!m) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'name', m.name);
+        // Preserve authoring: if source is present, write it; else write type.
+        if (m.source) addAttr(parts, 'source', m.source);
+        else if (m.type) addAttr(parts, 'type', m.type);
+        if (m.color) addAttr(parts, 'color', m.color);
+        const p = m.params;
+        if (p && typeof p === 'object') {
+          for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
+            if (p[k] === undefined || p[k] === null || p[k] === '') continue;
+            addNumAttr(parts, k, p[k]);
+          }
+        }
+        if (parts.length > 0) lines.push(`    <Mesh ${parts.join(' ')} />`);
+      }
+      lines.push('');
+    }
+
+    const materialsXml = /** @type {any[]} */ (Array.isArray(sceneAny._materialXml) ? sceneAny._materialXml : []);
+    if (materialsXml.length > 0) {
+      for (const m of materialsXml) {
+        if (!m) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'name', m.name);
+        if (m.source) {
+          addAttr(parts, 'source', m.source);
+          lines.push(`    <Material ${parts.join(' ')} />`);
+          continue;
+        }
+
+        // Inline material definition: save only non-empty values.
+        addAttr(parts, 'baseColorFactor', m.baseColorFactor);
+        addAttr(parts, 'metallicFactor', m.metallicFactor);
+        addAttr(parts, 'roughnessFactor', m.roughnessFactor);
+        addAttr(parts, 'normalScale', m.normalScale);
+        addAttr(parts, 'aoStrength', m.aoStrength);
+        addAttr(parts, 'emissiveFactor', m.emissiveFactor);
+        addAttr(parts, 'alphaMode', m.alphaMode);
+        addAttr(parts, 'alphaCutoff', m.alphaCutoff);
+
+        addAttr(parts, 'baseColorTexture', m.baseColorTexture);
+        addAttr(parts, 'metallicTexture', m.metallicTexture);
+        addAttr(parts, 'roughnessTexture', m.roughnessTexture);
+        addAttr(parts, 'normalTexture', m.normalTexture);
+        addAttr(parts, 'aoTexture', m.aoTexture);
+        addAttr(parts, 'emissiveTexture', m.emissiveTexture);
+        addAttr(parts, 'alphaTexture', m.alphaTexture);
+
+        if (parts.length > 0) lines.push(`    <Material ${parts.join(' ')} />`);
+      }
+      lines.push('');
+    }
+
+    const skyboxXml = /** @type {any} */ (sceneAny._skyboxXml || null);
+    if (skyboxXml) {
+      /** @type {string[]} */
+      const parts = [];
+      if (skyboxXml.color) addAttr(parts, 'color', skyboxXml.color);
+      if (skyboxXml.source) addAttr(parts, 'source', skyboxXml.source);
+      if (skyboxXml.equirectangular) addAttr(parts, 'equirectangular', 'true');
+      if (skyboxXml.right) addAttr(parts, 'right', skyboxXml.right);
+      if (skyboxXml.left) addAttr(parts, 'left', skyboxXml.left);
+      if (skyboxXml.top) addAttr(parts, 'top', skyboxXml.top);
+      if (skyboxXml.bottom) addAttr(parts, 'bottom', skyboxXml.bottom);
+      if (skyboxXml.front) addAttr(parts, 'front', skyboxXml.front);
+      if (skyboxXml.back) addAttr(parts, 'back', skyboxXml.back);
+      if (parts.length > 0) {
+        lines.push(`    <Skybox ${parts.join(' ')} />`);
+        lines.push('');
+      }
+    }
+
+    // Use loader-preserved ordering when available.
+    const ordered = Array.isArray(sceneAny._sourceOrder) ? sceneAny._sourceOrder : null;
+    const objsFallback = [];
+    if (!ordered) {
+      if (Array.isArray(scene.objects)) objsFallback.push(...scene.objects);
+      if (Array.isArray(scene.audio)) objsFallback.push(...scene.audio);
+      if (Array.isArray(scene.lights)) objsFallback.push(...scene.lights);
+    }
+    const toWrite = ordered || objsFallback;
+
+    for (const o of toWrite) {
+      if (!o) continue;
+      // Cameras are emitted from authored state above.
+      const cn = String(o?.constructor?.name || '');
+      if (cn === 'Camera' || cn === 'Camera3D') continue;
+      const block = this._serializeNodeXml(o, 1);
+      if (block) lines.push(block);
+    }
+
+    lines.push(`</Scene>`);
+    // Ensure trailing newline.
+    return lines.filter((l, i, arr) => {
+      // Keep intentional blank lines but avoid multiple blanks at end.
+      if (l !== '') return true;
+      // allow blank if next is non-blank and not last
+      return i < arr.length - 1 && arr[i + 1] !== '';
+    }).join('\n') + '\n';
+  },
+
+  /**
+   * @param {any} obj
+   * @param {number} indentLevel
+   * @returns {string|null}
+   */
+  _serializeNodeXml(obj, indentLevel) {
+    const indent = '    '.repeat(Math.max(0, indentLevel));
+    /** @param {any} v */
+    const esc = (v) => this._xmlEscapeAttr(v);
+    /**
+     * @param {string[]} parts
+     * @param {string} k
+     * @param {any} v
+     * @param {{ allowEmpty?: boolean }=} opts
+     */
+    const addAttr = (parts, k, v, opts = {}) => {
+      const allowEmpty = !!opts.allowEmpty;
+      if (v === undefined || v === null) return;
+      const s = String(v);
+      if (!allowEmpty && s === '') return;
+      parts.push(`${k}="${esc(s)}"`);
+    };
+    /** @param {string[]} parts @param {string} k @param {any} v */
+    const addNumAttr = (parts, k, v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return;
+      parts.push(`${k}="${esc(String(n))}"`);
+    };
+    /** @param {string[]} parts @param {string} k @param {any} v */
+    const addBoolAttr = (parts, k, v) => {
+      if (v === undefined || v === null) return;
+      parts.push(`${k}="${v ? 'true' : 'false'}"`);
+    };
+    /** @param {string[]} parts @param {any} o */
+    const addCommon = (parts, o) => {
+      addAttr(parts, 'name', o?.name);
+
+      // Active is capitalized in loader.
+      if (Object.prototype.hasOwnProperty.call(o, 'active') && o.active === false) {
+        addAttr(parts, 'Active', 'false');
+      }
+
+      // followCamera special handling: store x/y as base offsets.
+      if (Object.prototype.hasOwnProperty.call(o, 'followCamera') && o.followCamera === true) {
+        addBoolAttr(parts, 'followCamera', true);
+      }
+
+      // Layer
+      if (Object.prototype.hasOwnProperty.call(o, 'layer')) {
+        const lv = Number(o.layer);
+        if (Number.isFinite(lv)) addNumAttr(parts, 'layer', lv);
+      }
+
+      // Opacity (author-facing): 0..1, derived from Sprite transparency (0..255)
+      if (typeof o?.transparency === 'number' && Number.isFinite(o.transparency) && o.transparency !== 255) {
+        const op = Math.max(0, Math.min(1, Number(o.transparency) / 255));
+        // Keep clean integers like 0/1, else keep a few decimals.
+        const s = (op === 0 || op === 1) ? String(op) : String(Math.round(op * 1000000) / 1000000);
+        addAttr(parts, 'opacity', s);
+      }
+    };
+
+    const ctor = String(obj?.constructor?.name || '');
+
+    // ClickableArea
+    if (ctor === 'ClickableArea' || (obj && obj.width === null && obj.height === null && typeof obj.onClick !== 'undefined')) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      if (Number.isFinite(Number(obj.x)) && Number(obj.x) !== 0) addNumAttr(parts, 'x', obj.x);
+      if (Number.isFinite(Number(obj.y)) && Number(obj.y) !== 0) addNumAttr(parts, 'y', obj.y);
+      if (obj.width !== null && obj.width !== undefined) addNumAttr(parts, 'width', obj.width);
+      if (obj.height !== null && obj.height !== undefined) addNumAttr(parts, 'height', obj.height);
+      return `${indent}<ClickableArea ${parts.join(' ')} />`;
+    }
+
+    // Audio
+    if (ctor === 'Audio' || (obj && Object.prototype.hasOwnProperty.call(obj, 'autoplay') && Object.prototype.hasOwnProperty.call(obj, 'stopOnSceneChange') && typeof obj.play === 'function')) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      addAttr(parts, 'src', obj.src);
+      addBoolAttr(parts, 'loop', !!obj.loop);
+      addBoolAttr(parts, 'autoplay', !!obj.autoplay);
+      if (Number.isFinite(Number(obj.volume)) && Number(obj.volume) !== 1) addNumAttr(parts, 'volume', obj.volume);
+      if (Object.prototype.hasOwnProperty.call(obj, 'stopOnSceneChange') && obj.stopOnSceneChange === false) {
+        addBoolAttr(parts, 'stopOnSceneChange', false);
+      }
+      return `${indent}<Audio ${parts.join(' ')} />`;
+    }
+
+    // Lights
+    if (obj && obj.isLight) {
+      /** @type {string[]} */
+      const parts = [];
+      addAttr(parts, 'name', obj.name);
+
+      // Color: store as #RRGGBB for readability when possible.
+      const c = obj.color;
+      if (Array.isArray(c) && c.length >= 3) {
+        const r = Math.max(0, Math.min(255, Math.round((Number(c[0]) || 0) * 255)));
+        const g = Math.max(0, Math.min(255, Math.round((Number(c[1]) || 0) * 255)));
+        const b = Math.max(0, Math.min(255, Math.round((Number(c[2]) || 0) * 255)));
+        /** @param {number} n */
+        const toHex2 = (n) => n.toString(16).padStart(2, '0');
+        addAttr(parts, 'color', `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`);
+      }
+      if (Number.isFinite(Number(obj.intensity))) addNumAttr(parts, 'intensity', obj.intensity);
+
+      if (ctor === 'DirectionalLight') {
+        if (Array.isArray(obj.direction) && obj.direction.length >= 3) {
+          addAttr(parts, 'direction', `${obj.direction[0]},${obj.direction[1]},${obj.direction[2]}`);
+        }
+        return `${indent}<DirectionalLight ${parts.join(' ')} />`;
+      }
+      if (ctor === 'PointLight') {
+        if (Array.isArray(obj.position) && obj.position.length >= 3) {
+          addNumAttr(parts, 'x', obj.position[0]);
+          addNumAttr(parts, 'y', obj.position[1]);
+          addNumAttr(parts, 'z', obj.position[2]);
+        }
+        if (Number.isFinite(Number(obj.range)) && Number(obj.range) !== 0) addNumAttr(parts, 'range', obj.range);
+        return `${indent}<PointLight ${parts.join(' ')} />`;
+      }
+      if (ctor === 'SpotLight') {
+        if (Array.isArray(obj.position) && obj.position.length >= 3) {
+          addNumAttr(parts, 'x', obj.position[0]);
+          addNumAttr(parts, 'y', obj.position[1]);
+          addNumAttr(parts, 'z', obj.position[2]);
+        }
+        if (Array.isArray(obj.direction) && obj.direction.length >= 3) {
+          addAttr(parts, 'direction', `${obj.direction[0]},${obj.direction[1]},${obj.direction[2]}`);
+        }
+        if (Number.isFinite(Number(obj.range)) && Number(obj.range) !== 0) addNumAttr(parts, 'range', obj.range);
+        if (Number.isFinite(Number(obj.innerAngleDeg))) addNumAttr(parts, 'innerAngleDeg', obj.innerAngleDeg);
+        if (Number.isFinite(Number(obj.outerAngleDeg))) addNumAttr(parts, 'outerAngleDeg', obj.outerAngleDeg);
+        return `${indent}<SpotLight ${parts.join(' ')} />`;
+      }
+    }
+
+    // MeshNode
+    if (ctor === 'MeshNode' || (obj && obj.renderLayer === 0 && typeof obj.draw3D === 'function')) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      addNumAttr(parts, 'x', obj.x);
+      addNumAttr(parts, 'y', obj.y);
+      addNumAttr(parts, 'z', obj.z);
+      addNumAttr(parts, 'scaleX', obj.scaleX);
+      addNumAttr(parts, 'scaleY', obj.scaleY);
+      addNumAttr(parts, 'scaleZ', obj.scaleZ);
+      addNumAttr(parts, 'rotX', obj.rotX);
+      addNumAttr(parts, 'rotY', obj.rotY);
+      addNumAttr(parts, 'rotZ', obj.rotZ);
+      addAttr(parts, 'source', obj.source || obj.mesh || 'Cube');
+
+      // Preserve material name even if the loader resolved it to an instance.
+      const matName = (typeof obj.materialName === 'string' && obj.materialName)
+        ? obj.materialName
+        : ((typeof obj.material === 'string' && obj.material) ? obj.material : '');
+      if (matName) addAttr(parts, 'material', matName);
+
+      // Optional per-node color.
+      if (Array.isArray(obj.color) && obj.color.length >= 3) {
+        const r = Math.max(0, Math.min(255, Math.round((Number(obj.color[0]) || 0) * 255)));
+        const g = Math.max(0, Math.min(255, Math.round((Number(obj.color[1]) || 0) * 255)));
+        const b = Math.max(0, Math.min(255, Math.round((Number(obj.color[2]) || 0) * 255)));
+        /** @param {number} n */
+        const toHex2 = (n) => n.toString(16).padStart(2, '0');
+        addAttr(parts, 'color', `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`);
+      }
+
+      // Optional primitive params (only meaningful for direct primitive meshes).
+      const p = obj?.meshDefinition?.params;
+      if (p && typeof p === 'object') {
+        for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
+          if (p[k] === undefined || p[k] === null || p[k] === '') continue;
+          addNumAttr(parts, k, p[k]);
+        }
+      }
+      return `${indent}<MeshNode ${parts.join(' ')} />`;
+    }
+
+    // Text
+    if (ctor === 'Text' || (obj && (typeof obj.textColor === 'string' || typeof obj.textContent === 'string') && typeof obj.updateTexture === 'function')) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      // followCamera: save base offsets if available.
+      if (obj.followCamera) {
+        addNumAttr(parts, 'x', Number.isFinite(Number(obj.baseX)) ? obj.baseX : obj.x);
+        addNumAttr(parts, 'y', Number.isFinite(Number(obj.baseY)) ? obj.baseY : obj.y);
+      } else {
+        addNumAttr(parts, 'x', obj.x);
+        addNumAttr(parts, 'y', obj.y);
+      }
+      addAttr(parts, 'text', (typeof obj.text === 'string') ? obj.text : obj.textContent);
+      addNumAttr(parts, 'fontSize', obj.fontSize ?? obj._fontSize);
+      addAttr(parts, 'fontFamily', obj._fontFamily || obj.fontFamily);
+      addAttr(parts, 'color', obj.textColor || obj._textColor);
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      if (children.length === 0) {
+        return `${indent}<Text ${parts.join(' ')} />`;
+      }
+
+      const childBlocks = [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childBlocks.push(b);
+      }
+      if (childBlocks.length === 0) {
+        return `${indent}<Text ${parts.join(' ')} />`;
+      }
+      return `${indent}<Text ${parts.join(' ')}>\n${childBlocks.join('\n')}\n${indent}</Text>`;
+    }
+
+    // AnimatedSprite
+    if (this._isAnimatedSprite(obj)) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      // followCamera: save base offsets if available.
+      if (obj.followCamera) {
+        addNumAttr(parts, 'x', Number.isFinite(Number(obj.baseX)) ? obj.baseX : obj.x);
+        addNumAttr(parts, 'y', Number.isFinite(Number(obj.baseY)) ? obj.baseY : obj.y);
+      } else {
+        addNumAttr(parts, 'x', obj.x);
+        addNumAttr(parts, 'y', obj.y);
+      }
+      addNumAttr(parts, 'width', obj.width);
+      addNumAttr(parts, 'height', obj.height);
+      addNumAttr(parts, 'frameWidth', obj.frameWidth);
+      addNumAttr(parts, 'frameHeight', obj.frameHeight);
+      addAttr(parts, 'imageSrc', obj.imageSrc ?? obj.textureKey ?? '', { allowEmpty: true });
+
+      const childLines = [];
+      if (obj.animations instanceof Map) {
+        for (const [name, anim] of obj.animations.entries()) {
+          if (!name || !anim) continue;
+          /** @type {string[]} */
+          const aParts = [];
+          addAttr(aParts, 'name', name);
+          const frames = Array.isArray(anim._frameKeys) ? anim._frameKeys : anim.frames;
+          if (Array.isArray(frames)) {
+            const s = frames.map(f => String(f).trim()).filter(Boolean).join(', ');
+            addAttr(aParts, 'frames', s);
+          }
+          addNumAttr(aParts, 'speed', anim.fps ?? anim.speed ?? 10);
+          addBoolAttr(aParts, 'loop', (anim.loop !== false));
+          addBoolAttr(aParts, 'autoplay', !!anim.autoplay);
+          childLines.push(`${indent}    <Animation ${aParts.join(' ')} />`);
+        }
+      }
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childLines.push(b);
+      }
+
+      if (childLines.length === 0) {
+        return `${indent}<AnimatedSprite ${parts.join(' ')} />`;
+      }
+      return `${indent}<AnimatedSprite ${parts.join(' ')}>\n${childLines.join('\n')}\n${indent}</AnimatedSprite>`;
+    }
+
+    // Sprite (generic)
+    if (ctor === 'Sprite' || (obj && typeof obj.x === 'number' && typeof obj.y === 'number' && typeof obj.width === 'number' && typeof obj.height === 'number' && (('textureKey' in obj) || ('imageSrc' in obj)))) {
+      /** @type {string[]} */
+      const parts = [];
+      addCommon(parts, obj);
+      if (obj.followCamera) {
+        addNumAttr(parts, 'x', Number.isFinite(Number(obj.baseX)) ? obj.baseX : obj.x);
+        addNumAttr(parts, 'y', Number.isFinite(Number(obj.baseY)) ? obj.baseY : obj.y);
+      } else {
+        addNumAttr(parts, 'x', obj.x);
+        addNumAttr(parts, 'y', obj.y);
+      }
+      addNumAttr(parts, 'width', obj.width);
+      addNumAttr(parts, 'height', obj.height);
+      addAttr(parts, 'imageSrc', obj.imageSrc ?? obj.textureKey ?? '', { allowEmpty: true });
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      if (children.length === 0) {
+        return `${indent}<Sprite ${parts.join(' ')} />`;
+      }
+      const childBlocks = [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childBlocks.push(b);
+      }
+      if (childBlocks.length === 0) {
+        return `${indent}<Sprite ${parts.join(' ')} />`;
+      }
+      return `${indent}<Sprite ${parts.join(' ')}>\n${childBlocks.join('\n')}\n${indent}</Sprite>`;
+    }
+
+    // Unknown node: skip for now.
+    return null;
+  },
+
+  /** @param {any} v */
+  _xmlEscapeAttr(v) {
+    return String(v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
   },
 
   _openAbout() {
@@ -1225,6 +1813,46 @@ const game = {
     requestResize();
   },
 
+  /**
+   * Re-sync the WebGL viewport after opening a scene.
+   * This handles cases where UI/layout changes (tree/inspector) settle a frame later,
+   * which can otherwise leave the letterboxed viewport offset.
+   * @param {Renderer} renderer
+   */
+  _requestViewportSync(renderer) {
+    const r = renderer;
+    const canvas = /** @type {HTMLCanvasElement | null} */ (document.getElementById('gameCanvas'));
+    if (!r || !canvas) return;
+
+    let attempts = 0;
+    let lastW = -1;
+    let lastH = -1;
+
+    const step = () => {
+      attempts++;
+      const w = canvas.clientWidth | 0;
+      const h = canvas.clientHeight | 0;
+
+      // If the canvas is layout-driven and currently has no size, wait until the next frame.
+      if (r.respectCssSize && (w <= 0 || h <= 0)) {
+        if (attempts < 10) requestAnimationFrame(step);
+        return;
+      }
+
+      // Apply resize/viewport math and keep camera logical size in sync.
+      r.resizeCanvas();
+      this._syncActiveCameraSizes();
+
+      // If the canvas size is still changing due to layout, run a couple more passes.
+      const changed = (w !== lastW || h !== lastH);
+      lastW = w;
+      lastH = h;
+      if (attempts < 3 && changed) requestAnimationFrame(step);
+    };
+
+    requestAnimationFrame(step);
+  },
+
   _syncActiveCameraSizes() {
     const r = this._renderer;
     const scene = this.currentScene;
@@ -1243,6 +1871,43 @@ const game = {
       const h = hasAuthoredSize ? ah : (r.targetHeight || 0);
       cam2.setSize(w, h);
     }
+  },
+
+  _freezeAnimatedSpritesOnSceneOpen() {
+    const scene = this.currentScene;
+    if (!scene || !Array.isArray(scene.objects)) return;
+
+    /** @param {any} o */
+    const visit = (o) => {
+      if (!o) return;
+
+      if (this._isAnimatedSprite(o) && (o.animations instanceof Map) && o.animations.size > 0) {
+        // Pick a stable default animation.
+        let name = (typeof o.currentAnimationName === 'string' && o.currentAnimationName) ? o.currentAnimationName : '';
+        if (!name || !o.animations.has(name)) {
+          for (const k of o.animations.keys()) { name = k; break; }
+        }
+
+        if (name && o.animations.has(name)) {
+          const anim = o.animations.get(name);
+          o.currentAnimationName = name;
+          o.currentAnimation = anim;
+          o.currentFrameIndex = 0;
+          o.timer = 0;
+          o.isPlaying = false;
+          if (anim) {
+            o.loop = !!anim.loop;
+            o.fps = Number(anim.fps) || o.fps;
+          }
+        }
+      }
+
+      if (Array.isArray(o.children)) {
+        for (const c of o.children) visit(c);
+      }
+    };
+
+    for (const o of scene.objects) visit(o);
   },
 
   /** @param {any} cam2 @param {any|null|undefined} sceneCam2 */
@@ -1422,6 +2087,10 @@ const game = {
 
     this._ensureEditorCameras();
 
+    // Editor: don't autoplay AnimatedSprites when opening scenes.
+    // Keep them on their default animation's first frame until explicitly played.
+    this._freezeAnimatedSpritesOnSceneOpen();
+
     // Ensure viewport resolution doesn't change due to scene camera zoom or editor heuristics.
     if (renderer && typeof renderer.setRenderScale === 'function') {
       renderer.setRenderScale(1.0);
@@ -1434,6 +2103,9 @@ const game = {
 
     this.rebuildTree();
     this.rebuildInspector();
+
+    // Final pass after UI/layout updates settle.
+    this._requestViewportSync(renderer);
   },
 
   _ensureEditorCameras() {
@@ -1485,6 +2157,19 @@ const game = {
       }
     }
 
+    // When opening a scene, initialize the editor camera transform from the authored scene camera
+    // so the viewport isn't visually offset compared to the game.
+    if (this._sceneCamera2D && this._editorCamera2D) {
+      // @ts-ignore
+      this._editorCamera2D.x = Number(this._sceneCamera2D.x) || 0;
+      // @ts-ignore
+      this._editorCamera2D.y = Number(this._sceneCamera2D.y) || 0;
+      // @ts-ignore
+      this._editorCamera2D.zoom = Math.max(0.0001, Number(this._sceneCamera2D.zoom) || 1);
+      // @ts-ignore
+      this._editorCamera2D.rotation = Number(this._sceneCamera2D.rotation) || 0;
+    }
+
     if (!this._editorCamera3D) {
       const cam3 = new Camera3D();
       // @ts-ignore - scenes often treat cameras as named objects
@@ -1507,6 +2192,9 @@ const game = {
     this._usingEditorCamera3D = true;
 
     this._syncActiveCameraSizes();
+
+    // Recompute viewport with the updated camera/aspect settings.
+    this._requestViewportSync(r);
   },
 
   /** @param {import("../../Fluxion/Core/Camera3D.js").default} cam3 */
@@ -1713,27 +2401,94 @@ const game = {
     tree.innerHTML = "";
 
     const scene = this.currentScene;
-    if (!scene || !Array.isArray(scene.objects)) return;
+    if (!scene) return;
 
-    /** @param {any} obj */
-    const addItem = (obj) => {
-      const div = document.createElement("div");
-      div.className = "treeItem" + (obj === this.selected ? " selected" : "");
-      const name = obj?.name ? String(obj.name) : obj?.constructor?.name || "(unnamed)";
-      div.textContent = name;
-      div.addEventListener("click", () => {
-        this.selected = obj;
+    /** @typedef {{ obj:any, depth:number, label:string }} TreeEntry */
+    /** @type {TreeEntry[]} */
+    const entries = [];
+
+    /** @param {any} obj @param {string} fallback */
+    const nameOf = (obj, fallback) => {
+      if (!obj) return fallback;
+      if (typeof obj.__xmlTag === 'string') {
+        const tag = String(obj.__xmlTag);
+        if (tag === 'Font') {
+          const fam = String(obj.family || '').trim();
+          return fam ? `Font: ${fam}` : 'Font';
+        }
+        if (tag === 'Mesh') {
+          const n = String(obj.name || '').trim();
+          return n ? `Mesh: ${n}` : 'Mesh';
+        }
+        if (tag === 'Material') {
+          const n = String(obj.name || '').trim();
+          return n ? `Material: ${n}` : 'Material';
+        }
+        if (tag === 'Skybox') return 'Skybox';
+        return tag;
+      }
+      const n = obj?.name ? String(obj.name) : '';
+      if (n) return n;
+      return obj?.constructor?.name || fallback;
+    };
+
+    /** @param {any} obj @param {number} depth */
+    const addNodeRecursive = (obj, depth) => {
+      if (!obj) return;
+      entries.push({ obj, depth, label: nameOf(obj, '(node)') });
+      const kids = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      for (const ch of kids) addNodeRecursive(ch, depth + 1);
+    };
+
+    const sceneAny = /** @type {any} */ (scene);
+
+    // XML resources / scene-level declarations
+    if (sceneAny._skyboxXml) entries.push({ obj: sceneAny._skyboxXml, depth: 0, label: nameOf(sceneAny._skyboxXml, 'Skybox') });
+    const fonts = Array.isArray(sceneAny.fonts) ? sceneAny.fonts : [];
+    for (const f of fonts) entries.push({ obj: f, depth: 0, label: nameOf(f, 'Font') });
+    const meshes = Array.isArray(sceneAny._meshXml) ? sceneAny._meshXml : [];
+    for (const m of meshes) entries.push({ obj: m, depth: 0, label: nameOf(m, 'Mesh') });
+    const materials = Array.isArray(sceneAny._materialXml) ? sceneAny._materialXml : [];
+    for (const m of materials) entries.push({ obj: m, depth: 0, label: nameOf(m, 'Material') });
+
+    // Cameras
+    if (scene.camera) entries.push({ obj: scene.camera, depth: 0, label: `Camera: ${nameOf(scene.camera, 'Camera')}` });
+    if (scene.camera3D) entries.push({ obj: scene.camera3D, depth: 0, label: `Camera3D: ${nameOf(scene.camera3D, 'Camera3D')}` });
+
+    // Audio & lights
+    if (Array.isArray(scene.audio)) {
+      for (const a of scene.audio) {
+        if (!a) continue;
+        entries.push({ obj: a, depth: 0, label: `Audio: ${nameOf(a, 'Audio')}` });
+      }
+    }
+    if (Array.isArray(scene.lights)) {
+      for (const l of scene.lights) {
+        if (!l) continue;
+        entries.push({ obj: l, depth: 0, label: `Light: ${nameOf(l, 'Light')}` });
+      }
+    }
+
+    // Scene objects (and children), filtered by mode.
+    if (Array.isArray(scene.objects)) {
+      for (const obj of scene.objects) {
+        if (!obj) continue;
+        if (!this._matchesMode(obj)) continue;
+        addNodeRecursive(obj, 0);
+      }
+    }
+
+    for (const e of entries) {
+      const div = document.createElement('div');
+      div.className = 'treeItem' + (e.obj === this.selected ? ' selected' : '');
+      div.textContent = e.label;
+      div.style.paddingLeft = `${10 + Math.max(0, e.depth) * 14}px`;
+      div.addEventListener('click', () => {
+        this.selected = e.obj;
         this.rebuildTree();
         this.rebuildInspector();
       });
       tree.appendChild(div);
-    };
-
-    // Keep it simple: top-level objects only (filtered by mode).
-    for (const obj of scene.objects) {
-      if (!obj) continue;
-      if (!this._matchesMode(obj)) continue;
-      addItem(obj);
     }
   },
 
@@ -1746,6 +2501,23 @@ const game = {
     if (!isEditor) return false;
 
     return !!(el.closest('#inspectorCommon') || el.closest('#inspectorTransform'));
+  },
+
+  /** @param {number} seconds */
+  _blockInspectorAutoRefresh(seconds) {
+    const s = Number(seconds);
+    if (!Number.isFinite(s) || s <= 0) return;
+    this._inspectorRefreshBlockT = Math.max(this._inspectorRefreshBlockT || 0, s);
+  },
+
+  _setupInspectorInteractionGuards() {
+    const panel = /** @type {HTMLElement|null} */ (document.getElementById('rightPanel'));
+    if (!panel) return;
+
+    // Capture so we run before any bubbling handlers.
+    panel.addEventListener('pointerdown', () => this._blockInspectorAutoRefresh(0.35), true);
+    panel.addEventListener('mousedown', () => this._blockInspectorAutoRefresh(0.35), true);
+    panel.addEventListener('wheel', () => this._blockInspectorAutoRefresh(0.25), { capture: true, passive: true });
   },
 
   rebuildInspector() {
@@ -1761,10 +2533,129 @@ const game = {
 
     if (!obj) return;
 
+    // Editor XML stubs (scene-level declarations)
+    if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') {
+      this._rebuildInspectorXmlStub(obj);
+      return;
+    }
+
     // Common fields
     this._addReadonly(ui.common, "type", obj.constructor?.name || "unknown");
+    this._addStringWith(ui.common, 'name', obj, 'name', () => this.rebuildTree());
     this._addToggle(ui.common, "active", obj, "active");
     this._addToggle(ui.common, "visible", obj, "visible");
+
+    // followCamera + base offsets
+    if (obj && typeof obj === 'object' && ('followCamera' in obj)) {
+      this._addToggle(ui.common, 'followCamera', obj, 'followCamera');
+      if (obj.followCamera) {
+        this._addNumber(ui.common, 'baseX', obj, 'baseX');
+        this._addNumber(ui.common, 'baseY', obj, 'baseY');
+      }
+    }
+
+    // Shared 2D tint opacity (Sprite-style). Expose as 0..1.
+    if (obj && typeof obj.setTransparency === 'function' && (('transparency' in obj) || ('color' in obj))) {
+      this._addOpacity01(ui.common, 'opacity', obj);
+    }
+
+    // Text fill color (CSS string) is separate from Sprite tint.
+    if (obj && (typeof obj.textColor === 'string' || typeof obj._textColor === 'string')) {
+      this._addCssColor(ui.common, 'color', obj, 'textColor');
+    }
+
+    // Sprite / AnimatedSprite image source
+    if (obj && typeof obj === 'object' && ('imageSrc' in obj)) {
+      this._addStringWith(ui.common, 'imageSrc', obj, 'imageSrc', () => {
+        // Best-effort live reload for sprites.
+        try {
+          if (typeof obj.loadTexture === 'function') {
+            // Release previous cached texture if renderer supports it.
+            const key = obj.textureKey;
+            if (key && obj.renderer?.releaseTexture) {
+              try { obj.renderer.releaseTexture(key); } catch {}
+            }
+            obj.texture = null;
+            obj.textureKey = null;
+            obj.loadTexture(String(obj.imageSrc || ''));
+          }
+        } catch {}
+      });
+    }
+
+    // AnimatedSprite frame size
+    if (this._isAnimatedSprite(obj)) {
+      if (typeof obj.frameWidth === 'number') this._addNumber(ui.common, 'frameWidth', obj, 'frameWidth');
+      if (typeof obj.frameHeight === 'number') this._addNumber(ui.common, 'frameHeight', obj, 'frameHeight');
+    }
+
+    // Text fields
+    if (obj && obj.constructor?.name === 'Text') {
+      this._addString(ui.common, 'text', obj, 'text');
+      this._addNumber(ui.common, 'fontSize', obj, 'fontSize');
+      this._addTextFontFamily(ui.common, 'fontFamily', obj);
+    }
+
+    // ClickableArea nullable width/height (XML allows omission)
+    if (obj && obj.constructor?.name === 'ClickableArea') {
+      this._addNullableNumber(ui.common, 'width', obj, 'width');
+      this._addNullableNumber(ui.common, 'height', obj, 'height');
+    }
+
+    // Audio fields
+    if (obj && obj.constructor?.name === 'Audio') {
+      this._addStringWith(ui.common, 'src', obj, 'src', () => {
+        // Note: src is authoring-only here; live reload requires scene URL resolution.
+      });
+      this._addToggle(ui.common, 'loop', obj, 'loop');
+      this._addToggle(ui.common, 'autoplay', obj, 'autoplay');
+      this._addToggle(ui.common, 'stopOnSceneChange', obj, 'stopOnSceneChange');
+      this._addNumber(ui.common, 'volume', obj, 'volume');
+    }
+
+    // MeshNode fields
+    if (obj && obj.constructor?.name === 'MeshNode') {
+      this._addString(ui.common, 'source', obj, 'source');
+      // Preserve authoring name even if material resolves to an instance.
+      if (!('materialName' in obj) && typeof obj.material === 'string') {
+        obj.materialName = obj.material;
+      }
+      this._addStringWith(ui.common, 'material', obj, 'materialName', () => {
+        try { obj.material = String(obj.materialName || ''); } catch {}
+      });
+      if (Array.isArray(obj.color) && obj.color.length >= 3) {
+        this._addColorVec3(ui.common, 'color', obj.color);
+      }
+
+      // Primitive params when meshDefinition is inline
+      const p = obj?.meshDefinition?.params;
+      if (p && typeof p === 'object') {
+        for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
+          if (!(k in p)) continue;
+          this._addNumber(ui.common, `param.${k}`, p, k);
+        }
+      }
+    }
+
+    // Lights
+    if (obj && obj.isLight) {
+      if (Array.isArray(obj.color) && obj.color.length >= 3) this._addColorVec3(ui.common, 'color', obj.color);
+      if (typeof obj.intensity === 'number') this._addNumber(ui.common, 'intensity', obj, 'intensity');
+      if (obj.constructor?.name === 'DirectionalLight') {
+        if (Array.isArray(obj.direction) && obj.direction.length >= 3) this._addVec3Array(ui.common, 'direction', obj.direction, { normalize: true });
+      }
+      if (obj.constructor?.name === 'PointLight') {
+        if (Array.isArray(obj.position) && obj.position.length >= 3) this._addVec3Array(ui.common, 'position', obj.position);
+        if (typeof obj.range === 'number') this._addNumber(ui.common, 'range', obj, 'range');
+      }
+      if (obj.constructor?.name === 'SpotLight') {
+        if (Array.isArray(obj.position) && obj.position.length >= 3) this._addVec3Array(ui.common, 'position', obj.position);
+        if (Array.isArray(obj.direction) && obj.direction.length >= 3) this._addVec3Array(ui.common, 'direction', obj.direction, { normalize: true });
+        if (typeof obj.range === 'number') this._addNumber(ui.common, 'range', obj, 'range');
+        if (typeof obj.innerAngleDeg === 'number') this._addNumber(ui.common, 'innerAngleDeg', obj, 'innerAngleDeg');
+        if (typeof obj.outerAngleDeg === 'number') this._addNumber(ui.common, 'outerAngleDeg', obj, 'outerAngleDeg');
+      }
+    }
 
     if (this._isAnimatedSprite(obj)) {
       const btn = document.createElement('button');
@@ -1777,8 +2668,8 @@ const game = {
 
     // Transform fields (mode-specific)
     if (this.mode === '2d') {
-      if (typeof obj.x === "number") this._addNumber(ui.transform, "x", obj, "x");
-      if (typeof obj.y === "number") this._addNumber(ui.transform, "y", obj, "y");
+      if (typeof obj.x === "number") this._addNumber2DPos(ui.transform, "x", obj, "x");
+      if (typeof obj.y === "number") this._addNumber2DPos(ui.transform, "y", obj, "y");
       this._add2DLayerField(ui.transform, obj);
       if (typeof obj.width === "number") this._addNumber(ui.transform, "width", obj, "width");
       if (typeof obj.height === "number") this._addNumber(ui.transform, "height", obj, "height");
@@ -1806,6 +2697,97 @@ const game = {
         this._addNumber(ui.transform, "target.z", obj.target, "z");
       }
     }
+  },
+
+  /**
+   * Inspector for scene-level XML stub entries like <Font/>, <Mesh/>, <Material/>, <Skybox/>.
+   * @param {any} stub
+   */
+  _rebuildInspectorXmlStub(stub) {
+    if (ui.common) ui.common.innerHTML = '';
+    if (ui.transform) ui.transform.innerHTML = '';
+
+    this._addReadonly(ui.common, 'type', String(stub.__xmlTag || 'XML'));
+
+    const tag = String(stub.__xmlTag || '');
+    if (tag === 'Font') {
+      this._addStringWith(ui.common, 'family', stub, 'family', () => this.rebuildTree());
+      this._addString(ui.common, 'src', stub, 'src');
+      return;
+    }
+    if (tag === 'Mesh') {
+      this._addStringWith(ui.common, 'name', stub, 'name', () => this.rebuildTree());
+      this._addString(ui.common, 'source', stub, 'source');
+      this._addString(ui.common, 'type', stub, 'type');
+      this._addCssColor(ui.common, 'color', stub, 'color');
+
+      if (!stub.params || typeof stub.params !== 'object') stub.params = {};
+      const p = stub.params;
+      for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
+        this._addNullableNumber(ui.common, k, p, k);
+      }
+      return;
+    }
+    if (tag === 'Material') {
+      this._addStringWith(ui.common, 'name', stub, 'name', () => this.rebuildTree());
+      this._addString(ui.common, 'source', stub, 'source');
+      this._addCssColor(ui.common, 'baseColorFactor', stub, 'baseColorFactor');
+      this._addString(ui.common, 'metallicFactor', stub, 'metallicFactor');
+      this._addString(ui.common, 'roughnessFactor', stub, 'roughnessFactor');
+      this._addString(ui.common, 'normalScale', stub, 'normalScale');
+      this._addString(ui.common, 'aoStrength', stub, 'aoStrength');
+      this._addCssColor(ui.common, 'emissiveFactor', stub, 'emissiveFactor');
+      this._addString(ui.common, 'alphaMode', stub, 'alphaMode');
+      this._addString(ui.common, 'alphaCutoff', stub, 'alphaCutoff');
+      this._addString(ui.common, 'baseColorTexture', stub, 'baseColorTexture');
+      this._addString(ui.common, 'metallicTexture', stub, 'metallicTexture');
+      this._addString(ui.common, 'roughnessTexture', stub, 'roughnessTexture');
+      this._addString(ui.common, 'normalTexture', stub, 'normalTexture');
+      this._addString(ui.common, 'aoTexture', stub, 'aoTexture');
+      this._addString(ui.common, 'emissiveTexture', stub, 'emissiveTexture');
+      this._addString(ui.common, 'alphaTexture', stub, 'alphaTexture');
+      return;
+    }
+    if (tag === 'Skybox') {
+      this._addCssColor(ui.common, 'color', stub, 'color');
+      this._addString(ui.common, 'source', stub, 'source');
+      this._addToggle(ui.common, 'equirectangular', stub, 'equirectangular');
+      this._addString(ui.common, 'right', stub, 'right');
+      this._addString(ui.common, 'left', stub, 'left');
+      this._addString(ui.common, 'top', stub, 'top');
+      this._addString(ui.common, 'bottom', stub, 'bottom');
+      this._addString(ui.common, 'front', stub, 'front');
+      this._addString(ui.common, 'back', stub, 'back');
+      return;
+    }
+  },
+
+  /**
+   * 2D position editing: if followCamera is enabled, write baseX/baseY instead of x/y
+   * to avoid the engine overwriting the value next frame.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {'x'|'y'} key
+   */
+  _addNumber2DPos(container, label, obj, key) {
+    if (!obj) return;
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.01';
+    input.value = String(Number(obj[key]) || 0);
+    const apply = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      if (obj.followCamera) {
+        if (key === 'x') obj.baseX = v;
+        if (key === 'y') obj.baseY = v;
+      }
+      obj[key] = v;
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
+    this._addField(container, label, input);
   },
 
   /**
@@ -1942,6 +2924,383 @@ const game = {
     };
     input.addEventListener("input", apply);
     input.addEventListener("change", apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   */
+  _addString(container, label, obj, key) {
+    if (!obj) return;
+    if (!(key in obj)) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = String(obj[key] ?? '');
+    const apply = () => {
+      obj[key] = String(input.value ?? '');
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * Like _addString but also runs a callback after applying.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   * @param {() => void} onChanged
+   */
+  _addStringWith(container, label, obj, key, onChanged) {
+    if (!obj) return;
+    if (!(key in obj)) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = String(obj[key] ?? '');
+    const apply = () => {
+      obj[key] = String(input.value ?? '');
+      try { onChanged(); } catch {}
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * Nullable number input: allows clearing the field to represent "unset".
+   * - For ClickableArea width/height, empty sets to null.
+   * - For plain objects (e.g. mesh params), empty deletes the key.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   */
+  _addNullableNumber(container, label, obj, key) {
+    if (!obj) return;
+
+    const isClickableArea = !!(obj?.constructor?.name === 'ClickableArea');
+    const emptyMode = isClickableArea ? 'null' : 'delete';
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.01';
+    input.placeholder = emptyMode === 'null' ? '(inherit)' : '(unset)';
+
+    const cur = obj[key];
+    if (cur === null || cur === undefined || cur === '') input.value = '';
+    else input.value = String(Number(cur));
+
+    const apply = () => {
+      const raw = String(input.value ?? '').trim();
+      if (!raw) {
+        if (emptyMode === 'null') {
+          obj[key] = null;
+        } else {
+          try { delete obj[key]; } catch { obj[key] = undefined; }
+        }
+        return;
+      }
+      const v = Number(raw);
+      if (!Number.isFinite(v)) return;
+      obj[key] = v;
+    };
+
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * Edit a vec3 stored as an array [x,y,z].
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {number[]} arr
+   * @param {{ normalize?: boolean }=} opts
+   */
+  _addVec3Array(container, label, arr, opts = {}) {
+    if (!container || !Array.isArray(arr) || arr.length < 3) return;
+    const normalize = !!opts.normalize;
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.gap = '6px';
+
+    /** @param {number} i */
+    const make = (i) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '0.01';
+      input.value = String(Number(arr[i]) || 0);
+      input.style.width = '80px';
+      const apply = () => {
+        const v = Number(input.value);
+        if (!Number.isFinite(v)) return;
+        arr[i] = v;
+        if (normalize) {
+          const x = Number(arr[0]) || 0;
+          const y = Number(arr[1]) || 0;
+          const z = Number(arr[2]) || 0;
+          const len = Math.hypot(x, y, z) || 1;
+          arr[0] = x / len;
+          arr[1] = y / len;
+          arr[2] = z / len;
+          // keep inputs in sync
+          inputs[0].value = String(arr[0]);
+          inputs[1].value = String(arr[1]);
+          inputs[2].value = String(arr[2]);
+        }
+      };
+      input.addEventListener('input', apply);
+      input.addEventListener('change', apply);
+      return input;
+    };
+
+    /** @type {HTMLInputElement[]} */
+    const inputs = [make(0), make(1), make(2)];
+    for (const i of inputs) wrap.appendChild(i);
+    this._addField(container, label, wrap);
+  },
+
+  /**
+   * Edit an RGB vec3 (0..1) stored as an array [r,g,b].
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {number[]} arr
+   */
+  _addColorVec3(container, label, arr) {
+    if (!container || !Array.isArray(arr) || arr.length < 3) return;
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.gap = '8px';
+    wrap.style.alignItems = 'center';
+
+    const picker = document.createElement('input');
+    picker.type = 'color';
+    picker.style.width = '44px';
+    picker.style.height = '34px';
+    picker.style.padding = '0';
+    picker.style.border = '1px solid var(--border)';
+    picker.style.borderRadius = '6px';
+    picker.style.background = 'transparent';
+
+    const r = Math.max(0, Math.min(1, Number(arr[0]) || 0));
+    const g = Math.max(0, Math.min(1, Number(arr[1]) || 0));
+    const b = Math.max(0, Math.min(1, Number(arr[2]) || 0));
+    picker.value = this._rgb01ToHex(r, g, b);
+
+    picker.addEventListener('input', () => {
+      const rgb = this._hexToRgb01(String(picker.value || ''));
+      if (!rgb) return;
+      arr[0] = rgb[0];
+      arr[1] = rgb[1];
+      arr[2] = rgb[2];
+    });
+
+    wrap.appendChild(picker);
+    this._addField(container, label, wrap);
+  },
+
+  /** @param {number} r @param {number} g @param {number} b */
+  _rgb01ToHex(r, g, b) {
+    const R = Math.max(0, Math.min(255, Math.round((Number(r) || 0) * 255)));
+    const G = Math.max(0, Math.min(255, Math.round((Number(g) || 0) * 255)));
+    const B = Math.max(0, Math.min(255, Math.round((Number(b) || 0) * 255)));
+    /** @param {number} n */
+    const toHex2 = (n) => n.toString(16).padStart(2, '0');
+    return `#${toHex2(R)}${toHex2(G)}${toHex2(B)}`;
+  },
+
+  /** @param {string} hex @returns {[number,number,number] | null} */
+  _hexToRgb01(hex) {
+    const s = String(hex || '').trim();
+    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
+    if (!m6) return null;
+    const h = m6[1];
+    const r = parseInt(h.slice(0, 2), 16) / 255;
+    const g = parseInt(h.slice(2, 4), 16) / 255;
+    const b = parseInt(h.slice(4, 6), 16) / 255;
+    return [r, g, b];
+  },
+
+  /**
+   * Text font family is stored as _fontFamily (no public setter).
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} textObj
+   */
+  _addTextFontFamily(container, label, textObj) {
+    if (!textObj || typeof textObj !== 'object') return;
+    if (!('_fontFamily' in textObj)) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    // @ts-ignore
+    input.value = String(textObj._fontFamily ?? '');
+    const apply = () => {
+      // @ts-ignore
+      textObj._fontFamily = String(input.value ?? '');
+      if (typeof textObj.updateTexture === 'function') {
+        try { textObj.updateTexture(); } catch {}
+      }
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * Better color input: color picker (when possible) + text field (always).
+   * Stores the color as a CSS string (e.g. "#ff00aa", "white", "rgba(...)"),
+   * which matches Text.textColor.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   */
+  _addCssColor(container, label, obj, key) {
+    if (!obj) return;
+    if (!(key in obj)) return;
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.gap = '8px';
+    wrap.style.alignItems = 'center';
+
+    const picker = document.createElement('input');
+    picker.type = 'color';
+    picker.style.width = '44px';
+    picker.style.height = '34px';
+    picker.style.padding = '0';
+    picker.style.border = '1px solid var(--border)';
+    picker.style.borderRadius = '6px';
+    picker.style.background = 'transparent';
+
+    const text = document.createElement('input');
+    text.type = 'text';
+    text.placeholder = 'e.g. #ff00aa, white, rgba(255,0,0,0.5)';
+    text.value = String(obj[key] ?? '');
+
+    const syncPickerFromText = () => {
+      const v = String(text.value ?? '').trim();
+      const hex = this._cssColorToHex(v);
+      if (hex) {
+        picker.disabled = false;
+        picker.value = hex;
+      } else {
+        // Keep picker usable but reflect "unknown" by disabling it.
+        picker.disabled = true;
+      }
+    };
+
+    const applyText = () => {
+      obj[key] = String(text.value ?? '');
+      syncPickerFromText();
+    };
+
+    picker.addEventListener('input', () => {
+      // When the user picks a color, prefer storing as hex.
+      const hex = String(picker.value || '').trim();
+      if (hex) {
+        text.value = hex;
+        obj[key] = hex;
+      }
+    });
+
+    text.addEventListener('input', applyText);
+    text.addEventListener('change', applyText);
+
+    // Initial sync
+    syncPickerFromText();
+
+    wrap.appendChild(picker);
+    wrap.appendChild(text);
+    this._addField(container, label, wrap);
+  },
+
+  /**
+   * Convert a CSS color string to #RRGGBB if possible.
+   * Returns null if the browser can't parse it.
+   * @param {string} css
+   * @returns {string|null}
+   */
+  _cssColorToHex(css) {
+    const s = String(css || '').trim();
+    if (!s) return null;
+
+    // Fast path for #rgb/#rrggbb
+    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
+    if (m3) {
+      const r = m3[1][0];
+      const g = m3[1][1];
+      const b = m3[1][2];
+      return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+    }
+    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
+    if (m6) return `#${m6[1]}`.toLowerCase();
+    // Ignore alpha in picker; keep RGB.
+    const m8 = /^#([0-9a-fA-F]{8})$/.exec(s);
+    if (m8) return `#${m8[1].slice(0, 6)}`.toLowerCase();
+
+    // Use the browser parser for named colors / rgb() / hsl(), etc.
+    // This works in Electron/DOM.
+    try {
+      const el = document.createElement('div');
+      el.style.color = '';
+      el.style.color = s;
+      // If invalid, most browsers keep it empty.
+      if (!el.style.color) return null;
+
+      // Attach briefly to ensure computedStyle is available in all engines.
+      el.style.display = 'none';
+      document.body.appendChild(el);
+      const computed = getComputedStyle(el).color || '';
+      el.remove();
+
+      // computed is typically "rgb(r,g,b)" or "rgba(r,g,b,a)"
+      const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)$/.exec(computed.trim());
+      if (!m) return null;
+      const r = Math.max(0, Math.min(255, parseInt(m[1], 10) || 0));
+      const g = Math.max(0, Math.min(255, parseInt(m[2], 10) || 0));
+      const b = Math.max(0, Math.min(255, parseInt(m[3], 10) || 0));
+      /** @param {number} n */
+      const toHex2 = (n) => n.toString(16).padStart(2, '0');
+      return `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`;
+    } catch {
+      return null;
+    }
+  },
+
+  /**
+   * Opacity shown as 0..1 but stored as Sprite transparency 0..255.
+   * Works for Sprite-derived nodes (including Text).
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   */
+  _addOpacity01(container, label, obj) {
+    if (!obj || typeof obj.setTransparency !== 'function') return;
+    const t = Number(obj.transparency);
+    const opacity = Number.isFinite(t) ? Math.max(0, Math.min(1, t / 255)) : 1;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '0.01';
+    input.min = '0';
+    input.max = '1';
+    input.value = String(opacity);
+
+    const apply = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      const clamped = Math.max(0, Math.min(1, v));
+      obj.setTransparency(clamped * 255);
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
     this._addField(container, label, input);
   },
 
@@ -2350,7 +3709,15 @@ const game = {
     }
 
     // Keep inspector values reasonably fresh, but don’t fight user input while typing.
-    if (this.selected && !this._isEditingInspector()) {
+    if (this._inspectorRefreshBlockT > 0) {
+      this._inspectorRefreshBlockT = Math.max(0, this._inspectorRefreshBlockT - dt);
+    }
+
+    if (this._lastSceneSaveOkT > 0) {
+      this._lastSceneSaveOkT = Math.max(0, this._lastSceneSaveOkT - dt);
+    }
+
+    if (this.selected && !this._isEditingInspector() && this._inspectorRefreshBlockT <= 0) {
       this._inspectorAutoRefreshT += dt;
       if (this._inspectorAutoRefreshT >= 0.2) {
         this._inspectorAutoRefreshT = 0;

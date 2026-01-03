@@ -75,12 +75,62 @@ export default class SceneLoader {
 
             const children = Array.from(sceneNode.children);
 
+            // Preserve the original top-level element order for editor save/round-trip.
+            // (Cameras/audio/lights are not stored in scene.objects, so order would otherwise be lost.)
+            // @ts-ignore - editor-only metadata
+            scene._sourceOrder = [];
+
+            // Font declarations (optional): <Font family="..." src="..." />
+            // Loads a font via the FontFace API so Text nodes can reference it by family.
+            // Also stores the declaration on the Scene for round-tripping.
+            for (const child of children) {
+                if (child.tagName !== 'Font') continue;
+                const family = (child.getAttribute('family') || '').trim();
+                const srcRaw = (child.getAttribute('src') || child.getAttribute('source') || '').trim();
+                if (!family || !srcRaw) continue;
+
+                const src = SceneLoader._resolveSceneResourceUrl(srcRaw, baseUrl);
+                // @ts-ignore - editor-only
+                if (!Array.isArray(scene.fonts)) scene.fonts = [];
+                // @ts-ignore
+                scene.fonts.push({ __xmlTag: 'Font', family, src: srcRaw });
+
+                // Best-effort load; failures should not abort scene load.
+                try {
+                    if (typeof FontFace !== 'undefined' && typeof document !== 'undefined' && document.fonts) {
+                        const face = new FontFace(family, `url(${src})`);
+                        const p = face.load().then((loaded) => {
+                            try { document.fonts.add(loaded); } catch {}
+                            return true;
+                        }).catch(() => false);
+                        renderer?.trackAssetPromise?.(p);
+                        await p;
+                    }
+                } catch (e) {
+                    console.warn('Failed to load font', { family, src }, e);
+                }
+            }
+
             // Pass 1: register named mesh resources (top-level <Mesh ... />) and materials
             for (const child of children) {
                 if (child.tagName === 'Mesh') {
                     const name = child.getAttribute('name') || '';
                     const type = child.getAttribute('type') || child.getAttribute('source') || child.getAttribute('mesh') || '';
                     if (!name) continue;
+
+                    // Preserve mesh declaration for editor round-tripping.
+                    // @ts-ignore - editor-only metadata
+                    if (!Array.isArray(scene._meshXml)) scene._meshXml = [];
+                    // @ts-ignore
+                    scene._meshXml.push({
+                        __xmlTag: 'Mesh',
+                        name,
+                        // Keep raw authoring attributes when present.
+                        source: child.getAttribute('source') || child.getAttribute('src') || '',
+                        type: child.getAttribute('type') || '',
+                        color: child.getAttribute('color') || '',
+                        params: this._parseMeshParams(child),
+                    });
 
                     // Check if this is a GLTF file
                     const source = child.getAttribute('source') || child.getAttribute('src') || '';
@@ -195,6 +245,38 @@ export default class SceneLoader {
                     const name = child.getAttribute('name') || '';
                     if (!name) continue;
 
+                    // Preserve material declaration for editor round-tripping.
+                    // @ts-ignore - editor-only metadata
+                    if (!Array.isArray(scene._materialXml)) scene._materialXml = [];
+                    /** @type {any} */
+                    const matXml = { __xmlTag: 'Material', name };
+
+                    // Raw authoring attributes (keep strings so we can re-save faithfully)
+                    const srcAttr = child.getAttribute('source') || child.getAttribute('src') || '';
+                    if (srcAttr) {
+                        matXml.source = srcAttr;
+                    } else {
+                        matXml.baseColorFactor = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color') || '';
+                        matXml.metallicFactor = child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '';
+                        matXml.roughnessFactor = child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '';
+                        matXml.normalScale = child.getAttribute('normalScale') || '';
+                        matXml.aoStrength = child.getAttribute('aoStrength') || '';
+                        matXml.emissiveFactor = child.getAttribute('emissiveFactor') || child.getAttribute('emissive') || '';
+                        matXml.alphaMode = child.getAttribute('alphaMode') || '';
+                        matXml.alphaCutoff = child.getAttribute('alphaCutoff') || '';
+
+                        matXml.baseColorTexture = child.getAttribute('baseColorTexture') || child.getAttribute('albedoTexture') || '';
+                        matXml.metallicTexture = child.getAttribute('metallicTexture') || '';
+                        matXml.roughnessTexture = child.getAttribute('roughnessTexture') || '';
+                        matXml.normalTexture = child.getAttribute('normalTexture') || '';
+                        matXml.aoTexture = child.getAttribute('aoTexture') || child.getAttribute('occlusionTexture') || child.getAttribute('occlusion') || '';
+                        matXml.emissiveTexture = child.getAttribute('emissiveTexture') || '';
+                        matXml.alphaTexture = child.getAttribute('alphaTexture') || '';
+                    }
+
+                    // @ts-ignore
+                    scene._materialXml.push(matXml);
+
                     const src = child.getAttribute('source') || child.getAttribute('src') || null;
                     if (src) {
                         // Resolve relative to the scene URL (not the caller page).
@@ -306,9 +388,24 @@ export default class SceneLoader {
             for (const child of children) {
                 if (child.tagName === 'Mesh') continue;
                 if (child.tagName === 'Material') continue;
+                if (child.tagName === 'Font') continue;
 
                 // Handle Skybox separately (needs renderer reference)
                 if (child.tagName === 'Skybox') {
+                    // Preserve skybox declaration for editor round-tripping.
+                    // @ts-ignore - editor-only metadata
+                    scene._skyboxXml = {
+                        __xmlTag: 'Skybox',
+                        color: child.getAttribute('color') || '',
+                        source: child.getAttribute('source') || child.getAttribute('src') || '',
+                        equirectangular: (child.getAttribute('equirectangular') || '').toLowerCase() === 'true',
+                        right: child.getAttribute('right') || '',
+                        left: child.getAttribute('left') || '',
+                        top: child.getAttribute('top') || '',
+                        bottom: child.getAttribute('bottom') || '',
+                        front: child.getAttribute('front') || '',
+                        back: child.getAttribute('back') || '',
+                    };
                     const skybox = await this.parseSkybox(child, renderer, url);
                     if (skybox && renderer) {
                         renderer.setSkybox(skybox);
@@ -318,6 +415,10 @@ export default class SceneLoader {
 
                 const obj = await this.parseObject(child, renderer, baseUrl);
                 if (!obj) continue;
+
+                // Preserve source order for editor round-tripping.
+                // @ts-ignore
+                scene._sourceOrder.push(obj);
 
                 if (obj instanceof Camera) {
                     scene.setCamera(obj);
@@ -488,6 +589,12 @@ export default class SceneLoader {
             child.source = parent.source;
             child.setMeshDefinition({ type: 'gltf', mesh: part.mesh, material: part.material || '__gltf_default__' });
 
+            // Preserve original authoring hint name for editor round-tripping.
+            const hintName = child.meshDefinition?.material;
+            if (typeof hintName === 'string') {
+                child.materialName = hintName;
+            }
+
             // Apply override material if present; else auto-apply the per-part hint.
             if (overrideMaterial) {
                 child.setMaterial(overrideMaterial);
@@ -633,6 +740,8 @@ export default class SceneLoader {
             
             const sprite = new Sprite(renderer, src, x, y, w, h);
             sprite.name = getString("name");
+            // Preserve XML attribute for editor tooling / debugging.
+            sprite.imageSrc = src;
             obj = sprite;
         }
         
@@ -648,6 +757,8 @@ export default class SceneLoader {
             
             const sprite = new AnimatedSprite(renderer, src, x, y, w, h, fw, fh);
             sprite.name = getString("name");
+            // Preserve XML attribute for editor tooling / debugging.
+            sprite.imageSrc = src;
             
             let firstAnimName = null;
             let hasAutoplay = false;
@@ -674,12 +785,18 @@ export default class SceneLoader {
                             frames = framesStr.split(',').map(s => parseInt(s.trim()));
                         }
 
+                        const autoplay = animNode.getAttribute("autoplay") === "true";
                         sprite.addAnimation(name, frames, fps, loop);
+                        // Preserve autoplay flag for editor round-tripping.
+                        try {
+                            const a = sprite.animations.get(name);
+                            if (a) a.autoplay = autoplay;
+                        } catch {}
                         
                         if (!firstAnimName) firstAnimName = name;
 
                         // Auto play if specified
-                        if (animNode.getAttribute("autoplay") === "true") {
+                        if (autoplay) {
                             sprite.play(name);
                             hasAutoplay = true;
                         }
@@ -759,6 +876,8 @@ export default class SceneLoader {
 
             const audio = new Audio();
             audio.name = getString("name");
+            // Preserve XML attribute for editor tooling / debugging.
+            audio.src = src;
             if (src) {
                 // Track + await audio decoding so loading flows (e.g., splash) can wait.
                 const p = audio.load(src);
@@ -839,6 +958,8 @@ export default class SceneLoader {
             n.source = getString("source", getString("mesh", "Cube"));
             // Material reference by name: will be resolved by the loader pass.
             n.material = getString('material', getString('mat', ''));
+            // Preserve original authoring name even if the loader later resolves to a Material instance.
+            n.materialName = n.material;
 
             if (node.hasAttribute('color')) {
                 n.color = this._parseColor(node.getAttribute('color'));
@@ -945,7 +1066,9 @@ export default class SceneLoader {
         // Common properties
         if (obj) {
             if (node.hasAttribute("opacity")) {
-                const opacity = parseFloat(node.getAttribute("opacity"));
+                const raw = parseFloat(node.getAttribute("opacity"));
+                // Author-facing: allow opacity 0..1, but keep backward-compat with 0..255.
+                const opacity = (!Number.isNaN(raw) && raw <= 1.0) ? (raw * 255.0) : raw;
                 if (typeof obj.setTransparency === 'function') {
                     obj.setTransparency(opacity);
                 }

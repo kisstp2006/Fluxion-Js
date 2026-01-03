@@ -122,7 +122,8 @@ body {
 }
 
 .modal.modalWide {
-  width: 820px;
+  width: 1040px;
+  max-width: calc(100vw - 40px);
 }
 
 .animEditor {
@@ -140,7 +141,7 @@ body {
   border-radius: 8px;
   background: #1a1a1a;
   overflow: auto;
-  max-height: 360px;
+  max-height: 520px;
 }
 
 .animListItem {
@@ -169,7 +170,7 @@ body {
   background: #1a1a1a;
   padding: 10px;
   overflow: auto;
-  max-height: 360px;
+  max-height: 520px;
   gap: 8px;
 }
 
@@ -244,7 +245,7 @@ body {
 
 .framePreviewBox {
   width: 100%;
-  height: 220px;
+  height: 320px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #0f0f0f;
