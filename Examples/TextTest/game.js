@@ -2,6 +2,8 @@
 
 import { Engine, SceneLoader, Input } from "../../Fluxion/index.js";
 
+const SCENE_URL = new URL('./scene2.xml', import.meta.url).toString();
+
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 /** @typedef {import("../../Fluxion/Core/Scene.js").default} Scene */
 /** @typedef {import("../../Fluxion/Core/ClickableArea.js").default} ClickableArea */
@@ -26,7 +28,7 @@ const game = {
 
     /** @param {Renderer} renderer */
     async init(renderer) {
-        const scene = await SceneLoader.load("scene2.xml", renderer);
+        const scene = await SceneLoader.load(SCENE_URL, renderer);
         this.currentScene = scene;
         console.log("Scene loaded:", scene);
 

@@ -126,6 +126,141 @@ body {
   max-width: calc(100vw - 40px);
 }
 
+.modal.modalProject {
+  width: 560px;
+  max-width: calc(100vw - 40px);
+}
+
+.modal.modalNode {
+  width: 860px;
+  max-width: calc(100vw - 40px);
+}
+
+.nodeDialog {
+  height: 520px;
+  max-height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nodeSearchRow {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.nodeLabel {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.nodeMain {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 10px;
+}
+
+.nodeSide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nodeSideTitle,
+.nodeMatchesTitle,
+.nodeDescTitle {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.nodeSideList {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1a1a1a;
+  overflow: auto;
+  height: 160px;
+}
+
+.nodeSideSection:last-child .nodeSideList {
+  flex: 1;
+  height: auto;
+  min-height: 160px;
+}
+
+.nodeMatchesPane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.nodeMatchesList {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1a1a1a;
+  overflow: auto;
+}
+
+.nodeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #262626;
+  cursor: pointer;
+  user-select: none;
+}
+
+.nodeRow:hover {
+  background: #202020;
+}
+
+.nodeRow.selected {
+  background: rgba(79, 193, 255, 0.18);
+  outline: 1px solid rgba(79, 193, 255, 0.35);
+}
+
+.nodeRowIcon {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.10);
+  flex: 0 0 auto;
+}
+
+.nodeRowCaret {
+  width: 12px;
+  text-align: center;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+
+.nodeRowLabel {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nodeDescription {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #1a1a1a;
+  padding: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 56px;
+}
+
 .animEditor {
   display: grid;
   grid-template-columns: 260px 1fr;

@@ -33,6 +33,10 @@ export class DirectionalLight {
    */
   constructor(opts = {}) {
     this.isLight = true;
+    /** @type {'2D'|'3D'} */
+    this.nodeType = '3D';
+    /** @type {string} */
+    this.category = 'light';
     this.type = LightType.Directional;
     this.name = opts.name || 'DirectionalLight';
     this.direction = _norm3(_toVec3(opts.direction, [0.5, -1, 0.3]));
@@ -50,6 +54,10 @@ export class PointLight {
    */
   constructor(opts = {}) {
     this.isLight = true;
+    /** @type {'2D'|'3D'} */
+    this.nodeType = '3D';
+    /** @type {string} */
+    this.category = 'light';
     this.type = LightType.Point;
     this.name = opts.name || 'PointLight';
     this.position = _toVec3(opts.position, [0, 2, 0]);
@@ -80,6 +88,10 @@ export class SpotLight {
    */
   constructor(opts = {}) {
     this.isLight = true;
+    /** @type {'2D'|'3D'} */
+    this.nodeType = '3D';
+    /** @type {string} */
+    this.category = 'light';
     this.type = LightType.Spot;
     this.name = opts.name || 'SpotLight';
     this.position = _toVec3(opts.position, [0, 2, 0]);

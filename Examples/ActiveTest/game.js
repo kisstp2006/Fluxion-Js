@@ -1,15 +1,24 @@
+// @ts-check
+
 import { Engine, SceneLoader, Input } from "../../Fluxion/index.js";
+
+const SCENE_URL = new URL('./scene.xml', import.meta.url).toString();
 
 const game = {
     currentScene: null,
     timer: 0,
+    _alwaysActive: null,
+    _blinking: null,
 
     async init(renderer) {
-        this.currentScene = await SceneLoader.load("scene.xml", renderer);
+        this.currentScene = await SceneLoader.load(SCENE_URL, renderer);
         
         // Setup the click handler for the third sprite
         const clickArea = this.currentScene.getObjectByName("ScreenClick");
         const toggleSprite = this.currentScene.getObjectByName("ClickToggleSprite");
+
+        this._alwaysActive = this.currentScene.getObjectByName("AlwaysActive");
+        this._blinking = this.currentScene.getObjectByName("BlinkingSprite");
         
         if (clickArea && toggleSprite) {
             clickArea.onClick = () => {
@@ -24,22 +33,19 @@ const game = {
             this.currentScene.update(dt);
             
             // 1. Rotate the "Always Active" sprite
-            const alwaysActive = this.currentScene.getObjectByName("AlwaysActive");
-            if (alwaysActive) {
-                // We don't have a rotation property on Sprite in the base code I saw earlier, 
-                // but let's assume we might want to animate it or just move it.
-                // If Sprite doesn't have rotation, we can scale it to pulse.
-                alwaysActive.width = 150 + Math.sin(Date.now() / 500) * 20;
-                alwaysActive.height = 150 + Math.sin(Date.now() / 500) * 20;
+            if (this._alwaysActive) {
+                // Pulse size to demonstrate per-frame updates.
+                const pulse = 150 + Math.sin(Date.now() / 500) * 20;
+                this._alwaysActive.width = pulse;
+                this._alwaysActive.height = pulse;
             }
 
             // 2. Handle the "Blinking Sprite"
-            const blinking = this.currentScene.getObjectByName("BlinkingSprite");
-            if (blinking) {
+            if (this._blinking) {
                 // Accumulate time
                 this.timer += dt;
                 if (this.timer > 2) { // Every 2 seconds
-                    blinking.active = !blinking.active;
+                    this._blinking.active = !this._blinking.active;
                     this.timer = 0;
                 }
 
@@ -54,9 +60,7 @@ const game = {
                 // Since we are updating x/y here manually, the position WILL change even if invisible,
                 // unless we check active here too.
                 
-                if (blinking.active) {
-                    blinking.y = 300 + Math.sin(Date.now() / 200) * 50;
-                }
+                if (this._blinking.active) this._blinking.y = 300 + Math.sin(Date.now() / 200) * 50;
             }
         }
     },

@@ -9,6 +9,11 @@ class Audio {
    * Creates an instance of Audio.
    */
   constructor() {
+      /** @type {'2D'|'3D'} */
+      this.type = '2D';
+      /** @type {string} */
+      this.category = 'audio';
+
       if (!Audio.audioContext) {
           Audio.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }

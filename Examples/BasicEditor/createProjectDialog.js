@@ -8,6 +8,7 @@
  * @typedef {{
  *  createProjectModal: HTMLDivElement|null,
  *  createProjectNameInput: HTMLInputElement|null,
+ *  createProjectTemplateSelect: HTMLSelectElement|null,
  *  createProjectPathInput: HTMLInputElement|null,
  *  createProjectBrowseBtn: HTMLButtonElement|null,
  *  createProjectOkBtn: HTMLButtonElement|null,
@@ -23,16 +24,17 @@ export function createProjectDialog(opts) {
   const closeMenus = opts.closeMenus || null;
 
   let open = false;
-  /** @type {((v: {name: string, parentDir: string} | null) => void) | null} */
+  /** @type {((v: {name: string, parentDir: string, template: string} | null) => void) | null} */
   let resolve = null;
   let lastParentDir = '';
+  let lastTemplate = 'empty';
   let busy = false;
 
   function isOpen() {
     return open;
   }
 
-  /** @param {{name: string, parentDir: string} | null} v */
+  /** @param {{name: string, parentDir: string, template: string} | null} v */
   function close(v) {
     if (ui.createProjectModal) ui.createProjectModal.hidden = true;
     open = false;
@@ -75,7 +77,10 @@ export function createProjectDialog(opts) {
         parentDir = picked;
       }
 
-      close({ name, parentDir });
+      const template = String(ui.createProjectTemplateSelect?.value || lastTemplate || 'empty').trim() || 'empty';
+      lastTemplate = template;
+
+      close({ name, parentDir, template });
     } finally {
       busy = false;
     }
@@ -83,7 +88,7 @@ export function createProjectDialog(opts) {
 
   /** @param {string} initialName */
   function promptOptions(initialName) {
-    if (!ui.createProjectModal || !ui.createProjectNameInput || !ui.createProjectPathInput) {
+    if (!ui.createProjectModal || !ui.createProjectNameInput || !ui.createProjectPathInput || !ui.createProjectTemplateSelect) {
       alert('Create Project UI is missing.');
       return Promise.resolve(null);
     }
@@ -94,6 +99,7 @@ export function createProjectDialog(opts) {
     ui.createProjectModal.hidden = false;
     ui.createProjectNameInput.value = String(initialName ?? '');
     ui.createProjectPathInput.value = String(lastParentDir || '');
+    ui.createProjectTemplateSelect.value = String(lastTemplate || 'empty');
     ui.createProjectNameInput.focus();
     ui.createProjectNameInput.select();
 
@@ -113,7 +119,7 @@ export function createProjectDialog(opts) {
     const cfg = await promptOptions(initialName);
     if (!cfg) return;
 
-    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name });
+    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name, template: cfg.template });
     if (!res || !res.ok) {
       alert(`Failed to create project: ${res && res.error ? res.error : 'Unknown error'}`);
       return;
@@ -143,6 +149,17 @@ export function createProjectDialog(opts) {
     });
 
     ui.createProjectPathInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        confirm().catch(console.error);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        cancel();
+      }
+    });
+
+    ui.createProjectTemplateSelect?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         confirm().catch(console.error);

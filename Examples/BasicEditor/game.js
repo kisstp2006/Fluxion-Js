@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea } from "../../Fluxion/index.js";
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
@@ -31,10 +31,22 @@ const ui = {
   animSpriteError: /** @type {HTMLDivElement|null} */ (null),
   createProjectModal: /** @type {HTMLDivElement|null} */ (null),
   createProjectNameInput: /** @type {HTMLInputElement|null} */ (null),
+  createProjectTemplateSelect: /** @type {HTMLSelectElement|null} */ (null),
   createProjectPathInput: /** @type {HTMLInputElement|null} */ (null),
   createProjectBrowseBtn: /** @type {HTMLButtonElement|null} */ (null),
   createProjectOkBtn: /** @type {HTMLButtonElement|null} */ (null),
   createProjectCancelBtn: /** @type {HTMLButtonElement|null} */ (null),
+  projectSelectModal: /** @type {HTMLDivElement|null} */ (null),
+  projectSelectCreateBtn: /** @type {HTMLButtonElement|null} */ (null),
+  projectSelectOpenBtn: /** @type {HTMLButtonElement|null} */ (null),
+  projectSelectOpenLegacyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  addNodeModal: /** @type {HTMLDivElement|null} */ (null),
+  addNodeCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  addNodeSearchInput: /** @type {HTMLInputElement|null} */ (null),
+  addNodeFavorites: /** @type {HTMLDivElement|null} */ (null),
+  addNodeRecent: /** @type {HTMLDivElement|null} */ (null),
+  addNodeMatches: /** @type {HTMLDivElement|null} */ (null),
+  addNodeDescription: /** @type {HTMLDivElement|null} */ (null),
   assetUpBtn: /** @type {HTMLButtonElement|null} */ (null),
   assetPath: /** @type {HTMLDivElement|null} */ (null),
   assetFolders: /** @type {HTMLDivElement|null} */ (null),
@@ -119,6 +131,25 @@ const game = {
 
   _aboutOpen: false,
 
+  _projectSelectOpen: false,
+
+  _addNodeOpen: false,
+  _addNodeSearch: '',
+  /** @type {string|null} */
+  _addNodeSelectedId: null,
+  _addNodeExpanded: {
+    Spatial: true,
+    CanvasItem: true,
+    Node2D: true,
+    Control: true,
+  },
+  /** @type {string[]} */
+  _addNodeFavorites: [],
+  /** @type {string[]} */
+  _addNodeRecent: [],
+
+  _defaultSpriteIconUrl: new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString(),
+
   _animSpriteOpen: false,
   /** @type {any|null} */
   _animSpriteTarget: null,
@@ -130,6 +161,12 @@ const game = {
   _animSpritePrevPlayback: null,
 
   _inspectorAutoRefreshT: 0,
+
+  _speakerIconUrl: new URL('../../Fluxion/Icon/Speaker.png', import.meta.url).toString(),
+  /** @type {WebGLTexture|null} */
+  _speakerIconTexture: null,
+  /** @type {Promise<boolean>|null} */
+  _speakerIconLoadPromise: null,
 
   // When the inspector auto-refreshes, it rebuilds DOM. If that happens between
   // pointer down/up, the browser may not fire a click on the original element.
@@ -155,6 +192,10 @@ const game = {
   async init(renderer) {
     this._renderer = renderer;
     this._input = new Input();
+
+    // Best-effort preload for the Audio viewport icon.
+    // (If it isn't ready yet, it will be lazily loaded on first draw.)
+    this._ensureSpeakerIconTexture(renderer);
 
     // Keep the renderer sized to the editor viewport.
     // (Window resize is not enough in editor layouts; panels can affect canvas size.)
@@ -187,10 +228,24 @@ const game = {
     ui.animSpriteError = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteError'));
     ui.createProjectModal = /** @type {HTMLDivElement} */ (document.getElementById("createProjectModal"));
     ui.createProjectNameInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectNameInput"));
+    ui.createProjectTemplateSelect = /** @type {HTMLSelectElement} */ (document.getElementById("createProjectTemplateSelect"));
     ui.createProjectPathInput = /** @type {HTMLInputElement} */ (document.getElementById("createProjectPathInput"));
     ui.createProjectBrowseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectBrowseBtn"));
     ui.createProjectOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectOkBtn"));
     ui.createProjectCancelBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectCancelBtn"));
+
+    ui.projectSelectModal = /** @type {HTMLDivElement} */ (document.getElementById('projectSelectModal'));
+    ui.projectSelectCreateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectCreateBtn'));
+    ui.projectSelectOpenBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectOpenBtn'));
+    ui.projectSelectOpenLegacyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectOpenLegacyBtn'));
+
+    ui.addNodeModal = /** @type {HTMLDivElement} */ (document.getElementById('addNodeModal'));
+    ui.addNodeCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('addNodeCloseBtn'));
+    ui.addNodeSearchInput = /** @type {HTMLInputElement} */ (document.getElementById('addNodeSearchInput'));
+    ui.addNodeFavorites = /** @type {HTMLDivElement} */ (document.getElementById('addNodeFavorites'));
+    ui.addNodeRecent = /** @type {HTMLDivElement} */ (document.getElementById('addNodeRecent'));
+    ui.addNodeMatches = /** @type {HTMLDivElement} */ (document.getElementById('addNodeMatches'));
+    ui.addNodeDescription = /** @type {HTMLDivElement} */ (document.getElementById('addNodeDescription'));
     ui.assetUpBtn = /** @type {HTMLButtonElement} */ (document.getElementById("assetUpBtn"));
     ui.assetPath = /** @type {HTMLDivElement} */ (document.getElementById("assetPath"));
     ui.assetFolders = /** @type {HTMLDivElement} */ (document.getElementById("assetFolders"));
@@ -201,6 +256,10 @@ const game = {
     if (ui.animSpriteModal) ui.animSpriteModal.hidden = true;
     // Ensure Create Project starts closed.
     if (ui.createProjectModal) ui.createProjectModal.hidden = true;
+    // Ensure Project Select starts closed (we open it after initial boot).
+    if (ui.projectSelectModal) ui.projectSelectModal.hidden = true;
+    // Ensure Add Node starts closed.
+    if (ui.addNodeModal) ui.addNodeModal.hidden = true;
 
     this._setupAssetBrowser();
     ui.mode2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode2dBtn"));
@@ -230,6 +289,49 @@ const game = {
       if (e.target === ui.aboutModal) this._closeAbout();
     });
 
+    // Add Node modal close behavior
+    ui.addNodeCloseBtn?.addEventListener('click', () => this._closeAddNode());
+    ui.addNodeModal?.addEventListener('mousedown', (e) => {
+      if (e.target === ui.addNodeModal) this._closeAddNode();
+    });
+    ui.addNodeSearchInput?.addEventListener('input', () => {
+      this._addNodeSearch = String(ui.addNodeSearchInput?.value || '');
+      this._renderAddNodeDialog();
+    });
+    ui.addNodeSearchInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (this._addNodeSelectedId) this._add2DNodeByType(this._addNodeSelectedId);
+      }
+    });
+
+    ui.addNodeMatches?.addEventListener('click', (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const row = t?.closest('[data-node-id]');
+      const id = row?.getAttribute('data-node-id');
+      if (!id) return;
+
+      // Group toggle
+      if (id.startsWith('group:')) {
+        const key = id.slice('group:'.length);
+        // @ts-ignore
+        this._addNodeExpanded[key] = !this._addNodeExpanded[key];
+        this._renderAddNodeDialog();
+        return;
+      }
+
+      this._addNodeSelectedId = id;
+      this._renderAddNodeDialog();
+    });
+
+    ui.addNodeMatches?.addEventListener('dblclick', (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const row = t?.closest('[data-node-id]');
+      const id = row?.getAttribute('data-node-id');
+      if (!id || id.startsWith('group:')) return;
+      this._add2DNodeByType(id);
+    });
+
     // AnimatedSprite modal close behavior
     ui.animSpriteCloseBtn?.addEventListener('click', () => this._closeAnimSpriteEditor());
     ui.animSpriteModal?.addEventListener('mousedown', (e) => {
@@ -249,6 +351,11 @@ const game = {
       if (!text) return;
       this._copyTextToClipboard(text).catch(console.error);
     });
+
+    // Project Select behavior (mandatory - cannot dismiss without choosing/creating)
+    ui.projectSelectCreateBtn?.addEventListener('click', () => this._createAndOpenNewProject().catch(console.error));
+    ui.projectSelectOpenBtn?.addEventListener('click', () => this._openProjectFolderStrict().catch(console.error));
+    ui.projectSelectOpenLegacyBtn?.addEventListener('click', () => this._openLegacyProjectFolder().catch(console.error));
 
     // Create Project dialog
     this._createProjectDialog = createProjectDialog({
@@ -282,6 +389,11 @@ const game = {
         return;
       }
       if (e.key === "Escape") {
+        // Mandatory project selection screen: Escape does nothing.
+        if (this._projectSelectOpen) {
+          e.preventDefault();
+          return;
+        }
         const canvas = this._editorPointerLockCanvas;
         if (canvas && document.pointerLockElement === canvas) {
           e.preventDefault();
@@ -290,6 +402,7 @@ const game = {
         }
         if (this._createProjectDialog?.isOpen()) this._createProjectDialog.cancel();
         else if (this._animSpriteOpen) this._closeAnimSpriteEditor();
+        else if (this._addNodeOpen) this._closeAddNode();
         else if (this._aboutOpen) this._closeAbout();
         else this._closeTopbarMenus();
       }
@@ -307,6 +420,181 @@ const game = {
     this._applyRenderLayers();
 
     await this.loadSelectedScene(renderer);
+
+    // Show the startup project selection screen when the editor launches.
+    this._openProjectSelect();
+  },
+
+  _openProjectSelect() {
+    if (!ui.projectSelectModal) return;
+    this._projectSelectOpen = true;
+    ui.projectSelectModal.hidden = false;
+    ui.projectSelectOpenBtn?.focus();
+  },
+
+  _closeProjectSelect() {
+    if (!ui.projectSelectModal) return;
+    this._projectSelectOpen = false;
+    ui.projectSelectModal.hidden = true;
+  },
+
+  async _createAndOpenNewProject() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.createProject !== 'function' || typeof electronAPI.setWorkspaceRoot !== 'function') {
+      alert('Create Project is only available in the Electron editor.');
+      return;
+    }
+
+    const cfg = await this._createProjectDialog?.promptOptions?.('MyFluxionGame');
+    if (!cfg) return;
+
+    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name, template: cfg.template });
+    if (!res || !res.ok || !res.path) {
+      alert(`Failed to create project: ${res && res.error ? res.error : 'Unknown error'}`);
+      return;
+    }
+
+    const setRes = await electronAPI.setWorkspaceRoot(String(res.path));
+    if (!setRes || !setRes.ok) {
+      alert(`Failed to open project: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
+      return;
+    }
+
+    await this._setAssetBrowserRoot('.');
+    await this._tryLoadProjectMainScene();
+    this._closeProjectSelect();
+  },
+
+  async _openProjectFolderStrict() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.selectFolder !== 'function' || typeof electronAPI.setWorkspaceRoot !== 'function' || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.listProjectDir !== 'function') {
+      alert('Open Project is only available in the Electron editor.');
+      return;
+    }
+
+    const prev = await electronAPI.getWorkspaceRoot();
+    const prevPath = prev && prev.ok && prev.path ? String(prev.path) : null;
+
+    const pick = await electronAPI.selectFolder();
+    if (!pick || !pick.ok || pick.canceled) return;
+    const abs = String(pick.path || '').trim();
+    if (!abs) return;
+
+    const setRes = await electronAPI.setWorkspaceRoot(abs);
+    if (!setRes || !setRes.ok) {
+      alert(`Failed to set workspace root: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
+      return;
+    }
+
+    const rootList = await electronAPI.listProjectDir('.');
+    const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
+      ? /** @type {{ name?: string }[]} */ (rootList.entries)
+      : /** @type {{ name?: string }[]} */ ([]);
+    const hasProjectFile = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
+    if (!hasProjectFile) {
+      // Revert
+      if (prevPath) await electronAPI.setWorkspaceRoot(prevPath);
+      alert('That folder does not look like a Fluxion project (missing fluxion.project.json).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
+      return;
+    }
+
+    await this._setAssetBrowserRoot('.');
+    await this._tryLoadProjectMainScene();
+    this._closeProjectSelect();
+  },
+
+  async _openLegacyProjectFolder() {
+    const ok = await this._openWorkspaceFolder().catch((e) => {
+      console.error(e);
+      return false;
+    });
+    if (!ok) return;
+    // Legacy projects may not have fluxion.project.json; keep the scene as-is.
+    this._closeProjectSelect();
+  },
+
+  async _tryLoadProjectMainScene() {
+    const r = this._renderer;
+    if (!r) return;
+
+    // Best-effort: read fluxion.project.json and load its mainScene.
+    try {
+      const res = await fetch('fluxion://workspace/fluxion.project.json');
+      if (!res.ok) return;
+      const txt = await res.text();
+      const data = JSON.parse(txt);
+      const mainScene = String(data && data.mainScene ? data.mainScene : '').trim();
+      if (!mainScene) return;
+      const clean = mainScene.replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
+      this._scenePath = `fluxion://workspace/${clean}`;
+      await this.loadSelectedScene(r);
+    } catch {
+      // Ignore; user can open a scene manually from the asset browser.
+    }
+  },
+
+  /** @param {Renderer} renderer */
+  _ensureSpeakerIconTexture(renderer) {
+    if (this._speakerIconTexture) return this._speakerIconTexture;
+    if (!renderer) return null;
+
+    const key = String(this._speakerIconUrl || '');
+    if (!key) return null;
+
+    // If already cached, just grab it.
+    const cached = renderer.getCachedTexture?.(key);
+    if (cached) {
+      this._speakerIconTexture = cached;
+      return cached;
+    }
+
+    // Kick off a single load request.
+    if (this._speakerIconLoadPromise) return null;
+
+    const img = new Image();
+    img.decoding = 'async';
+    // Note: When running under Electron with local assets, CORS is typically not an issue,
+    // but setting this keeps browser-hosted runs happier.
+    img.crossOrigin = 'anonymous';
+
+    this._speakerIconLoadPromise = new Promise((resolve) => {
+      img.onload = () => {
+        try {
+          const tex = renderer.createAndAcquireTexture?.(img, key) || null;
+          if (tex) this._speakerIconTexture = tex;
+          resolve(!!tex);
+        } catch (e) {
+          console.warn('Failed to create Speaker icon texture', e);
+          resolve(false);
+        }
+      };
+      img.onerror = () => resolve(false);
+      img.src = key;
+    });
+
+    renderer.trackAssetPromise?.(this._speakerIconLoadPromise);
+    return null;
+  },
+
+  /** @param {Renderer} renderer @param {any} cam2 */
+  _drawAudioIcons2D(renderer, cam2) {
+    const scene = this.currentScene;
+    if (!scene || !Array.isArray(scene.audio) || scene.audio.length === 0) return;
+
+    const tex = this._ensureSpeakerIconTexture(renderer);
+    if (!tex || typeof renderer.drawQuad !== 'function') return;
+
+    const zoom = Math.max(0.0001, Number(cam2?.zoom) || 1);
+    const left = Number(cam2?.x) || 0;
+    const top = Number(cam2?.y) || 0;
+
+    // Keep icon a constant size in screen pixels by scaling with 1/zoom.
+    const iconPx = 22;
+    const size = iconPx / zoom;
+    const padX = 8 / zoom;
+    const padY = 22 / zoom;
+
+    renderer.drawQuad(tex, left + padX, top + padY, size, size, [255, 255, 255, 255]);
   },
 
   _setupAssetBrowser() {
@@ -511,7 +799,7 @@ const game = {
           this._createProjectDialog?.createProjectFromEditor().catch(console.error);
           break;
         case 'file.openProject':
-          this._openWorkspaceFolder().catch(console.error);
+          this._openProjectFolderStrict().catch(console.error);
           break;
         case 'file.openFolder':
           this._openWorkspaceFolder().catch(console.error);
@@ -531,6 +819,9 @@ const game = {
           break;
         case 'scene.focusSelection':
           this.focusSelection();
+          break;
+        case 'scene.addNode':
+          this._openAddNode();
           break;
         case 'view.mode2d':
           this.setMode('2d');
@@ -1123,6 +1414,263 @@ const game = {
     ui.aboutCloseBtn?.focus();
   },
 
+  _openAddNode() {
+    if (!ui.addNodeModal) return;
+    this._addNodeOpen = true;
+    ui.addNodeModal.hidden = false;
+    this._closeTopbarMenus();
+
+    // Reset selection and render the dialog.
+    this._addNodeSelectedId = this._addNodeSelectedId || 'Sprite';
+    this._renderAddNodeDialog();
+    ui.addNodeSearchInput?.focus();
+  },
+
+  _renderAddNodeDialog() {
+    if (!this._addNodeOpen) return;
+    const reg = this._getAddNodeRegistry();
+
+    const q = String(this._addNodeSearch || '').trim().toLowerCase();
+    const filtered = q ? reg.filter(n => n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)) : reg;
+
+    // Sidebar lists (visual only)
+    /** @param {HTMLDivElement|null} el @param {string[]} ids */
+    const renderSideList = (el, ids) => {
+      if (!el) return;
+      el.innerHTML = '';
+      for (const id of ids) {
+        const n = reg.find(x => x.id === id);
+        if (!n) continue;
+        const row = document.createElement('div');
+        row.className = 'nodeRow' + (id === this._addNodeSelectedId ? ' selected' : '');
+        row.setAttribute('data-node-id', id);
+        const icon = document.createElement('div');
+        icon.className = 'nodeRowIcon';
+        const label = document.createElement('div');
+        label.className = 'nodeRowLabel';
+        label.textContent = n.label;
+        row.appendChild(icon);
+        row.appendChild(label);
+        row.addEventListener('click', () => {
+          this._addNodeSelectedId = id;
+          this._renderAddNodeDialog();
+        });
+        row.addEventListener('dblclick', () => this._add2DNodeByType(id));
+        el.appendChild(row);
+      }
+    };
+
+    renderSideList(ui.addNodeFavorites, this._addNodeFavorites);
+    renderSideList(ui.addNodeRecent, this._addNodeRecent);
+
+    // Matches list: Godot-like grouping
+    if (ui.addNodeMatches) {
+      ui.addNodeMatches.innerHTML = '';
+
+      /** @param {string} name @param {number} depth @param {boolean} expanded */
+      const mkGroup = (name, depth, expanded) => {
+        const row = document.createElement('div');
+        row.className = 'nodeRow' + (` depth${depth}`);
+        row.style.paddingLeft = `${10 + depth * 14}px`;
+        row.setAttribute('data-node-id', `group:${name}`);
+        const caret = document.createElement('div');
+        caret.className = 'nodeRowCaret';
+        caret.textContent = expanded ? '▾' : '▸';
+        const icon = document.createElement('div');
+        icon.className = 'nodeRowIcon';
+        const label = document.createElement('div');
+        label.className = 'nodeRowLabel';
+        label.textContent = name;
+        row.appendChild(caret);
+        row.appendChild(icon);
+        row.appendChild(label);
+        return row;
+      };
+
+      /** @param {{id:string,label:string,group:string,description:string}} node @param {number} depth */
+      const mkNode = (node, depth) => {
+        const row = document.createElement('div');
+        row.className = 'nodeRow' + (node.id === this._addNodeSelectedId ? ' selected' : '');
+        row.style.paddingLeft = `${10 + depth * 14}px`;
+        row.setAttribute('data-node-id', node.id);
+        const caret = document.createElement('div');
+        caret.className = 'nodeRowCaret';
+        caret.textContent = '';
+        const icon = document.createElement('div');
+        icon.className = 'nodeRowIcon';
+        const label = document.createElement('div');
+        label.className = 'nodeRowLabel';
+        label.textContent = node.label;
+        row.appendChild(caret);
+        row.appendChild(icon);
+        row.appendChild(label);
+        return row;
+      };
+
+      const expCanvas = !!this._addNodeExpanded.CanvasItem;
+      const expNode2D = !!this._addNodeExpanded.Node2D;
+      const expControl = !!this._addNodeExpanded.Control;
+
+      ui.addNodeMatches.appendChild(mkGroup('CanvasItem', 0, expCanvas));
+
+      if (expCanvas) {
+        ui.addNodeMatches.appendChild(mkGroup('Node2D', 1, expNode2D));
+        if (expNode2D) {
+          for (const n of filtered.filter(x => x.group === 'Node2D')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
+        }
+
+        ui.addNodeMatches.appendChild(mkGroup('Control', 1, expControl));
+        if (expControl) {
+          for (const n of filtered.filter(x => x.group === 'Control')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
+        }
+      }
+    }
+
+    // Description
+    const sel = this._addNodeSelectedId ? reg.find(n => n.id === this._addNodeSelectedId) : null;
+    if (ui.addNodeDescription) {
+      ui.addNodeDescription.textContent = sel ? sel.description : '';
+    }
+  },
+
+  _getAddNodeRegistry() {
+    return [
+      {
+        id: 'Sprite',
+        label: 'Sprite',
+        group: 'Node2D',
+        description: 'Represents a 2D sprite object that can be rendered on the screen.',
+      },
+      {
+        id: 'AnimatedSprite',
+        label: 'AnimatedSprite',
+        group: 'Node2D',
+        description: 'A Sprite that supports animations (sprite sheets or multi-image animations).',
+      },
+      {
+        id: 'ClickableArea',
+        label: 'ClickableArea',
+        group: 'Node2D',
+        description: 'A clickable area that detects mouse interactions (typically attached to a parent Sprite).',
+      },
+      {
+        id: 'Text',
+        label: 'Text',
+        group: 'Control',
+        description: 'Text object rendered to a texture (editable text content, font size, and color).',
+      },
+    ];
+  },
+
+  /** @param {string} type */
+  _add2DNodeByType(type) {
+    const r = this._renderer;
+    const scene = this.currentScene;
+    if (!r || !scene) return;
+
+    // Adding 2D nodes is only really useful in 2D mode (tree filters by mode).
+    if (this.mode !== '2d') this.setMode('2d');
+
+    // Spawn at the current editor camera origin.
+    const cam2 = /** @type {any} */ (this._editorCamera2D || this._sceneCamera2D || null);
+    const spawnX = Number(cam2?.x) || 0;
+    const spawnY = Number(cam2?.y) || 0;
+
+    const iconUrl = String(this._defaultSpriteIconUrl || '').trim();
+
+    /** @param {string} base */
+    const uniqueName = (base) => {
+      const used = new Set();
+      /** @param {any} obj */
+      const addName = (obj) => {
+        const n = obj?.name ? String(obj.name).trim() : '';
+        if (n) used.add(n);
+      };
+      /** @param {any} obj */
+      const visit = (obj) => {
+        if (!obj) return;
+        addName(obj);
+        const kids = Array.isArray(obj.children) ? obj.children : [];
+        for (const ch of kids) visit(ch);
+      };
+      if (Array.isArray(scene.objects)) {
+        for (const o of scene.objects) visit(o);
+      }
+      if (Array.isArray(scene.audio)) {
+        for (const a of scene.audio) addName(a);
+      }
+      const b = String(base || 'Node').trim() || 'Node';
+      if (!used.has(b)) return b;
+      for (let i = 2; i < 1000; i++) {
+        const n = `${b}${i}`;
+        if (!used.has(n)) return n;
+      }
+      return `${b}${Date.now()}`;
+    };
+
+    /** @type {any|null} */
+    let created = null;
+
+    switch (String(type)) {
+      case 'Sprite': {
+        const sp = new Sprite(r, iconUrl, spawnX, spawnY, 96, 96);
+        // @ts-ignore
+        sp.name = uniqueName('Sprite');
+        scene.add(sp);
+        created = sp;
+        break;
+      }
+      case 'AnimatedSprite': {
+        const sp = new AnimatedSprite(r, iconUrl, spawnX, spawnY, 96, 96);
+        // @ts-ignore
+        sp.name = uniqueName('AnimatedSprite');
+        scene.add(sp);
+        created = sp;
+        break;
+      }
+      case 'Text': {
+        const tx = new Text(r, 'New Text', spawnX, spawnY, 32);
+        // @ts-ignore
+        tx.name = uniqueName('Text');
+        scene.add(tx);
+        created = tx;
+        break;
+      }
+      case 'ClickableArea': {
+        // ClickableArea is typically used as a child of a Sprite so it has a visible host.
+        const host = new Sprite(r, iconUrl, spawnX, spawnY, 120, 120);
+        // @ts-ignore
+        host.name = uniqueName('ClickableAreaHost');
+
+        const area = new ClickableArea(r);
+        // @ts-ignore
+        area.name = uniqueName('ClickableArea');
+        host.addChild(area);
+        scene.add(host);
+        created = area;
+        break;
+      }
+      default:
+        return;
+    }
+
+    // Track recents (UI only)
+    const id = String(type);
+    this._addNodeRecent = [id, ...this._addNodeRecent.filter(x => x !== id)].slice(0, 12);
+
+    if (created) {
+      this.selected = created;
+      this.rebuildTree();
+      this.rebuildInspector();
+    }
+
+    this._closeAddNode();
+  },
+
   /** @param {any} obj */
   _isAnimatedSprite(obj) {
     if (!obj) return false;
@@ -1617,6 +2165,12 @@ const game = {
     if (!ui.aboutModal) return;
     this._aboutOpen = false;
     ui.aboutModal.hidden = true;
+  },
+
+  _closeAddNode() {
+    if (!ui.addNodeModal) return;
+    this._addNodeOpen = false;
+    ui.addNodeModal.hidden = true;
   },
 
   /** @param {Renderer} renderer */
@@ -2381,10 +2935,8 @@ const game = {
       if (o && this._matchesMode(o)) return o;
     }
 
-    // Fall back to editor camera (always present after load).
-    return this.mode === '3d'
-      ? (scene.camera3D || null)
-      : (scene.camera || null);
+    // Don't auto-select editor cameras (they're editor-only, not scene content).
+    return null;
   },
 
   /** @param {any} obj */
@@ -2451,9 +3003,11 @@ const game = {
     const materials = Array.isArray(sceneAny._materialXml) ? sceneAny._materialXml : [];
     for (const m of materials) entries.push({ obj: m, depth: 0, label: nameOf(m, 'Material') });
 
-    // Cameras
-    if (scene.camera) entries.push({ obj: scene.camera, depth: 0, label: `Camera: ${nameOf(scene.camera, 'Camera')}` });
-    if (scene.camera3D) entries.push({ obj: scene.camera3D, depth: 0, label: `Camera3D: ${nameOf(scene.camera3D, 'Camera3D')}` });
+    // Cameras: show authored cameras (editor forces render cameras).
+    const authoredCam2D = /** @type {any} */ (this._sceneCamera2D || null);
+    const authoredCam3D = /** @type {any} */ (this._sceneCamera3D || null);
+    if (authoredCam2D) entries.push({ obj: authoredCam2D, depth: 0, label: `Camera: ${nameOf(authoredCam2D, 'Camera')}` });
+    if (authoredCam3D) entries.push({ obj: authoredCam3D, depth: 0, label: `Camera3D: ${nameOf(authoredCam3D, 'Camera3D')}` });
 
     // Audio & lights
     if (Array.isArray(scene.audio)) {
@@ -3845,6 +4399,12 @@ const game = {
     }
 
     if (this.currentScene) this.currentScene.draw(renderer);
+
+    // Viewport icon overlays (draw after scene so they stay visible).
+    if (this.mode === '2d') {
+      const cam2 = /** @type {any} */ (this.currentScene?.camera);
+      if (cam2) this._drawAudioIcons2D(renderer, cam2);
+    }
   },
 };
 

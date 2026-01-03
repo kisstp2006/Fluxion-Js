@@ -15,6 +15,11 @@ export default class Sprite {
      * @param {boolean} [useSpriteSheet=true] - Whether to treat the image as a sprite sheet.
      */
     constructor(renderer, imageSrc, x=1, y=1, width=1, height=1, frameWidth = 0, frameHeight = 0, useSpriteSheet = true) {
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'visual';
+
         this.renderer = renderer;
         this.x = x;
         this.y = y;

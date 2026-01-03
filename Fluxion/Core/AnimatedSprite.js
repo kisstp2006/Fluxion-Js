@@ -18,6 +18,12 @@ export default class AnimatedSprite extends Sprite {
      */
     constructor(renderer, imageSrc, x = 0, y = 0, width = 100, height = 100, frameWidth = 0, frameHeight = 0) {
         super(renderer, imageSrc, x, y, width, height, frameWidth, frameHeight, true);
+
+        // Metadata
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'animation';
         
         this.animations = new Map();
         this.currentAnimation = null;

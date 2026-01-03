@@ -12,6 +12,11 @@ export default class MeshNode {
     this.name = 'MeshNode';
     this.active = true;
 
+    /** @type {'2D'|'3D'} */
+    this.type = '3D';
+    /** @type {string} */
+    this.category = 'mesh';
+
     /** @type {any[]} */
     this.children = [];
 

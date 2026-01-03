@@ -17,6 +17,12 @@ export default class Text extends Sprite {
      */
     constructor(renderer, text = "Text", x = 0, y = 0, fontSize = 16, fontFamily = "Inter", color = "white") {
         super(renderer, null, x, y, 1, 1, 0, 0, false);
+
+        // Metadata
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'text';
         
         this.textContent = text; // Rename to avoid conflict if any
         this._fontSize = fontSize;

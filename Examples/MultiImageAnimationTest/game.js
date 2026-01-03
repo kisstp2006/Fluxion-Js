@@ -1,10 +1,14 @@
+// @ts-check
+
 import { Engine, SceneLoader } from "../../Fluxion/index.js";
+
+const SCENE_URL = new URL('./scene.xml', import.meta.url).toString();
 
 const game = {
     currentScene: null,
 
     async init(renderer) {
-        this.currentScene = await SceneLoader.load("scene.xml", renderer);
+        this.currentScene = await SceneLoader.load(SCENE_URL, renderer);
         
         const hero = this.currentScene.getObjectByName("MultiImgHero");
         if (hero) {

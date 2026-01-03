@@ -1,3 +1,5 @@
+// @ts-check
+
 import { Engine, Text, Input, Sprite } from '../../Fluxion/index.js';
 
 const input = new Input();
@@ -16,7 +18,7 @@ class ResolutionGame {
 
     init(renderer) {
         // Put a sprite on screen so MSAA differences are visible when rotated.
-        const LOGO = "../../Fluxion/Icon/Fluxion_icon.png";
+        const LOGO = new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
         this.logo = new Sprite(renderer, LOGO, 440, 160, 400, 400);
 
         // Create text overlays
@@ -35,6 +37,11 @@ class ResolutionGame {
     setupUI() {
         const btnFullscreen = document.getElementById('btn-fullscreen');
         const statusDiv = document.getElementById('status');
+
+        if (!(btnFullscreen instanceof HTMLElement) || !(statusDiv instanceof HTMLElement)) {
+            console.warn('ResolutionTest: missing UI elements (#btn-fullscreen or #status).');
+            return;
+        }
 
         btnFullscreen.addEventListener('click', () => {
             this.isFullscreen = !this.isFullscreen;

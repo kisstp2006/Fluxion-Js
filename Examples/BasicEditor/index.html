@@ -43,6 +43,8 @@
         <button id="sceneMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Scene</button>
         <div id="sceneMenu" class="menu" role="menu">
           <button class="menuItem" type="button" role="menuitem" data-action="scene.focusSelection">Focus Selection (F)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="scene.addNode">Add Node...</button>
         </div>
       </div>
 
@@ -143,6 +145,24 @@
     </footer>
   </div>
 
+  <div id="projectSelectModal" class="modalBackdrop" hidden>
+    <div class="modal modalProject" role="dialog" aria-modal="true" aria-labelledby="projectSelectTitle">
+      <div class="modalHeader">
+        <div id="projectSelectTitle" class="modalTitle">Select Project</div>
+      </div>
+      <div class="modalBody">
+        <div class="aboutName">Fluxion</div>
+        <div class="aboutMeta">Select or create a project to continue.</div>
+
+        <div class="row" style="margin-top: 14px;">
+          <button id="projectSelectCreateBtn" class="btn" type="button">Create Project...</button>
+          <button id="projectSelectOpenBtn" class="btn" type="button">Open Project...</button>
+          <button id="projectSelectOpenLegacyBtn" class="btn" type="button">Open Legacy Project...</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="aboutModal" class="modalBackdrop" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
       <div class="modalHeader">
@@ -213,6 +233,11 @@
         <div class="sectionTitle">Project Name</div>
         <input id="createProjectNameInput" class="input" type="text" autocomplete="off" spellcheck="false" />
 
+        <div class="sectionTitle" style="margin-top: 12px;">Template</div>
+        <select id="createProjectTemplateSelect" class="input" aria-label="Project Template">
+          <option value="empty" selected>Empty</option>
+        </select>
+
         <div class="sectionTitle" style="margin-top: 12px;">Location</div>
         <div class="row">
           <input id="createProjectPathInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Choose a folder..." />
@@ -221,6 +246,45 @@
       </div>
       <div class="modalFooter">
         <button id="createProjectOkBtn" class="btn" type="button">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addNodeModal" class="modalBackdrop" hidden>
+    <div class="modal modalNode" role="dialog" aria-modal="true" aria-labelledby="addNodeTitle">
+      <div class="modalHeader">
+        <div id="addNodeTitle" class="modalTitle">Create New Node</div>
+        <button id="addNodeCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody" style="padding: 12px;">
+        <div class="nodeDialog" aria-label="Create Node Dialog">
+          <div class="nodeSearchRow">
+            <div class="nodeLabel">Search:</div>
+            <input id="addNodeSearchInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div class="nodeMain">
+            <div class="nodeSide" aria-label="Sidebar">
+              <div class="nodeSideSection">
+                <div class="nodeSideTitle">Favorites:</div>
+                <div id="addNodeFavorites" class="nodeSideList" role="list"></div>
+              </div>
+
+              <div class="nodeSideSection">
+                <div class="nodeSideTitle">Recent:</div>
+                <div id="addNodeRecent" class="nodeSideList" role="list"></div>
+              </div>
+            </div>
+
+            <div class="nodeMatchesPane" aria-label="Matches">
+              <div class="nodeMatchesTitle">Matches:</div>
+              <div id="addNodeMatches" class="nodeMatchesList" role="list"></div>
+            </div>
+          </div>
+
+          <div class="nodeDescTitle">Description:</div>
+          <div id="addNodeDescription" class="nodeDescription" aria-live="polite"></div>
+        </div>
       </div>
     </div>
   </div>

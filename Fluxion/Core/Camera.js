@@ -12,6 +12,11 @@ export default class Camera {
      * @param {number} [height=0] - The height of the camera view.
      */
     constructor(x = 0, y = 0, zoom = 1, rotation = 0, width = 0, height = 0) {
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'camera';
+
         this.x = x;
         this.y = y;
         this.zoom = zoom;

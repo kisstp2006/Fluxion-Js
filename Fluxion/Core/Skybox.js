@@ -16,6 +16,11 @@ export default class Skybox {
    * @param {boolean} [isEquirectangular=false] - Whether the source is equirectangular.
    */
   constructor(gl, source, isEquirectangular = false) {
+    /** @type {'2D'|'3D'} */
+    this.type = '3D';
+    /** @type {string} */
+    this.category = 'visual';
+
     this.gl = gl;
     this.cubemapTexture = null;
     this.isEquirectangular = isEquirectangular;

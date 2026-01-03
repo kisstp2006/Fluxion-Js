@@ -482,7 +482,7 @@ if (!gotTheLock) {
   });
 
   // Create a new Fluxion project in a chosen folder.
-  // opts: { parentDir: string, name: string, force?: boolean }
+  // opts: { parentDir: string, name: string, template?: string, force?: boolean }
   ipcMain.handle('create-fluxion-project', async (event, opts) => {
     try {
       if (app.isPackaged) {
@@ -492,10 +492,15 @@ if (!gotTheLock) {
       const o = (opts && typeof opts === 'object') ? opts : {};
       const parentDir = path.resolve(String(o.parentDir || ''));
       const name = String(o.name || '').trim();
+      const template = String(o.template || 'empty').trim() || 'empty';
       const force = !!o.force;
       if (!parentDir || !name) return { ok: false, error: 'Missing parentDir or name.' };
 
       const targetDir = path.join(parentDir, name);
+
+      // Template is plumbed for future expansion.
+      // Current supported templates: 'empty' (default)
+      void template;
 
       if (fs.existsSync(targetDir) && !isEmptyDir(targetDir) && !force) {
         return { ok: false, error: 'Target folder is not empty. Choose another name or enable force.' };

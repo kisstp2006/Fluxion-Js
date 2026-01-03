@@ -6,6 +6,11 @@ import { Mat4, Vector3 } from './Math3D.js';
  */
 export default class Camera3D {
   constructor() {
+    /** @type {'2D'|'3D'} */
+    this.type = '3D';
+    /** @type {string} */
+    this.category = 'camera';
+
     this.position = new Vector3(0, 0, 5);
     this.target = new Vector3(0, 0, 0);
     this.up = new Vector3(0, 1, 0);

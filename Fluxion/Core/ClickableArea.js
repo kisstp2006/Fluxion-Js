@@ -10,6 +10,11 @@ export default class ClickableArea {
      * @param {Object} renderer - The renderer instance.
      */
     constructor(renderer) {
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'input';
+
         this.renderer = renderer;
         this.parent = null;
         this.name = "ClickableArea";
