@@ -230,7 +230,22 @@ if (!gotTheLock) {
       if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
         return { ok: true, canceled: true };
       }
-      return { ok: true, canceled: false, path: String(res.filePaths[0]) };
+
+      const projectRoot = path.resolve(__dirname);
+      const pickedAbs = path.resolve(String(res.filePaths[0]));
+
+      // Provide renderer a safe relative path when the selection is within the project root.
+      const rel = path.relative(projectRoot, pickedAbs);
+      const insideProjectRoot = (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)));
+      const projectRel = insideProjectRoot ? normSlashes(rel || '.') : null;
+
+      return {
+        ok: true,
+        canceled: false,
+        path: pickedAbs,
+        insideProjectRoot,
+        projectRel,
+      };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }

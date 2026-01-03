@@ -240,6 +240,55 @@ const game = {
     this._assetBrowserCtl.init();
   },
 
+  /**
+   * Select a folder and return its project-root-relative path.
+   * Only works in the Electron editor and only for folders inside the app's project root
+   * (enforced in the main process for safety).
+   * @returns {Promise<string|null>}
+   */
+  async _pickProjectRelativeFolder() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.selectFolder !== 'function') {
+      alert('Open Folder/Project is only available in the Electron editor.');
+      return null;
+    }
+
+    const pick = await electronAPI.selectFolder();
+    if (!pick || !pick.ok || pick.canceled) return null;
+
+    // Newer Electron host returns projectRel + insideProjectRoot.
+    if (pick.projectRel != null) {
+      if (pick.insideProjectRoot === false) {
+        alert('That folder is outside the current editor workspace.\n\nFor now, Open Folder/Project can only target folders inside this Fluxion-Js repo.');
+        return null;
+      }
+
+      const rel = String(pick.projectRel || '').trim();
+      return rel || '.';
+    }
+
+    // Older host: cannot safely derive a relative folder in the renderer.
+    alert('Open Folder/Project requires an updated Electron host (select-folder IPC needs to return projectRel).');
+    return null;
+  },
+
+  /** @param {string} relRoot */
+  async _setAssetBrowserRoot(relRoot) {
+    const ctl = this._assetBrowserCtl;
+    if (!ctl) return;
+
+    const root = String(relRoot || '.');
+    ctl.state.root = root;
+    ctl.state.cwd = root;
+    ctl.state.selected = null;
+
+    this._assetBrowser.root = root;
+    this._assetBrowser.cwd = root;
+    this._assetBrowser.selected = null;
+
+    await ctl.render();
+  },
+
   /** @param {string} pathRel */
   async _tryOpenSceneFromAsset(pathRel) {
     const ext = String(pathRel || '').toLowerCase();
@@ -352,6 +401,18 @@ const game = {
         case 'file.createProject':
           this._createProjectDialog?.createProjectFromEditor().catch(console.error);
           break;
+        case 'file.openProject':
+          // Currently equivalent to selecting a folder to become the asset root.
+          // (This editor runs inside the Fluxion-Js repo; opening outside is intentionally blocked.)
+          this._pickProjectRelativeFolder()
+            .then((rel) => (rel ? this._setAssetBrowserRoot(rel) : null))
+            .catch(console.error);
+          break;
+        case 'file.openFolder':
+          this._pickProjectRelativeFolder()
+            .then((rel) => (rel ? this._setAssetBrowserRoot(rel) : null))
+            .catch(console.error);
+          break;
         case 'file.reloadScene':
           this.loadSelectedScene(renderer).catch(console.error);
           break;
@@ -449,6 +510,104 @@ const game = {
       e.preventDefault();
       this._wheelDeltaY += e.deltaY;
     }, { passive: false });
+
+    // 2D picking: click in the viewport to select the topmost 2D object.
+    // Uses renderer.screenToWorld so it matches the engine camera math.
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (this.mode !== '2d') return;
+      if (this._gizmo.active) return;
+
+      const scene = this.currentScene;
+      const cam2 = /** @type {any} */ (scene?.camera);
+      if (!scene || !cam2 || !renderer || typeof renderer.screenToWorld !== 'function') return;
+
+      // Only if click started inside the canvas bounds.
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX, y = e.clientY;
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+
+      const picked = this._pick2DObjectAt(x, y, cam2);
+      this.selected = picked;
+      this.rebuildTree();
+      this.rebuildInspector();
+    });
+  },
+
+  /**
+   * Pick the topmost 2D object under the given screen position.
+   * @param {number} screenX
+   * @param {number} screenY
+   * @param {any} cam2
+   */
+  _pick2DObjectAt(screenX, screenY, cam2) {
+    const r = this._renderer;
+    const scene = this.currentScene;
+    if (!r || !scene || typeof r.screenToWorld !== 'function') return null;
+
+    const world = r.screenToWorld(screenX, screenY, cam2);
+    const wx = Number(world?.x) || 0;
+    const wy = Number(world?.y) || 0;
+
+    /** @type {any[]} */
+    const flat = [];
+    /** @param {any} o */
+    const visit = (o) => {
+      if (!o) return;
+      flat.push(o);
+      if (Array.isArray(o.children)) {
+        for (const c of o.children) visit(c);
+      }
+    };
+    if (Array.isArray(scene.objects)) {
+      for (const o of scene.objects) visit(o);
+    }
+
+    let best = null;
+    let bestLayer = -Infinity;
+    let bestOrder = -Infinity;
+
+    for (let i = 0; i < flat.length; i++) {
+      const o = flat[i];
+      if (!o) continue;
+      // Only consider 2D objects for 2D picking.
+      if (!this._matchesMode(o)) continue;
+      if (o.visible === false || o.active === false) continue;
+
+      const hasXY = (typeof o.x === 'number') && (typeof o.y === 'number');
+      const hasWH = (typeof o.width === 'number') && (typeof o.height === 'number');
+      if (!hasXY || !hasWH) continue;
+
+      const ox = Number(o.x) || 0;
+      const oy = Number(o.y) || 0;
+      const ow = Number(o.width) || 0;
+      const oh = Number(o.height) || 0;
+
+      // Allow negative sizes (some draw paths can use negative width/height).
+      const x1 = ox;
+      const y1 = oy;
+      const x2 = ox + ow;
+      const y2 = oy + oh;
+      const minX = Math.min(x1, x2);
+      const maxX = Math.max(x1, x2);
+      const minY = Math.min(y1, y2);
+      const maxY = Math.max(y1, y2);
+
+      const hit = (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY);
+      if (!hit) continue;
+
+      const layer = (o.layer !== undefined) ? (Number(o.layer) || 0) : 0;
+      // Tie-break by traversal order (later wins). This also works for children.
+      const order = i;
+
+      if (layer > bestLayer || (layer === bestLayer && order >= bestOrder)) {
+        best = o;
+        bestLayer = layer;
+        bestOrder = order;
+      }
+    }
+
+    return best;
   },
 
   _applyRenderLayers() {
@@ -986,7 +1145,7 @@ const game = {
     if (this.mode === '2d') {
       if (typeof obj.x === "number") this._addNumber(ui.transform, "x", obj, "x");
       if (typeof obj.y === "number") this._addNumber(ui.transform, "y", obj, "y");
-      if (typeof obj.layer === "number") this._addNumber(ui.transform, "layer", obj, "layer");
+      this._add2DLayerField(ui.transform, obj);
       if (typeof obj.width === "number") this._addNumber(ui.transform, "width", obj, "width");
       if (typeof obj.height === "number") this._addNumber(ui.transform, "height", obj, "height");
       if (typeof obj.rotation === "number") this._addNumber(ui.transform, "rotation", obj, "rotation");
@@ -1013,6 +1172,45 @@ const game = {
         this._addNumber(ui.transform, "target.z", obj.target, "z");
       }
     }
+  },
+
+  /**
+   * Layer support for 2D objects: allow editing even if the object didn't explicitly
+   * define a numeric layer (engine treats missing as 0).
+   * Also forces scene resorting so changes take effect immediately.
+   * @param {HTMLElement | null} container
+   * @param {any} obj
+   */
+  _add2DLayerField(container, obj) {
+    if (!container || !obj) return;
+
+    // Only show for objects that look like 2D drawables.
+    if (!this._matchesMode(obj)) return;
+    if (typeof obj.draw !== 'function') return;
+
+    if (obj.layer === undefined || obj.layer === null || obj.layer === '') {
+      obj.layer = 0;
+    }
+    if (!Number.isFinite(Number(obj.layer))) {
+      obj.layer = 0;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = '1';
+    input.value = String(Number(obj.layer) || 0);
+    input.addEventListener('change', () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      obj.layer = v;
+      // Scene caches sorted 2D objects; mark dirty so the new layer takes effect.
+      if (this.currentScene) {
+        // @ts-ignore - internal optimization flag
+        this.currentScene._objectsDirty = true;
+      }
+    });
+
+    this._addField(container, 'layer', input);
   },
 
   /**
