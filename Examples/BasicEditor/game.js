@@ -106,8 +106,7 @@ const ui = {
   assetPanelAssets: /** @type {HTMLDivElement|null} */ (null),
   assetPanelConsole: /** @type {HTMLDivElement|null} */ (null),
   consoleOutput: /** @type {HTMLDivElement|null} */ (null),
-  mainTabViewport2dBtn: /** @type {HTMLButtonElement|null} */ (null),
-  mainTabViewport3dBtn: /** @type {HTMLButtonElement|null} */ (null),
+  mainTabViewportBtn: /** @type {HTMLButtonElement|null} */ (null),
   mainTabsDynamic: /** @type {HTMLDivElement|null} */ (null),
   viewportView: /** @type {HTMLDivElement|null} */ (null),
   scriptView: /** @type {HTMLDivElement|null} */ (null),
@@ -163,7 +162,13 @@ const game = {
   _editorCam3DState: {
     yaw: 0,
     pitch: 0,
+    yawTarget: 0,
+    pitchTarget: 0,
     moveSpeed: 6, // units/sec
+    // Lower = snappier, higher = floatier.
+    smoothTimeRot: 0.06,
+    smoothTimePos: 0.05,
+    posTarget: { x: 0, y: 0, z: 0 },
   },
 
   _wheelDeltaY: 0,
@@ -230,8 +235,8 @@ const game = {
   /** @type {'assets'|'console'} */
   _bottomTab: 'assets',
 
-  /** @type {'viewport2d'|'viewport3d'|'script'} */
-  _mainTab: 'viewport2d',
+  /** @type {'viewport'|'script'} */
+  _mainTab: 'viewport',
   /** @type {string|null} */
   _activeScriptPath: null,
   /** @type {{ pathRel: string, name: string, text: string, dirty: boolean }[]} */
@@ -379,8 +384,7 @@ const game = {
     ui.assetPanelConsole = /** @type {HTMLDivElement} */ (document.getElementById('assetPanelConsole'));
     ui.consoleOutput = /** @type {HTMLDivElement} */ (document.getElementById('consoleOutput'));
 
-    ui.mainTabViewport2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewport2dBtn'));
-    ui.mainTabViewport3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewport3dBtn'));
+    ui.mainTabViewportBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewportBtn'));
     ui.mainTabsDynamic = /** @type {HTMLDivElement} */ (document.getElementById('mainTabsDynamic'));
     ui.viewportView = /** @type {HTMLDivElement} */ (document.getElementById('viewportView'));
     ui.scriptView = /** @type {HTMLDivElement} */ (document.getElementById('scriptView'));
@@ -425,11 +429,10 @@ const game = {
     this._setBottomTab('assets');
 
     // Main tabs (viewport + scripts)
-    ui.mainTabViewport2dBtn?.addEventListener('click', () => this._setMainTab('viewport2d'));
-    ui.mainTabViewport3dBtn?.addEventListener('click', () => this._setMainTab('viewport3d'));
+    ui.mainTabViewportBtn?.addEventListener('click', () => this._setMainTab('viewport'));
     ui.scriptSaveBtn?.addEventListener('click', () => this._saveActiveScript().catch(console.error));
     ui.scriptEditorText?.addEventListener('input', () => this._markActiveScriptDirty());
-    this._setMainTab('viewport2d');
+    this._setMainTab('viewport');
 
     // Capture logs into the Console tab
     this._installEditorConsoleCapture();
@@ -1114,21 +1117,16 @@ const game = {
     await this.loadSelectedScene(r);
   },
 
-  /** @param {'viewport2d'|'viewport3d'|'script'} tab */
+  /** @param {'viewport'|'script'} tab */
   _setMainTab(tab) {
     this._mainTab = tab;
 
-    const is2d = tab === 'viewport2d';
-    const is3d = tab === 'viewport3d';
+    const isViewport = tab === 'viewport';
     const isScript = tab === 'script';
 
-    if (ui.mainTabViewport2dBtn) {
-      ui.mainTabViewport2dBtn.classList.toggle('active', is2d);
-      ui.mainTabViewport2dBtn.setAttribute('aria-selected', is2d ? 'true' : 'false');
-    }
-    if (ui.mainTabViewport3dBtn) {
-      ui.mainTabViewport3dBtn.classList.toggle('active', is3d);
-      ui.mainTabViewport3dBtn.setAttribute('aria-selected', is3d ? 'true' : 'false');
+    if (ui.mainTabViewportBtn) {
+      ui.mainTabViewportBtn.classList.toggle('active', isViewport);
+      ui.mainTabViewportBtn.setAttribute('aria-selected', isViewport ? 'true' : 'false');
     }
 
     if (ui.viewportView) {
@@ -1142,9 +1140,7 @@ const game = {
       ui.scriptView.setAttribute('aria-hidden', isScript ? 'false' : 'true');
     }
 
-    if (is2d) this.setMode('2d');
-    else if (is3d) this.setMode('3d');
-    else if (isScript) {
+    if (isScript) {
       // Ensure the editor has focus when switching to script.
       ui.scriptEditorText?.focus();
     }
@@ -3393,9 +3389,14 @@ const game = {
     // Reset FP state per scene load (simple + predictable).
     this._editorCam3DState.yaw = 0;
     this._editorCam3DState.pitch = 0;
+    this._editorCam3DState.yawTarget = 0;
+    this._editorCam3DState.pitchTarget = 0;
     this._editorCamera3D.position.x = 0;
     this._editorCamera3D.position.y = 1.5;
     this._editorCamera3D.position.z = 6;
+    this._editorCam3DState.posTarget.x = this._editorCamera3D.position.x;
+    this._editorCam3DState.posTarget.y = this._editorCamera3D.position.y;
+    this._editorCam3DState.posTarget.z = this._editorCamera3D.position.z;
     this._updateEditorCamera3DTarget(this._editorCamera3D);
 
     // Force the scene to render using editor cameras.
@@ -3486,24 +3487,54 @@ const game = {
     const cam3 = /** @type {any} */ (scene.camera3D);
     if (!cam3 || !this._usingEditorCamera3D) return;
 
+    const st = this._editorCam3DState;
+    // Back-compat if state was created before smoothing fields existed.
+    if (typeof st.yawTarget !== 'number') st.yawTarget = Number(st.yaw) || 0;
+    if (typeof st.pitchTarget !== 'number') st.pitchTarget = Number(st.pitch) || 0;
+    if (!st.posTarget || typeof st.posTarget !== 'object') st.posTarget = { x: cam3.position.x, y: cam3.position.y, z: cam3.position.z };
+    if (!Number.isFinite(Number(st.smoothTimeRot))) st.smoothTimeRot = 0.06;
+    if (!Number.isFinite(Number(st.smoothTimePos))) st.smoothTimePos = 0.05;
+
     const key = (/** @type {string} */ k) => input.getKey(k) || input.getKey(String(k).toUpperCase());
     const isRmb = input.getMouseButton(2);
     const isMmb = input.getMouseButton(1);
+
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const lerpAngle = (a, b, t) => {
+      // Shortest path around the circle.
+      const twoPi = Math.PI * 2;
+      let d = (b - a) % twoPi;
+      if (d > Math.PI) d -= twoPi;
+      if (d < -Math.PI) d += twoPi;
+      return a + d * t;
+    };
+    const smoothAlpha = (smoothTime) => {
+      const t = Math.max(0, Number(dt) || 0);
+      const st = Math.max(0.0001, Number(smoothTime) || 0.05);
+      // Exponential smoothing: stable across framerates.
+      return 1 - Math.exp(-t / st);
+    };
 
     // Mouse look (hold RMB)
     if (isRmb) {
       const md = input.getMouseDelta();
       const rotSpeed = 0.003;
-      this._editorCam3DState.yaw += md.x * rotSpeed;
-      this._editorCam3DState.pitch -= md.y * rotSpeed;
+      st.yawTarget += md.x * rotSpeed;
+      st.pitchTarget -= md.y * rotSpeed;
       // Clamp pitch to avoid flipping.
-      this._editorCam3DState.pitch = Math.max(-1.5, Math.min(1.5, this._editorCam3DState.pitch));
+      st.pitchTarget = Math.max(-1.5, Math.min(1.5, st.pitchTarget));
     }
+
+    // Smooth rotation (always, so motion feels consistent).
+    const aRot = smoothAlpha(st.smoothTimeRot);
+    st.yaw = lerpAngle(Number(st.yaw) || 0, Number(st.yawTarget) || 0, aRot);
+    st.pitch = lerp(Number(st.pitch) || 0, Number(st.pitchTarget) || 0, aRot);
+    st.pitch = Math.max(-1.5, Math.min(1.5, st.pitch));
 
     // Pan (hold MMB): move along camera right (XZ) + world up.
     if (isMmb) {
       const md = input.getMouseDelta();
-      const yaw = this._editorCam3DState.yaw;
+      const yaw = st.yaw;
       const sy = Math.sin(yaw);
       const cy = Math.cos(yaw);
       const rX = cy;
@@ -3512,9 +3543,9 @@ const game = {
       const speedBase = Number(this._editorCam3DState.moveSpeed) || 6;
       const panScale = Math.max(0.0005, speedBase * 0.002);
 
-      cam3.position.x += (-md.x * rX) * panScale;
-      cam3.position.z += (-md.x * rZ) * panScale;
-      cam3.position.y += (md.y) * panScale;
+      st.posTarget.x += (-md.x * rX) * panScale;
+      st.posTarget.z += (-md.x * rZ) * panScale;
+      st.posTarget.y += (md.y) * panScale;
     }
 
     // Fly movement (WASD + QE). Only active while RMB is held,
@@ -3536,8 +3567,8 @@ const game = {
     const step = speed * Math.max(0, dt);
 
     if (moveX !== 0 || moveZ !== 0 || moveY !== 0) {
-      const yaw = this._editorCam3DState.yaw;
-      const pitch = this._editorCam3DState.pitch;
+      const yaw = st.yaw;
+      const pitch = st.pitch;
       const sy = Math.sin(yaw);
       const cy = Math.cos(yaw);
 
@@ -3559,16 +3590,16 @@ const game = {
       const nZ = moveZ / len;
       const nY = moveY / len;
 
-      cam3.position.x += (rX * nX + fX * nZ) * step;
-      cam3.position.z += (rZ * nX + fZ * nZ) * step;
-      cam3.position.y += (fY * nZ) * step;
-      cam3.position.y += nY * step;
+      st.posTarget.x += (rX * nX + fX * nZ) * step;
+      st.posTarget.z += (rZ * nX + fZ * nZ) * step;
+      st.posTarget.y += (fY * nZ) * step;
+      st.posTarget.y += nY * step;
     }
 
     // Wheel dolly along forward (scaled by delta magnitude; supports trackpads).
     if (wheel !== 0) {
-      const yaw = this._editorCam3DState.yaw;
-      const pitch = this._editorCam3DState.pitch;
+      const yaw = st.yaw;
+      const pitch = st.pitch;
       const sy = Math.sin(yaw);
       const cy = Math.cos(yaw);
       const cp = Math.cos(pitch);
@@ -3578,10 +3609,16 @@ const game = {
       const fZ = -cp * cy;
       const wheelSteps = Math.max(-10, Math.min(10, (Number(wheel) || 0) / 100));
       const amount = (wheelSteps) * (speedBase * 0.25);
-      cam3.position.x += fX * amount;
-      cam3.position.y += fY * amount;
-      cam3.position.z += fZ * amount;
+      st.posTarget.x += fX * amount;
+      st.posTarget.y += fY * amount;
+      st.posTarget.z += fZ * amount;
     }
+
+    // Smooth position toward its target.
+    const aPos = smoothAlpha(st.smoothTimePos);
+    cam3.position.x = lerp(Number(cam3.position.x) || 0, Number(st.posTarget.x) || 0, aPos);
+    cam3.position.y = lerp(Number(cam3.position.y) || 0, Number(st.posTarget.y) || 0, aPos);
+    cam3.position.z = lerp(Number(cam3.position.z) || 0, Number(st.posTarget.z) || 0, aPos);
 
     this._updateEditorCamera3DTarget(cam3);
   },
