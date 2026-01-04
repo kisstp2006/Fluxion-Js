@@ -710,6 +710,44 @@ if (!gotTheLock) {
     }
   });
 
+  // Pick a file on disk (OS-native dialog).
+  // opts: { title?: string, filters?: Array<{ name: string, extensions: string[] }> }
+  ipcMain.handle('select-file', async (event, opts) => {
+    try {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const o = (opts && typeof opts === 'object') ? opts : {};
+      const title = String(o.title || 'Select File');
+      const filters = Array.isArray(o.filters) ? o.filters : undefined;
+
+      const res = await dialog.showOpenDialog(win || undefined, {
+        title,
+        properties: ['openFile'],
+        filters,
+      });
+      if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+        return { ok: true, canceled: true };
+      }
+
+      const projectRoot = path.resolve(__dirname);
+      const pickedAbs = path.resolve(String(res.filePaths[0]));
+
+      // Provide renderer a safe relative path when the selection is within the project root.
+      const rel = path.relative(projectRoot, pickedAbs);
+      const insideProjectRoot = (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel)));
+      const projectRel = insideProjectRoot ? normSlashes(rel || '.') : null;
+
+      return {
+        ok: true,
+        canceled: false,
+        path: pickedAbs,
+        insideProjectRoot,
+        projectRel,
+      };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
   // Create a new Fluxion project in a chosen folder.
   // opts: { parentDir: string, name: string, template?: string, force?: boolean }
   // opts: { parentDir: string, name: string, template?: string, force?: boolean, engineRoot?: string }

@@ -172,6 +172,227 @@ export function addNumberWith(container, label, obj, key, onChanged, opts = {}) 
 }
 
 /**
+ * Slider bound to a string property that stores a number (or an empty string for "unset").
+ * Useful for XML stubs where numbers are authored as strings.
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {() => void} onChanged
+ * @param {{ step?: number, min?: number, max?: number, allowEmpty?: boolean }=} opts
+ */
+export function addSliderStringWith(container, label, obj, key, onChanged, opts = {}) {
+	if (!obj) return;
+	if (!(key in obj)) return;
+
+	const min = Number.isFinite(Number(opts.min)) ? Number(opts.min) : 0;
+	const max = Number.isFinite(Number(opts.max)) ? Number(opts.max) : 1;
+	const step = Number.isFinite(Number(opts.step)) ? Number(opts.step) : 0.01;
+	const allowEmpty = opts.allowEmpty !== false;
+
+	/** @param {number} v */
+	const clamp = (v) => Math.min(max, Math.max(min, v));
+	const asNum = () => {
+		const raw = String(obj[key] ?? '').trim();
+		if (!raw) return null;
+		const v = parseFloat(raw);
+		return Number.isFinite(v) ? v : null;
+	};
+
+	const wrap = document.createElement('div');
+	wrap.className = 'rangeRow';
+
+	const range = document.createElement('input');
+	range.type = 'range';
+	range.min = String(min);
+	range.max = String(max);
+	range.step = String(step);
+
+	const number = document.createElement('input');
+	number.type = 'number';
+	number.min = String(min);
+	number.max = String(max);
+	number.step = String(step);
+	number.placeholder = allowEmpty ? '' : String(min);
+
+	const clearBtn = document.createElement('button');
+	clearBtn.type = 'button';
+	clearBtn.className = 'btn';
+	clearBtn.textContent = 'Clear';
+	clearBtn.style.padding = '6px 10px';
+	clearBtn.style.lineHeight = '1';
+
+	const syncFromObj = () => {
+		const v = asNum();
+		if (v === null) {
+			number.value = '';
+			range.value = String(min);
+			range.disabled = true;
+			clearBtn.disabled = true;
+			return;
+		}
+		const c = clamp(v);
+		number.value = String(c);
+		range.value = String(c);
+		range.disabled = false;
+		clearBtn.disabled = false;
+	};
+
+	const applyNumber = () => {
+		const raw = String(number.value ?? '').trim();
+		if (!raw) {
+			if (!allowEmpty) return;
+			obj[key] = '';
+			syncFromObj();
+			try { onChanged(); } catch {}
+			return;
+		}
+		const v = parseFloat(raw);
+		if (!Number.isFinite(v)) return;
+		const c = clamp(v);
+		obj[key] = String(c);
+		syncFromObj();
+		try { onChanged(); } catch {}
+	};
+
+	const applyRange = () => {
+		const v = parseFloat(String(range.value ?? ''));
+		if (!Number.isFinite(v)) return;
+		const c = clamp(v);
+		obj[key] = String(c);
+		syncFromObj();
+		try { onChanged(); } catch {}
+	};
+
+	clearBtn.addEventListener('click', () => {
+		if (!allowEmpty) return;
+		obj[key] = '';
+		syncFromObj();
+		try { onChanged(); } catch {}
+	});
+
+	range.addEventListener('input', applyRange);
+	range.addEventListener('change', applyRange);
+	number.addEventListener('input', applyNumber);
+	number.addEventListener('change', applyNumber);
+
+	syncFromObj();
+
+	wrap.appendChild(range);
+	wrap.appendChild(number);
+	wrap.appendChild(clearBtn);
+	addField(container, label, wrap);
+}
+
+/**
+ * Dropdown/select input.
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {Array<{ label: string, value: string }>} options
+ * @param {() => void} onChanged
+ */
+export function addSelectWith(container, label, obj, key, options, onChanged) {
+	if (!obj) return;
+	if (!(key in obj)) return;
+
+	const current = String(obj[key] ?? '');
+	const hasCurrent = options.some((o) => String(o.value ?? '') === current);
+	/** @type {Array<{ label: string, value: string }>} */
+	const opts = hasCurrent || !current
+		? options
+		: [{ label: `Custom (${current})`, value: current }, ...options];
+
+	const select = document.createElement('select');
+	for (const opt of opts) {
+		const o = document.createElement('option');
+		o.value = String(opt.value ?? '');
+		o.textContent = String(opt.label ?? opt.value ?? '');
+		select.appendChild(o);
+	}
+
+	select.value = current;
+
+	select.addEventListener('change', () => {
+		obj[key] = String(select.value ?? '');
+		try { onChanged(); } catch {}
+	});
+
+	addField(container, label, select);
+}
+
+/**
+ * Auto-picks a field type based on the current value and (when helpful) the key name.
+ * - boolean -> checkbox
+ * - number -> number input
+ * - string -> text input (or color picker, or a slider for known numeric material params)
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {() => void} onChanged
+ */
+export function addAutoWith(container, label, obj, key, onChanged) {
+	if (!obj) return;
+	if (!(key in obj)) return;
+
+	const v = obj[key];
+	const k = String(key || '').toLowerCase();
+
+	if (typeof v === 'boolean') {
+		addToggleWith(container, label, obj, key, onChanged);
+		return;
+	}
+
+	if (typeof v === 'number') {
+		addNumberWith(container, label, obj, key, onChanged);
+		return;
+	}
+
+	if (typeof v === 'string') {
+		// Common enums.
+		if (k === 'alphamode') {
+			addSelectWith(container, label, obj, key, [
+				{ label: '(default)', value: '' },
+				{ label: 'OPAQUE', value: 'OPAQUE' },
+				{ label: 'MASK', value: 'MASK' },
+				{ label: 'BLEND', value: 'BLEND' },
+			], onChanged);
+			return;
+		}
+
+		// Color-ish string fields.
+		if (k.includes('color')) {
+			addCssColorWith(container, label, obj, key, onChanged);
+			return;
+		}
+
+		// Known numeric material overrides are authored as strings in XML stubs.
+		/** @type {Record<string, { min: number, max: number, step: number }>} */
+		const materialNumeric = {
+			metallicfactor: { min: 0, max: 1, step: 0.01 },
+			roughnessfactor: { min: 0.04, max: 1, step: 0.01 },
+			normalscale: { min: 0, max: 2, step: 0.01 },
+			aostrength: { min: 0, max: 2, step: 0.01 },
+			alphacutoff: { min: 0, max: 1, step: 0.01 },
+		};
+
+		if (k in materialNumeric) {
+			const m = materialNumeric[k];
+			addSliderStringWith(container, label, obj, key, onChanged, { min: m.min, max: m.max, step: m.step, allowEmpty: true });
+			return;
+		}
+
+		addStringWith(container, label, obj, key, onChanged);
+		return;
+	}
+
+	// Fallback
+	addStringWith(container, label, obj, key, onChanged);
+}
+
+/**
  * @param {HTMLElement | null} container
  * @param {string} label
  * @param {any} obj

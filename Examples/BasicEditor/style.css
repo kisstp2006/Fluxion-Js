@@ -1123,6 +1123,13 @@ body {
   gap: 6px;
 }
 
+.value .rangeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
 .value input {
   flex: 1;
   min-width: 0;
@@ -1134,7 +1141,32 @@ body {
   outline: none;
 }
 
+.value select {
+  flex: 1;
+  min-width: 0;
+  background: #1a1a1a;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.value input[type="range"] {
+  background: transparent;
+  border: none;
+  padding: 0;
+  height: 34px;
+}
+
+.value .rangeRow input[type="number"] {
+  flex: 0 0 auto;
+  width: 92px;
+}
+
 .value input:focus { border-color: var(--accent); }
+
+.value select:focus { border-color: var(--accent); }
 
 .checkRow {
   display: flex;

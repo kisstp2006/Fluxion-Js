@@ -1248,6 +1248,7 @@ const game = {
 
   /** @param {string} text */
   _highlightJsToHtml(text) {
+    /** @type {(s: string) => string} */
     const esc = (s) => this._escapeHtml(s);
     const out = [];
 
@@ -1258,8 +1259,11 @@ const game = {
       'var','void','while','with','yield','await','async','from','as'
     ]);
 
+    /** @type {(c: string) => boolean} */
     const isIdStart = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_' || c === '$';
+    /** @type {(c: string) => boolean} */
     const isId = (c) => isIdStart(c) || (c >= '0' && c <= '9');
+    /** @type {(c: string) => boolean} */
     const isDigit = (c) => (c >= '0' && c <= '9');
 
     const s = String(text ?? '');
@@ -3425,6 +3429,22 @@ const game = {
     if (!path) {
       const empty = new Scene();
       empty.name = 'Empty Scene';
+
+      // New scenes should include an authored 2D camera so saving produces a usable scene.
+      // The editor will still render using its own editor camera.
+      try {
+        const r = this._renderer || renderer;
+        const w = Math.max(1, Number(r?.targetWidth) || 1920);
+        const h = Math.max(1, Number(r?.targetHeight) || 1080);
+        const cam2 = new Camera(0, 0, 1, 0, w, h);
+        // @ts-ignore - scenes often treat cameras as named objects
+        cam2.name = 'MainCamera';
+        cam2.active = true;
+        // Store as the scene's authored camera.
+        // @ts-ignore
+        empty.camera = cam2;
+      } catch {}
+
       this.currentScene = empty;
     } else {
       this.currentScene = await SceneLoader.load(path, renderer);
@@ -3635,7 +3655,9 @@ const game = {
     const isRmb = input.getMouseButton(2);
     const isMmb = input.getMouseButton(1);
 
+    /** @type {(a: number, b: number, t: number) => number} */
     const lerp = (a, b, t) => a + (b - a) * t;
+    /** @type {(a: number, b: number, t: number) => number} */
     const lerpAngle = (a, b, t) => {
       // Shortest path around the circle.
       const twoPi = Math.PI * 2;
@@ -3644,6 +3666,7 @@ const game = {
       if (d < -Math.PI) d += twoPi;
       return a + d * t;
     };
+    /** @type {(smoothTime: number) => number} */
     const smoothAlpha = (smoothTime) => {
       const t = Math.max(0, Number(dt) || 0);
       const st = Math.max(0.0001, Number(smoothTime) || 0.05);
@@ -3838,8 +3861,11 @@ const game = {
     // Cameras: show authored cameras (editor forces render cameras).
     const authoredCam2D = /** @type {any} */ (this._sceneCamera2D || null);
     const authoredCam3D = /** @type {any} */ (this._sceneCamera3D || null);
-    if (authoredCam2D) entries.push({ obj: authoredCam2D, depth: 0, label: `Camera: ${nameOf(authoredCam2D, 'Camera')}` });
-    if (authoredCam3D) entries.push({ obj: authoredCam3D, depth: 0, label: `Camera3D: ${nameOf(authoredCam3D, 'Camera3D')}` });
+    if (this.mode === '2d') {
+      if (authoredCam2D) entries.push({ obj: authoredCam2D, depth: 0, label: `Camera: ${nameOf(authoredCam2D, 'Camera')}` });
+    } else {
+      if (authoredCam3D) entries.push({ obj: authoredCam3D, depth: 0, label: `Camera3D: ${nameOf(authoredCam3D, 'Camera3D')}` });
+    }
 
     // Audio & lights
     if (Array.isArray(scene.audio)) {

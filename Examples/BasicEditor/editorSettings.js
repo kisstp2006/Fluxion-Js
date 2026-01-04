@@ -140,9 +140,73 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
     });
 
     // Used by project generation to avoid copying the engine into each project.
-    host._addStringWith(ui.editorSettingsForm, 'Fluxion install path', obj, 'fluxionInstallPath', () => {
-      saveEditorSettingsToStorage(host);
-    });
+    {
+      const form = ui.editorSettingsForm;
+
+      const field = document.createElement('div');
+      field.className = 'field';
+
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = 'Fluxion install path';
+
+      const value = document.createElement('div');
+      value.className = 'value';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.placeholder = 'Pick Fluxion/version.py to set this automatically';
+      input.value = String(obj.fluxionInstallPath || '');
+
+      const browse = document.createElement('button');
+      browse.type = 'button';
+      browse.className = 'btn';
+      browse.textContent = 'Browse…';
+
+      const apply = () => {
+        obj.fluxionInstallPath = String(input.value || '').trim();
+        saveEditorSettingsToStorage(host);
+      };
+
+      input.addEventListener('input', apply);
+      input.addEventListener('change', apply);
+
+      browse.addEventListener('click', async () => {
+        const electronAPI = /** @type {any} */ (window)?.electronAPI || null;
+        if (!electronAPI || typeof electronAPI.selectFile !== 'function') return;
+
+        const res = await electronAPI.selectFile({
+          title: 'Select Fluxion version.py',
+          filters: [{ name: 'Python', extensions: ['py'] }],
+        });
+
+        if (!res || !res.ok || res.canceled) return;
+        const picked = String(res.path || '').trim();
+        if (!picked) return;
+
+        const sep = picked.includes('\\') ? '\\' : '/';
+
+        // Derive engine root from picked file.
+        // Expected: <engineRoot>/Fluxion/version.py
+        const parts = picked.split(/[/\\]+/g).filter(Boolean);
+        const fileName = String(parts[parts.length - 1] || '').toLowerCase();
+        const parentName = String(parts[parts.length - 2] || '').toLowerCase();
+
+        if (fileName !== 'version.py' || parentName !== 'fluxion') {
+          window.alert('Please select the engine file at: <engineRoot>/Fluxion/version.py');
+          return;
+        }
+
+        input.value = parts.slice(0, -2).join(sep);
+        apply();
+      });
+
+      field.appendChild(label);
+      field.appendChild(value);
+      value.appendChild(input);
+      value.appendChild(browse);
+      form.appendChild(field);
+    }
   } else if (cat === 'grid2d') {
     const obj = host._editorSettings.grid2d;
     host._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => saveEditorSettingsToStorage(host));

@@ -77,22 +77,30 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
   }
   if (tag === 'Material') {
     InspectorFields.addStringWith(ui.common, 'name', stub, 'name', () => host.rebuildTree());
-    InspectorFields.addString(ui.common, 'source', stub, 'source');
-    InspectorFields.addCssColor(ui.common, 'baseColorFactor', stub, 'baseColorFactor');
-    InspectorFields.addString(ui.common, 'metallicFactor', stub, 'metallicFactor');
-    InspectorFields.addString(ui.common, 'roughnessFactor', stub, 'roughnessFactor');
-    InspectorFields.addString(ui.common, 'normalScale', stub, 'normalScale');
-    InspectorFields.addString(ui.common, 'aoStrength', stub, 'aoStrength');
-    InspectorFields.addCssColor(ui.common, 'emissiveFactor', stub, 'emissiveFactor');
-    InspectorFields.addString(ui.common, 'alphaMode', stub, 'alphaMode');
-    InspectorFields.addString(ui.common, 'alphaCutoff', stub, 'alphaCutoff');
-    InspectorFields.addString(ui.common, 'baseColorTexture', stub, 'baseColorTexture');
-    InspectorFields.addString(ui.common, 'metallicTexture', stub, 'metallicTexture');
-    InspectorFields.addString(ui.common, 'roughnessTexture', stub, 'roughnessTexture');
-    InspectorFields.addString(ui.common, 'normalTexture', stub, 'normalTexture');
-    InspectorFields.addString(ui.common, 'aoTexture', stub, 'aoTexture');
-    InspectorFields.addString(ui.common, 'emissiveTexture', stub, 'emissiveTexture');
-    InspectorFields.addString(ui.common, 'alphaTexture', stub, 'alphaTexture');
+
+    /** @type {Array<[string, string]>} */
+    const fields = [
+      ['source', 'source'],
+      ['baseColorFactor', 'baseColorFactor'],
+      ['metallicFactor', 'metallicFactor'],
+      ['roughnessFactor', 'roughnessFactor'],
+      ['normalScale', 'normalScale'],
+      ['aoStrength', 'aoStrength'],
+      ['emissiveFactor', 'emissiveFactor'],
+      ['alphaMode', 'alphaMode'],
+      ['alphaCutoff', 'alphaCutoff'],
+      ['baseColorTexture', 'baseColorTexture'],
+      ['metallicTexture', 'metallicTexture'],
+      ['roughnessTexture', 'roughnessTexture'],
+      ['normalTexture', 'normalTexture'],
+      ['aoTexture', 'aoTexture'],
+      ['emissiveTexture', 'emissiveTexture'],
+      ['alphaTexture', 'alphaTexture'],
+    ];
+
+    for (const [label, key] of fields) {
+      InspectorFields.addAutoWith(ui.common, label, stub, key, () => {});
+    }
     return;
   }
   if (tag === 'Skybox') {
@@ -528,30 +536,16 @@ export function rebuildInspector(host, ui) {
       if (!('alphaMode' in matStub)) matStub.alphaMode = '';
       if (!('alphaCutoff' in matStub)) matStub.alphaCutoff = '';
 
-      InspectorFields.addCssColorWith(ui.common, 'baseColor', matStub, 'baseColorFactor', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'metallic', matStub, 'metallicFactor', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'roughness', matStub, 'roughnessFactor', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'normalScale', matStub, 'normalScale', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'aoStrength', matStub, 'aoStrength', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addCssColorWith(ui.common, 'emissive', matStub, 'emissiveFactor', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'alphaMode', matStub, 'alphaMode', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
-      InspectorFields.addStringWith(ui.common, 'alphaCutoff', matStub, 'alphaCutoff', () => {
-        applyLiveMaterialFromStub(matStub);
-      });
+      const apply = () => applyLiveMaterialFromStub(matStub);
+
+      InspectorFields.addAutoWith(ui.common, 'baseColor', matStub, 'baseColorFactor', apply);
+      InspectorFields.addAutoWith(ui.common, 'metallic', matStub, 'metallicFactor', apply);
+      InspectorFields.addAutoWith(ui.common, 'roughness', matStub, 'roughnessFactor', apply);
+      InspectorFields.addAutoWith(ui.common, 'normalScale', matStub, 'normalScale', apply);
+      InspectorFields.addAutoWith(ui.common, 'aoStrength', matStub, 'aoStrength', apply);
+      InspectorFields.addAutoWith(ui.common, 'emissive', matStub, 'emissiveFactor', apply);
+      InspectorFields.addAutoWith(ui.common, 'alphaMode', matStub, 'alphaMode', apply);
+      InspectorFields.addAutoWith(ui.common, 'alphaCutoff', matStub, 'alphaCutoff', apply);
     }
 
     // Primitive params when meshDefinition is inline
