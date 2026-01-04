@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea, MeshNode, DirectionalLight, PointLight, SpotLight } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea, MeshNode, DirectionalLight, PointLight, SpotLight, loadGLTF } from "../../Fluxion/index.js";
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
@@ -446,6 +446,61 @@ const game = {
     ui.scriptEditorText?.addEventListener('scroll', () => this._syncScriptHighlightScroll());
     this._setMainTab('viewport');
 
+    // Drag & drop OS files onto the viewport (GLTF import).
+    // We only react to OS file drops (dataTransfer.files), not internal asset drags.
+    if (ui.viewportView) {
+      ui.viewportView.addEventListener('dragover', (e) => {
+        const dt = e.dataTransfer;
+        if (!dt) return;
+        // Some Chromium builds report dt.files as empty until drop.
+        const types = Array.from(dt.types || []);
+        const hasFiles = types.includes('Files') || (dt.files && dt.files.length > 0);
+        if (!hasFiles) return;
+        e.preventDefault();
+        try { dt.dropEffect = 'copy'; } catch {}
+      });
+
+      ui.viewportView.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        if (!dt || !dt.files || dt.files.length === 0) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const paths = [];
+        for (const f of Array.from(dt.files)) {
+          // @ts-ignore - Electron File objects often have a .path
+          const p = String(f && (f.path || f.webkitRelativePath || f.name) ? (f.path || f.webkitRelativePath || f.name) : '').trim();
+          if (p) paths.push(p);
+        }
+        if (paths.length === 0) return;
+
+        this._handleViewportExternalFileDrop(paths).catch((err) => {
+          console.error(err);
+          alert('Import failed');
+        });
+      });
+    }
+
+    // Global guard: prevent Chromium/Electron from trying to navigate on OS file drops.
+    // This also helps ensure drop events are delivered when dragging files over the app.
+    document.addEventListener('dragover', (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const types = Array.from(dt.types || []);
+      const hasFiles = types.includes('Files') || (dt.files && dt.files.length > 0);
+      if (!hasFiles) return;
+      e.preventDefault();
+    });
+    document.addEventListener('drop', (e) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const types = Array.from(dt.types || []);
+      const hasFiles = types.includes('Files') || (dt.files && dt.files.length > 0);
+      if (!hasFiles) return;
+      e.preventDefault();
+    });
+
     // Capture logs into the Console tab
     this._installEditorConsoleCapture();
 
@@ -575,6 +630,287 @@ const game = {
 
     // Show the startup project selection screen when the editor launches.
     this._openProjectSelect();
+  },
+
+  /**
+   * Viewport drop handler for OS files.
+   * - If any `.gltf` is present: import + spawn into the scene.
+   * - Otherwise: import files into the current asset folder.
+   * @param {string[]} filePathsAbs
+   */
+  async _handleViewportExternalFileDrop(filePathsAbs) {
+    const pathsIn = Array.isArray(filePathsAbs) ? filePathsAbs.map((p) => String(p || '').trim()).filter(Boolean) : [];
+    if (pathsIn.length === 0) return;
+
+    const hasGltf = pathsIn.some((p) => p.toLowerCase().endsWith('.gltf'));
+    const hasGlb = pathsIn.some((p) => p.toLowerCase().endsWith('.glb'));
+    if (hasGltf || hasGlb) {
+      await this._importDroppedGltfToScene(pathsIn);
+      return;
+    }
+
+    await this._importDroppedFilesToWorkspace(pathsIn);
+  },
+
+  /**
+   * Import arbitrary OS files into the project workspace (current asset folder).
+   * @param {string[]} filePathsAbs
+   */
+  async _importDroppedFilesToWorkspace(filePathsAbs) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
+    if (!canImport) {
+      alert('Import is only available in the Electron editor.');
+      return;
+    }
+
+    const pathsIn = Array.isArray(filePathsAbs) ? filePathsAbs.map((p) => String(p || '').trim()).filter(Boolean) : [];
+    if (pathsIn.length === 0) return;
+
+    const destDir = String(this._assetBrowserCtl?.state?.cwd || this._assetBrowser?.cwd || '.').trim() || '.';
+    const importRes = await electronAPI.importExternalFiles(pathsIn, destDir);
+    if (!importRes || !importRes.ok) {
+      alert(importRes && importRes.error ? importRes.error : 'Import failed');
+      return;
+    }
+
+    const imported = Array.isArray(importRes.imported) ? importRes.imported : [];
+    const firstRel = String(imported[0]?.destRel || '').trim();
+
+    // Refresh asset browser view and select the first imported file.
+    const ctl = this._assetBrowserCtl;
+    if (ctl) {
+      if (firstRel) {
+        ctl.state.selected = firstRel;
+        ctl.state.selectedIsDir = false;
+      }
+      await ctl.render();
+    }
+  },
+
+  /**
+   * Import a dropped GLTF into the workspace and spawn it in the scene.
+   * @param {string[]} filePathsAbs
+   */
+  async _importDroppedGltfToScene(filePathsAbs) {
+    const scene = this.currentScene;
+    const renderer = this._renderer;
+    if (!scene || !renderer) return;
+
+    const gl = renderer.gl;
+    if (!gl) {
+      alert('WebGL context is not available yet.');
+      return;
+    }
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
+    if (!canImport) {
+      alert('Import is only available in the Electron editor.');
+      return;
+    }
+
+    const pathsIn = Array.isArray(filePathsAbs) ? filePathsAbs.map((p) => String(p || '').trim()).filter(Boolean) : [];
+    if (pathsIn.length === 0) return;
+
+    const gltfsIn = pathsIn.filter((p) => p.toLowerCase().endsWith('.gltf'));
+    const glbsIn = pathsIn.filter((p) => p.toLowerCase().endsWith('.glb'));
+
+    if (gltfsIn.length === 0) {
+      if (glbsIn.length > 0) {
+        alert('GLB (.glb) is not supported yet. Please drop a .gltf file.');
+      }
+      return;
+    }
+
+    // Import everything dropped into the current asset folder (helps GLTF sidecars: .bin/.png/etc).
+    const destDir = String(this._assetBrowserCtl?.state?.cwd || this._assetBrowser?.cwd || '.').trim() || '.';
+    const importRes = await electronAPI.importExternalFiles(pathsIn, destDir);
+    if (!importRes || !importRes.ok) {
+      alert(importRes && importRes.error ? importRes.error : 'Import failed');
+      return;
+    }
+
+    /** @type {{ destRel?: string }[]} */
+    const imported = Array.isArray(importRes.imported) ? importRes.imported : [];
+    const importedGltf = imported.find((x) => String(x?.destRel || '').toLowerCase().endsWith('.gltf'))
+      || imported
+        .map((x) => String(x?.destRel || ''))
+        .filter(Boolean)
+        .map((rel) => ({ destRel: String(rel || '') }))
+        .find((x) => String(x?.destRel || '').toLowerCase().endsWith('.gltf'));
+
+    const destRelRaw = String(importedGltf?.destRel || '').trim();
+    if (!destRelRaw) return;
+    const destRel = destRelRaw.split('\\').join('/');
+
+    /** @type {any} */
+    const sceneAny = /** @type {any} */ (scene);
+    if (!Array.isArray(sceneAny._meshXml)) sceneAny._meshXml = [];
+
+    const fileName = destRel.split('/').pop() || 'Model.gltf';
+    const base0 = fileName.replace(/\.[^/.]+$/, '');
+    const base = String(base0 || 'Model').replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'Model';
+
+    /** @param {string} name */
+    const meshNameIsFree = (name) => {
+      const n = String(name || '').trim();
+      if (!n) return false;
+      if (scene.getMeshDefinition && scene.getMeshDefinition(n)) return false;
+      const meshesXml = /** @type {any[]} */ (Array.isArray(sceneAny._meshXml) ? sceneAny._meshXml : []);
+      if (meshesXml.some((m) => m && String(m.name || '') === n)) return false;
+      return true;
+    };
+
+    let meshName = base;
+    if (!meshNameIsFree(meshName)) {
+      for (let i = 2; i < 1000; i++) {
+        const n = `${base}${i}`;
+        if (meshNameIsFree(n)) { meshName = n; break; }
+      }
+    }
+
+    // Store as workspace-root absolute (stable regardless of scene location).
+    const sourceForXml = `/${destRel.replace(/^\/+/, '')}`;
+
+    // Preserve authoring for round-tripping.
+    sceneAny._meshXml.push({ __xmlTag: 'Mesh', name: meshName, source: sourceForXml, type: '', color: '', params: {} });
+
+    // Start async load+registration, mirroring SceneLoader's GLTF registration behavior.
+    const gltfUrl = `fluxion://workspace/${encodeURIComponent(destRel.replace(/^\/+/, ''))}`;
+
+    const loadPromise = (async () => {
+      try {
+        /** @type {any} */
+        const result = await loadGLTF(gltfUrl, gl, renderer);
+
+        const ns = `${meshName}::`;
+        /** @param {string} k */
+        const nsMat = (k) => `${ns}${k}`;
+        /** @param {string} k */
+        const nsMesh = (k) => `${ns}${k}`;
+
+        for (const [meshN, mesh] of result.meshes.entries()) {
+          const matKey = result.meshMaterials?.get(meshN);
+          const hint = nsMat(matKey || '__gltf_default__');
+          scene.registerMesh(nsMesh(meshN), { type: 'gltf', mesh, material: hint });
+          if (!scene.getMeshDefinition(meshN)) {
+            scene.registerMesh(meshN, { type: 'gltf', mesh, material: hint });
+          }
+        }
+
+        if (result.meshes.size > 0) {
+          const firstEntry = Array.from(result.meshes.entries())[0];
+          const firstMeshName = firstEntry[0];
+          const primMatch = /^(.*)_Primitive_(\d+)$/.exec(firstMeshName);
+          const baseName = primMatch ? primMatch[1] : firstMeshName;
+
+          const partEntries = Array.from(result.meshes.entries())
+            .filter(([k]) => k === baseName || k.startsWith(`${baseName}_Primitive_`))
+            .sort((a, b) => {
+              const ma = /_Primitive_(\d+)$/.exec(a[0]);
+              const mb = /_Primitive_(\d+)$/.exec(b[0]);
+              const ia = ma ? parseInt(ma[1]) : 0;
+              const ib = mb ? parseInt(mb[1]) : 0;
+              return ia - ib;
+            });
+
+          if (partEntries.length <= 1) {
+            const firstMesh = firstEntry[1];
+            const matKey = result.meshMaterials?.get(firstMeshName);
+            scene.registerMesh(meshName, { type: 'gltf', mesh: firstMesh, material: nsMat(matKey || '__gltf_default__') });
+          } else {
+            const parts = partEntries.map(([k, mesh]) => ({
+              name: nsMesh(k),
+              mesh,
+              material: nsMat(result.meshMaterials?.get(k) || '__gltf_default__'),
+            }));
+            scene.registerMesh(meshName, { type: 'gltf-group', parts });
+          }
+        }
+
+        for (const [matName, mat] of result.materials.entries()) {
+          scene.registerMaterial(nsMat(matName), mat);
+          if (!scene.getMaterialDefinition(matName)) {
+            scene.registerMaterial(matName, mat);
+          }
+        }
+
+        return result;
+      } catch (err) {
+        console.error(`Failed to load GLTF ${gltfUrl}:`, err);
+        return null;
+      }
+    })();
+
+    renderer?.trackAssetPromise?.(loadPromise);
+    scene.registerMesh(meshName, { type: 'gltf', promise: loadPromise, url: gltfUrl });
+
+    // Spawn a MeshNode in front of the current 3D camera.
+    // (Reuses the same spawn math as Add Node.)
+    const cam3 = /** @type {any} */ (this._editorCamera3D || this._sceneCamera3D || null);
+    const px = Number(cam3?.position?.x) || 0;
+    const py = Number(cam3?.position?.y) || 0;
+    const pz = Number(cam3?.position?.z) || 0;
+
+    const tx = Number(cam3?.target?.x);
+    const ty = Number(cam3?.target?.y);
+    const tz = Number(cam3?.target?.z);
+
+    let fx = Number.isFinite(tx) ? (tx - px) : 0;
+    let fy = Number.isFinite(ty) ? (ty - py) : 0;
+    let fz = Number.isFinite(tz) ? (tz - pz) : -1;
+    let fl = Math.hypot(fx, fy, fz);
+    if (!Number.isFinite(fl) || fl <= 1e-6) { fx = 0; fy = 0; fz = -1; fl = 1; }
+    fx /= fl; fy /= fl; fz /= fl;
+
+    const spawnDist = 3;
+    const spawnX = px + fx * spawnDist;
+    const spawnY = py + fy * spawnDist;
+    const spawnZ = pz + fz * spawnDist;
+
+    const node = new MeshNode();
+    node.name = `${meshName}Node`;
+    node.setPosition(spawnX, spawnY, spawnZ);
+    node.setSource(meshName);
+    scene.add(node);
+
+    // When the GLTF finishes loading, bind the resolved definition onto this node.
+    loadPromise.then(async () => {
+      try {
+        const def = scene.getMeshDefinition(meshName);
+        if (!def) return;
+
+        if (def.type === 'gltf' && def.mesh) {
+          node.setMeshDefinition(def);
+        } else if (def.type === 'gltf-group' && Array.isArray(def.parts)) {
+          await SceneLoader._expandGltfGroupMeshNode(node, def, scene);
+        }
+
+        // Auto-apply GLTF default material hint when present.
+        if (!node.material && node.meshDefinition && node.meshDefinition.type === 'gltf' && node.meshDefinition.material) {
+          const hint = node.meshDefinition.material;
+          const mdef = (typeof hint === 'string') ? scene.getMaterialDefinition(hint) : hint;
+          if (mdef) {
+            if (typeof mdef.then === 'function') {
+              const mat = await mdef;
+              if (mat) node.setMaterial(mat);
+            } else {
+              node.setMaterial(mdef);
+            }
+          }
+        }
+
+        if (this._renderer) this._requestViewportSync(this._renderer);
+      } catch (e) {
+        console.warn('Failed to finalize GLTF spawn', e);
+      }
+    }).catch(() => {});
+
+    this.selected = node;
+    this.rebuildTree();
+    this.rebuildInspector();
+    if (this._renderer) this._requestViewportSync(this._renderer);
   },
 
   /** @param {'assets'|'console'} tab */
@@ -1898,15 +2234,39 @@ const game = {
       }
     }
 
-    // Use loader-preserved ordering when available.
-    const ordered = Array.isArray(sceneAny._sourceOrder) ? sceneAny._sourceOrder : null;
-    const objsFallback = [];
-    if (!ordered) {
-      if (Array.isArray(scene.objects)) objsFallback.push(...scene.objects);
-      if (Array.isArray(scene.audio)) objsFallback.push(...scene.audio);
-      if (Array.isArray(scene.lights)) objsFallback.push(...scene.lights);
+    // Use loader-preserved ordering when available, but never drop newly-created nodes.
+    // `_sourceOrder` is only populated by the loader; the editor can add new nodes later.
+    /** @type {any[]} */
+    const allLive = [];
+    if (Array.isArray(scene.objects)) allLive.push(...scene.objects);
+    if (Array.isArray(scene.audio)) allLive.push(...scene.audio);
+    if (Array.isArray(scene.lights)) allLive.push(...scene.lights);
+
+    const liveSet = new Set(allLive.filter(Boolean));
+    // Cameras are serialized from authored state, but they can appear in `_sourceOrder`.
+    if (Array.isArray(sceneAny.cameras)) for (const c of sceneAny.cameras) liveSet.add(c);
+    if (Array.isArray(sceneAny.cameras3D)) for (const c of sceneAny.cameras3D) liveSet.add(c);
+
+    /** @type {any[]|null} */
+    let ordered = Array.isArray(sceneAny._sourceOrder) ? sceneAny._sourceOrder.filter(Boolean) : null;
+    /** @type {any[]} */
+    const toWrite = [];
+
+    if (ordered && ordered.length > 0) {
+      // Keep only objects that still exist (prevents saving deleted nodes).
+      ordered = ordered.filter((o) => liveSet.has(o));
+      toWrite.push(...ordered);
+
+      const seen = new Set(toWrite);
+      for (const o of allLive) {
+        if (!o) continue;
+        if (seen.has(o)) continue;
+        seen.add(o);
+        toWrite.push(o);
+      }
+    } else {
+      toWrite.push(...allLive);
     }
-    const toWrite = ordered || objsFallback;
 
     for (const o of toWrite) {
       if (!o) continue;
@@ -2161,6 +2521,7 @@ const game = {
       addNumAttr(parts, 'height', obj.height);
       addNumAttr(parts, 'frameWidth', obj.frameWidth);
       addNumAttr(parts, 'frameHeight', obj.frameHeight);
+      if (typeof obj.rotation === 'number' && Number.isFinite(obj.rotation) && obj.rotation !== 0) addNumAttr(parts, 'rotation', obj.rotation);
       addAttr(parts, 'imageSrc', obj.imageSrc ?? obj.textureKey ?? '', { allowEmpty: true });
 
       const childLines = [];
@@ -2208,6 +2569,7 @@ const game = {
       }
       addNumAttr(parts, 'width', obj.width);
       addNumAttr(parts, 'height', obj.height);
+      if (typeof obj.rotation === 'number' && Number.isFinite(obj.rotation) && obj.rotation !== 0) addNumAttr(parts, 'rotation', obj.rotation);
       addAttr(parts, 'imageSrc', obj.imageSrc ?? obj.textureKey ?? '', { allowEmpty: true });
 
       const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];

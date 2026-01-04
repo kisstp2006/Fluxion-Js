@@ -812,9 +812,11 @@ export default class SceneLoader {
             const y = getFloat("y");
             const w = getFloat("width", 1);
             const h = getFloat("height", 1);
+            const rotation = getFloat("rotation", 0);
             
             const sprite = new Sprite(renderer, src, x, y, w, h);
             sprite.name = getString("name");
+            sprite.rotation = rotation;
             // Preserve XML attribute for editor tooling / debugging.
             sprite.imageSrc = src;
             obj = sprite;
@@ -827,11 +829,13 @@ export default class SceneLoader {
             const y = getFloat("y");
             const w = getFloat("width", 1);
             const h = getFloat("height", 1);
+            const rotation = getFloat("rotation", 0);
             const fw = getFloat("frameWidth");
             const fh = getFloat("frameHeight");
             
             const sprite = new AnimatedSprite(renderer, src, x, y, w, h, fw, fh);
             sprite.name = getString("name");
+            sprite.rotation = rotation;
             // Preserve XML attribute for editor tooling / debugging.
             sprite.imageSrc = src;
             
