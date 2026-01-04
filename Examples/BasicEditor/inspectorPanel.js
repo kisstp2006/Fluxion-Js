@@ -137,25 +137,30 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       const back = String(stub.back || '').trim();
 
       try {
-        if (colorStr) {
-          const c = SceneLoader._parseColor(colorStr);
-          r.setSkybox(new Skybox(r.gl, [c[0], c[1], c[2], c[3]]));
+        if (!!stub.equirectangular) {
+          if (srcStr) {
+            const src = SceneLoader._resolveSceneResourceUrl(srcStr, baseUrl);
+            r.setSkybox(new Skybox(r.gl, src, true));
+          } else {
+            r.setSkybox(null);
+          }
           return;
         }
 
-        if (srcStr && !!stub.equirectangular) {
-          const src = SceneLoader._resolveSceneResourceUrl(srcStr, baseUrl);
-          r.setSkybox(new Skybox(r.gl, src, true));
-          return;
-        }
-
+        // Cubemap (6 faces)
         if (right && left && top && bottom && front && back) {
           const faces = [right, left, top, bottom, front, back].map((p) => SceneLoader._resolveSceneResourceUrl(p, baseUrl));
           r.setSkybox(new Skybox(r.gl, faces, false));
           return;
         }
 
-        // No valid skybox inputs => disable skybox.
+        // Solid color fallback
+        if (colorStr) {
+          const c = SceneLoader._parseColor(colorStr);
+          r.setSkybox(new Skybox(r.gl, [c[0], c[1], c[2], c[3]]));
+          return;
+        }
+
         r.setSkybox(null);
       } catch (e) {
         console.warn('Failed to apply skybox from inspector', e);
@@ -178,30 +183,37 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       applyAmbientFromStub();
     });
 
-    InspectorFields.addStringWith(ui.common, 'source', stub, 'source', () => {
-      applySkyboxFromStub();
-    });
     InspectorFields.addToggleWith(ui.common, 'equirectangular', stub, 'equirectangular', () => {
       applySkyboxFromStub();
+      // Rebuild to show/hide the correct fields.
+      try { host.rebuildInspector(); } catch {}
     });
-    InspectorFields.addStringWith(ui.common, 'right', stub, 'right', () => {
-      applySkyboxFromStub();
-    });
-    InspectorFields.addStringWith(ui.common, 'left', stub, 'left', () => {
-      applySkyboxFromStub();
-    });
-    InspectorFields.addStringWith(ui.common, 'top', stub, 'top', () => {
-      applySkyboxFromStub();
-    });
-    InspectorFields.addStringWith(ui.common, 'bottom', stub, 'bottom', () => {
-      applySkyboxFromStub();
-    });
-    InspectorFields.addStringWith(ui.common, 'front', stub, 'front', () => {
-      applySkyboxFromStub();
-    });
-    InspectorFields.addStringWith(ui.common, 'back', stub, 'back', () => {
-      applySkyboxFromStub();
-    });
+
+    // Show only the relevant inputs.
+    if (!!stub.equirectangular) {
+      InspectorFields.addStringWith(ui.common, 'source', stub, 'source', () => {
+        applySkyboxFromStub();
+      });
+    } else {
+      InspectorFields.addStringWith(ui.common, 'right', stub, 'right', () => {
+        applySkyboxFromStub();
+      });
+      InspectorFields.addStringWith(ui.common, 'left', stub, 'left', () => {
+        applySkyboxFromStub();
+      });
+      InspectorFields.addStringWith(ui.common, 'top', stub, 'top', () => {
+        applySkyboxFromStub();
+      });
+      InspectorFields.addStringWith(ui.common, 'bottom', stub, 'bottom', () => {
+        applySkyboxFromStub();
+      });
+      InspectorFields.addStringWith(ui.common, 'front', stub, 'front', () => {
+        applySkyboxFromStub();
+      });
+      InspectorFields.addStringWith(ui.common, 'back', stub, 'back', () => {
+        applySkyboxFromStub();
+      });
+    }
 
     // Apply current values once so selecting the stub syncs renderer state.
     applyAmbientFromStub();

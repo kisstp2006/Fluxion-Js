@@ -1855,6 +1855,8 @@ const game = {
     const scene = this.currentScene;
     if (!scene) return;
 
+    const r = this._renderer;
+
     // Project may disable 3D rendering.
     const { allow3D } = this._getProjectRenderEnableFlags();
     if (!allow3D) return;
@@ -1865,9 +1867,11 @@ const game = {
     const sceneAny = /** @type {any} */ (scene);
 
     if (!sceneAny._skyboxXml || typeof sceneAny._skyboxXml !== 'object') {
-      sceneAny._skyboxXml = {
+      /** @type {any} */
+      const stub = {
         __xmlTag: 'Skybox',
-        color: '',
+        // Default "basic" skybox is a neutral gray.
+        color: '#808080',
         ambientColor: '',
         source: '',
         equirectangular: false,
@@ -1878,6 +1882,56 @@ const game = {
         front: '',
         back: '',
       };
+
+      // Initialize from current renderer state when possible.
+      // This makes "Add Skybox" reflect what you're currently seeing.
+      /** @param {number} n */
+      const toHex2 = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+      /** @param {number} rr @param {number} gg @param {number} bb */
+      const rgbToHex = (rr, gg, bb) => `#${toHex2(rr)}${toHex2(gg)}${toHex2(bb)}`;
+
+      if (r) {
+        // Ambient (u_ambientColor)
+        const ac = Array.isArray(r.pbrAmbientColor) ? r.pbrAmbientColor : null;
+        if (ac && ac.length >= 3) {
+          const ar = Number(ac[0]);
+          const ag = Number(ac[1]);
+          const ab = Number(ac[2]);
+          if (Number.isFinite(ar) && Number.isFinite(ag) && Number.isFinite(ab)) {
+            stub.ambientColor = rgbToHex(ar * 255, ag * 255, ab * 255);
+          }
+        }
+
+        // Skybox source parameters
+        const sb = /** @type {any} */ (r.currentSkybox || null);
+        const spec = sb && typeof sb.getSourceSpec === 'function' ? sb.getSourceSpec() : null;
+
+        if (spec && spec.kind === 'color' && Array.isArray(spec.color) && spec.color.length >= 3) {
+          const cr = Number(spec.color[0]);
+          const cg = Number(spec.color[1]);
+          const cb = Number(spec.color[2]);
+          if (Number.isFinite(cr) && Number.isFinite(cg) && Number.isFinite(cb)) {
+            stub.color = rgbToHex(cr * 255, cg * 255, cb * 255);
+          }
+        } else if (spec && spec.kind === 'equirectangular') {
+          // Color is not meaningful for an equirect skybox.
+          stub.color = '';
+          if (typeof spec.source === 'string') stub.source = spec.source;
+          stub.equirectangular = true;
+        } else if (spec && spec.kind === 'cubemap' && Array.isArray(spec.faces) && spec.faces.length === 6) {
+          // Color is not meaningful for a cubemap skybox.
+          stub.color = '';
+          const faces = spec.faces;
+          if (typeof faces[0] === 'string') stub.right = faces[0];
+          if (typeof faces[1] === 'string') stub.left = faces[1];
+          if (typeof faces[2] === 'string') stub.top = faces[2];
+          if (typeof faces[3] === 'string') stub.bottom = faces[3];
+          if (typeof faces[4] === 'string') stub.front = faces[4];
+          if (typeof faces[5] === 'string') stub.back = faces[5];
+        }
+      }
+
+      sceneAny._skyboxXml = stub;
     } else {
       // Ensure newly-added fields exist for older scenes.
       if (!('ambientColor' in sceneAny._skyboxXml)) sceneAny._skyboxXml.ambientColor = '';
@@ -3059,6 +3113,7 @@ const game = {
     // Editor: reset environment defaults on load so settings don't leak between scenes.
     if (renderer) {
       renderer.pbrAmbientColor = [0.03, 0.03, 0.03];
+      if (typeof renderer.setSkybox === 'function') renderer.setSkybox(null);
     }
 
     if (!path) {

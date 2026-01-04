@@ -24,6 +24,12 @@ export default class Skybox {
     this.gl = gl;
     this.cubemapTexture = null;
     this.isEquirectangular = isEquirectangular;
+
+    // Best-effort metadata for editor tooling / round-tripping.
+    /** @type {'color'|'equirectangular'|'cubemap'|'unknown'} */
+    this._sourceKind = 'unknown';
+    /** @type {any} */
+    this._sourceValue = null;
     this._mesh = null;
     this._loaded = false;
     // For environment reflections (roughness LOD)
@@ -35,12 +41,38 @@ export default class Skybox {
     
     // Check if source is a solid color (array of numbers)
     if (Array.isArray(source) && source.length >= 3 && typeof source[0] === 'number') {
+      this._sourceKind = 'color';
+      this._sourceValue = Array.isArray(source) ? source.slice(0, 4) : source;
       this._loadSolidColor(source);
     } else if (isEquirectangular) {
+      this._sourceKind = 'equirectangular';
+      this._sourceValue = source;
       this._loadEquirectangular(source);
     } else {
+      // Expecting a cubemap face array.
+      if (Array.isArray(source) && source.length === 6) {
+        this._sourceKind = 'cubemap';
+        this._sourceValue = source.slice(0, 6);
+      }
       this._loadCubemap(source);
     }
+  }
+
+  /**
+   * Best-effort original source metadata (useful for editors).
+   * @returns {{ kind: 'color', color: number[] } | { kind: 'equirectangular', source: any, isEquirectangular: true } | { kind: 'cubemap', faces: any[] } | { kind: 'unknown' }}
+   */
+  getSourceSpec() {
+    if (this._sourceKind === 'color') {
+      return { kind: 'color', color: Array.isArray(this._sourceValue) ? this._sourceValue : [] };
+    }
+    if (this._sourceKind === 'equirectangular') {
+      return { kind: 'equirectangular', source: this._sourceValue, isEquirectangular: true };
+    }
+    if (this._sourceKind === 'cubemap') {
+      return { kind: 'cubemap', faces: Array.isArray(this._sourceValue) ? this._sourceValue : [] };
+    }
+    return { kind: 'unknown' };
   }
 
   /**
