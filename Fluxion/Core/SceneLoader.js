@@ -553,7 +553,14 @@ export default class SceneLoader {
                             obj.setMeshDefinition(def);
                         }
                     } else {
-                        console.warn(`MeshNode "${obj.name}": No mesh definition found for source "${obj.source}"`);
+                        // Built-in primitives (Cube/Sphere/etc.) are not registered as meshDefinitions.
+                        // Avoid warning in that case.
+                        const src = String(obj.source || '');
+                        const prim = src.toLowerCase();
+                        const isPrimitive = prim === 'cube' || prim === 'box' || prim === 'sphere' || prim === 'plane' || prim === 'quad' || prim === 'triangle' || prim === 'cone' || prim === 'capsule' || prim === 'coloredcube';
+                        if (!isPrimitive) {
+                            console.warn(`MeshNode "${obj.name}": No mesh definition found for source "${obj.source}"`);
+                        }
                     }
 
                     // If the mesh definition provides a default material and the node didn't specify one,

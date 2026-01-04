@@ -5,7 +5,7 @@
  */
 
 import * as InspectorFields from "./inspectorFields.js";
-import { SceneLoader, Skybox, Material } from "../../Fluxion/index.js";
+import { SceneLoader, Skybox, Material, loadGLTF } from "../../Fluxion/index.js";
 
 // Cache last-applied values for Skybox stubs so inspector rebuilds don't
 // constantly recreate skyboxes (which can flash black while textures upload).
@@ -184,6 +184,44 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       front,
       back,
     });
+
+    // If the renderer already has a matching skybox (e.g. loaded from scene),
+    // don't recreate it just because the inspector opened.
+    try {
+      if (!cache.skyboxKey) {
+        const sb = /** @type {any} */ (r.currentSkybox || null);
+        const spec = sb && typeof sb.getSourceSpec === 'function' ? sb.getSourceSpec() : null;
+        if (spec && spec.kind === 'color' && Array.isArray(spec.color)) {
+          // We don't know exact string formatting; skip this optimization for colors.
+        } else if (spec && spec.kind === 'equirectangular' && !!stub.equirectangular) {
+          const currentSrc = typeof spec.source === 'string' ? String(spec.source).trim() : '';
+          if (currentSrc && currentSrc === srcStr) {
+            cache.skyboxKey = skyboxKey;
+            _skyboxApplyCache.set(stub, cache);
+            return;
+          }
+        } else if (spec && spec.kind === 'cubemap' && Array.isArray(spec.faces) && !stub.equirectangular) {
+          const faces = spec.faces;
+          const cur = {
+            equirectangular: false,
+            src: '',
+            color: '',
+            right: typeof faces[0] === 'string' ? String(faces[0]).trim() : '',
+            left: typeof faces[1] === 'string' ? String(faces[1]).trim() : '',
+            top: typeof faces[2] === 'string' ? String(faces[2]).trim() : '',
+            bottom: typeof faces[3] === 'string' ? String(faces[3]).trim() : '',
+            front: typeof faces[4] === 'string' ? String(faces[4]).trim() : '',
+            back: typeof faces[5] === 'string' ? String(faces[5]).trim() : '',
+          };
+          const curKey = JSON.stringify(cur);
+          if (curKey === skyboxKey) {
+            cache.skyboxKey = skyboxKey;
+            _skyboxApplyCache.set(stub, cache);
+            return;
+          }
+        }
+      }
+    } catch {}
     if (cache.skyboxKey === skyboxKey) return;
     cache.skyboxKey = skyboxKey;
     _skyboxApplyCache.set(stub, cache);
@@ -423,8 +461,8 @@ export function rebuildInspector(host, ui) {
 
   // MeshNode fields
   if (obj && obj.constructor?.name === 'MeshNode') {
-    InspectorFields.addString(ui.common, 'source', obj, 'source');
-    // --- Material (.mat) input + inline overrides ---
+    // MeshNode.source is normally a primitive name or a named <Mesh name="..."/> resource.
+    // In the editor, also accept a direct .gltf/.glb path and auto-register a mesh resource.
     const sceneAny = /** @type {any} */ (host.currentScene || null);
     const getRenderer = () => /** @type {any} */ (host?._renderer || host?.engine?.renderer || null);
     const getSceneBaseUrl = () => {
@@ -437,6 +475,236 @@ export function rebuildInspector(host, ui) {
         return (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
       }
     };
+
+    const ensureMeshXmlArray = () => {
+      if (!sceneAny) return /** @type {any[]} */ ([]);
+      if (!Array.isArray(sceneAny._meshXml)) sceneAny._meshXml = [];
+      return /** @type {any[]} */ (sceneAny._meshXml);
+    };
+
+    /** @returns {Map<string, string[]>} */
+    const getGltfMaterialKeysByMeshResource = () => {
+      if (!sceneAny) return new Map();
+      if (!(sceneAny.__gltfMaterialKeysByMeshResource instanceof Map)) {
+        sceneAny.__gltfMaterialKeysByMeshResource = new Map();
+      }
+      return /** @type {Map<string, string[]>} */ (sceneAny.__gltfMaterialKeysByMeshResource);
+    };
+
+    /** @returns {Map<string, string>} */
+    const getMaterialOverrideSourceByKey = () => {
+      if (!sceneAny) return new Map();
+      if (!(sceneAny.__materialOverrideSourceByKey instanceof Map)) {
+        sceneAny.__materialOverrideSourceByKey = new Map();
+      }
+      return /** @type {Map<string, string>} */ (sceneAny.__materialOverrideSourceByKey);
+    };
+
+    /** @param {string} base */
+    const makeUniqueMeshName = (base) => {
+      const clean = String(base || 'Mesh').replace(/[^a-zA-Z0-9_\-]/g, '_') || 'Mesh';
+      const used = new Set();
+      try {
+        if (sceneAny?.meshDefinitions instanceof Map) {
+          for (const k of sceneAny.meshDefinitions.keys()) used.add(String(k));
+        }
+      } catch {}
+      for (const m of ensureMeshXmlArray()) used.add(String(m?.name || ''));
+      if (!used.has(clean)) return clean;
+      for (let i = 2; i < 10000; i++) {
+        const n = `${clean}_${i}`;
+        if (!used.has(n)) return n;
+      }
+      return `${clean}_${Date.now()}`;
+    };
+
+    /** @param {string} srcRaw */
+    const registerGltfMeshResource = (srcRaw) => {
+      if (!sceneAny) return null;
+      const r = getRenderer();
+      if (!r || !r.gl) return null;
+
+      const src = String(srcRaw || '').trim();
+      const baseUrl = getSceneBaseUrl();
+
+      const meshes = ensureMeshXmlArray();
+
+      // Reuse an existing <Mesh> resource if it already points at this GLTF.
+      // This avoids creating duplicates every time the user picks the same file.
+      /** @param {any} s */
+      const normalizeSrc = (s) => String(s || '').trim().replace(/\\/g, '/');
+      const srcNorm = normalizeSrc(src);
+      const srcAlt = srcNorm.startsWith('fluxion://workspace/') ? srcNorm.replace(/^fluxion:\/\/workspace\//, '') : `fluxion://workspace/${srcNorm.replace(/^\/+/, '')}`;
+      const existing = meshes.find((m) => {
+        if (!m || m.__xmlTag !== 'Mesh') return false;
+        const ms = normalizeSrc(m.source);
+        return ms === srcNorm || ms === srcAlt;
+      }) || null;
+
+      if (existing && String(existing.name || '').trim()) {
+        const existingName = String(existing.name).trim();
+        // Ensure there's at least a placeholder definition for the renderer to resolve.
+        // If it already exists, we won't stomp it.
+        try {
+          const hasDef = !!(sceneAny.getMeshDefinition?.(existingName));
+          if (!hasDef) sceneAny.registerMesh?.(existingName, { type: 'gltf', url: (() => { try { return new URL(src, baseUrl).toString(); } catch { return src; } })() });
+        } catch {}
+        return { meshName: existingName, createdStub: false, loadPromise: null };
+      }
+
+      // Derive a stable mesh name from the file name.
+      const file = src.replace(/^fluxion:\/\/workspace\//, '').split('/').pop()?.split('\\').pop() || 'Model';
+      const base = file.replace(/\.[^.]+$/, '') || 'Model';
+      const meshName = makeUniqueMeshName(base);
+
+      // Add/keep XML stub for round-tripping.
+      meshes.push({
+        __xmlTag: 'Mesh',
+        name: meshName,
+        source: src,
+        type: '',
+        color: '',
+        params: {},
+      });
+
+      // Resolve URL like SceneLoader does.
+      let gltfUrl = '';
+      try {
+        gltfUrl = new URL(src, baseUrl).toString();
+      } catch {
+        gltfUrl = src;
+      }
+
+      const loadPromise = (async () => {
+        try {
+          const result = await loadGLTF(gltfUrl, r.gl, r);
+          if (!result) return null;
+
+		  const resultAny = /** @type {any} */ (result);
+
+          // Namespace to avoid collisions, same strategy as SceneLoader.
+          const ns = `${meshName}::`;
+      /** @param {string} k */
+      const nsMat = (k) => `${ns}${k}`;
+      /** @param {string} k */
+      const nsMesh = (k) => `${ns}${k}`;
+
+          for (const [meshKey, mesh] of result.meshes.entries()) {
+			const matKey = resultAny.meshMaterials?.get(meshKey || '');
+            const hint = nsMat(matKey || '__gltf_default__');
+            sceneAny.registerMesh?.(nsMesh(meshKey), { type: 'gltf', mesh, material: hint });
+            if (!sceneAny.getMeshDefinition?.(meshKey)) sceneAny.registerMesh?.(meshKey, { type: 'gltf', mesh, material: hint });
+          }
+
+          // Point meshName at the first mesh.
+          // IMPORTANT: avoid registering a gltf-group here.
+          // The SceneLoader expands gltf-group into NEW MeshNodes, but in the inspector flow
+          // we want to keep editing the currently selected MeshNode.
+          if (result.meshes.size > 0) {
+            const firstEntry = Array.from(result.meshes.entries())[0];
+            const firstMeshName = firstEntry[0];
+            const mesh = firstEntry[1];
+            const matKey = resultAny.meshMaterials?.get(firstMeshName);
+            sceneAny.registerMesh?.(meshName, { type: 'gltf', mesh, material: nsMat(matKey || '__gltf_default__') });
+          }
+
+          // Register materials.
+          /** @type {string[]} */
+          const materialKeys = [];
+          for (const [matName, mat] of result.materials.entries()) {
+            const key = nsMat(matName);
+            materialKeys.push(key);
+            sceneAny.registerMaterial?.(key, mat);
+            if (!sceneAny.getMaterialDefinition?.(matName)) sceneAny.registerMaterial?.(matName, mat);
+          }
+
+          // Track how many materials are present on this model so the inspector can show N inputs.
+          try {
+            getGltfMaterialKeysByMeshResource().set(meshName, materialKeys);
+          } catch {}
+
+          return result;
+        } catch (e) {
+          console.warn('Failed to load GLTF for MeshNode source', gltfUrl, e);
+          return null;
+        }
+      })();
+
+      r.trackAssetPromise?.(loadPromise);
+      // Seed definition as a promise (mirrors SceneLoader behavior)
+      sceneAny.registerMesh?.(meshName, { type: 'gltf', promise: loadPromise, url: gltfUrl });
+      return { meshName, createdStub: true, loadPromise };
+    };
+
+    InspectorFields.addStringWithDrop(ui.common, 'source', obj, 'source', () => {
+      const raw = String(obj.source || '').trim();
+      const lower = raw.toLowerCase();
+      const isGltfPath = lower.endsWith('.gltf') || lower.endsWith('.glb') || lower.includes('.gltf?') || lower.includes('.glb?') || lower.endsWith('.gltf#') || lower.endsWith('.glb#');
+
+      if (sceneAny && isGltfPath) {
+        const reg = registerGltfMeshResource(raw);
+        const meshName = reg && typeof reg === 'object' ? reg.meshName : null;
+        const createdStub = !!(reg && typeof reg === 'object' && reg.createdStub);
+        const loadPromise = (reg && typeof reg === 'object') ? reg.loadPromise : null;
+        if (meshName) {
+          // Bind node to the named mesh resource so it resolves like normal MeshNodes.
+          // Note: don't set meshDefinition immediately (it may still be a promise-only placeholder).
+          // We'll set the real meshDefinition once the promise resolves.
+          try { obj.setSource?.(meshName); } catch { obj.source = meshName; }
+
+          // Preserve current selection (the MeshNode) even if the UI rebuilds.
+          const prevSelected = host?.selected;
+          try {
+            if (createdStub) host.rebuildTree?.();
+          } catch {}
+          try {
+            host.selected = prevSelected;
+          } catch {}
+          try {
+            host.rebuildInspector?.();
+          } catch {}
+          try {
+            host.selected = prevSelected;
+          } catch {}
+
+          // Once the GLTF promise resolves, re-fetch the resolved mesh definition and apply it
+          // to THIS MeshNode so it actually draws the imported mesh.
+          if (loadPromise && typeof loadPromise.then === 'function') {
+            Promise.resolve(loadPromise)
+              .then(() => {
+                try {
+                  const def2 = sceneAny.getMeshDefinition?.(meshName) || null;
+                  if (def2 && def2.type === 'gltf' && def2.mesh) {
+                    obj.setMeshDefinition?.(def2);
+
+                    // Match SceneLoader behavior: if the mesh definition suggests a default material
+                    // and the node doesn't have one, auto-apply it so GLTF imports aren't white.
+                    if (!obj.material && def2.material && typeof def2.material === 'string') {
+                      const mdef = sceneAny.getMaterialDefinition?.(def2.material) || null;
+                      if (mdef) {
+                        if (typeof mdef.then === 'function') {
+                          Promise.resolve(mdef).then((mat) => {
+                            if (mat && !obj.material) obj.setMaterial?.(mat);
+                          }).catch(() => {});
+                        } else {
+                          obj.setMaterial?.(mdef);
+                        }
+                      }
+                    }
+                  }
+                } catch {}
+              })
+              .catch(() => {});
+          }
+          return;
+        }
+      }
+
+      // Primitive/named resource path: clear cached mesh so it rebuilds next draw.
+      try { obj.setSource?.(raw); } catch { obj.source = raw; }
+    }, { acceptExtensions: ['.gltf', '.glb'], importToWorkspaceUrl: true });
+    // --- Material (.mat) input + inline overrides ---
+    // (sceneAny/getRenderer/getSceneBaseUrl are defined above)
 
     /** @returns {any[]} */
     const getMaterialsXml = () => {
@@ -565,6 +833,56 @@ export function rebuildInspector(host, ui) {
         apply(def);
       }
     };
+
+    // If this MeshNode is backed by a GLTF-imported mesh resource, show a .mat override input
+    // for each GLTF material present in the model.
+    // (This is independent from the node's single "material" override below.)
+    try {
+      const keyMap = getGltfMaterialKeysByMeshResource();
+      const matKeys = keyMap.get(String(obj.source || '').trim()) || null;
+      if (matKeys && Array.isArray(matKeys) && matKeys.length > 0) {
+        const overrideMap = getMaterialOverrideSourceByKey();
+        const r = getRenderer();
+        const baseUrl = getSceneBaseUrl();
+
+        /** @param {string} matKey @param {string} rawPath */
+        const applyMatOverride = (matKey, rawPath) => {
+          const raw = String(rawPath || '').trim();
+          if (!sceneAny || !matKey) return;
+          if (!raw) {
+            overrideMap.delete(matKey);
+            return;
+          }
+          overrideMap.set(matKey, raw);
+          if (!r) return;
+          const resolved = SceneLoader._resolveSceneResourceUrl(raw, baseUrl);
+          const p = Material.load(resolved, r);
+          r.trackAssetPromise?.(p);
+          sceneAny.registerMaterial?.(matKey, p);
+
+          // If this node is currently using this GLTF material hint, apply live.
+          try {
+            const hint = obj?.meshDefinition?.material;
+            if (typeof hint === 'string' && hint === matKey) {
+              p.then((mat) => {
+                if (mat) obj.setMaterial?.(mat);
+              }).catch(() => {});
+            }
+          } catch {}
+        };
+
+        for (let i = 0; i < matKeys.length; i++) {
+          const matKey = String(matKeys[i] || '').trim();
+          if (!matKey) continue;
+          const short = matKey.includes('::') ? matKey.split('::').slice(-1)[0] : matKey;
+          /** @type {any} */
+          const rowObj = { file: overrideMap.get(matKey) || '' };
+          InspectorFields.addStringWithDrop(ui.common, `gltfMat[${i}] ${short}`, rowObj, 'file', () => {
+            applyMatOverride(matKey, String(rowObj.file || ''));
+          }, { acceptExtensions: ['.mat'] });
+        }
+      }
+    } catch {}
 
     // Bind a UI field to the material source path (stored on the scene-level Material stub).
     const currentStub = findMatStub(String(obj.materialName || ''));

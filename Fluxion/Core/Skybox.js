@@ -371,7 +371,9 @@ export default class Skybox {
    */
   _directionToEquirectangularUV(dir) {
     const u = 0.5 + Math.atan2(dir.z, dir.x) / (2 * Math.PI);
-    const v = 0.5 - Math.asin(dir.y) / Math.PI;
+    // NOTE: The engine's skybox sampling convention effectively flips Y compared to
+    // the naive equirectangular mapping, so we flip V here to avoid an upside-down panorama.
+    const v = 0.5 + Math.asin(dir.y) / Math.PI;
     return { u, v };
   }
 
