@@ -797,6 +797,7 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 240px;
+  min-height: 0;
 }
 
 #rightPanel {
@@ -828,9 +829,16 @@ body {
 
 .section.grow {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 .sectionTitle {

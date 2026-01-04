@@ -401,6 +401,64 @@ if (!gotTheLock) {
     }
   });
 
+  // Rename a file or folder under the workspace root (same directory).
+  // payload: { relativePath: string, newName: string }
+  ipcMain.handle('rename-project-path', async (event, payload) => {
+    try {
+      const p = (payload && typeof payload === 'object') ? payload : {};
+      const relPath = String(p.relativePath ?? '');
+      const newNameIn = String(p.newName ?? '');
+      const newName = newNameIn.trim();
+
+      if (!relPath || relPath === '.' || relPath === '/') {
+        return { ok: false, error: 'Missing or invalid source path.' };
+      }
+
+      if (!newName) {
+        return { ok: false, error: 'Missing new name.' };
+      }
+
+      // Disallow path separators / traversal. Rename is only within the same directory.
+      if (newName.includes('/') || newName.includes('\\') || newName.includes(path.sep)) {
+        return { ok: false, error: 'New name must not contain path separators.' };
+      }
+      if (newName === '.' || newName === '..' || newName.includes('..')) {
+        return { ok: false, error: 'Invalid new name.' };
+      }
+
+      // Basic Windows-invalid characters.
+      if (/[\\/:*?"<>|]/.test(newName)) {
+        return { ok: false, error: 'New name contains invalid characters.' };
+      }
+
+      const srcAbs = resolveWorkspaceRelPath(relPath);
+      if (!srcAbs) return { ok: false, error: 'Refusing to rename outside workspace root.' };
+
+      const projectRoot = getWorkspaceRootAbs();
+      const srcSt = await fs.promises.stat(srcAbs);
+      if (!srcSt.isFile() && !srcSt.isDirectory()) {
+        return { ok: false, error: 'Source is not a file or directory.' };
+      }
+
+      const dstAbs = path.resolve(path.dirname(srcAbs), newName);
+      const dstRelCheck = path.relative(projectRoot, dstAbs);
+      const dstInside = dstRelCheck === '' || (!dstRelCheck.startsWith('..') && !path.isAbsolute(dstRelCheck));
+      if (!dstInside) {
+        return { ok: false, error: 'Refusing to rename outside workspace root.' };
+      }
+
+      if (fs.existsSync(dstAbs)) {
+        return { ok: false, error: 'Destination already exists.' };
+      }
+
+      await fs.promises.rename(srcAbs, dstAbs);
+      const outRel = path.relative(projectRoot, dstAbs).split(path.sep).join('/');
+      return { ok: true, path: outRel };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
   // Copy a file or folder under the workspace root into a destination directory under the workspace root.
   // payload: { srcRelativePath: string, destDirRelativePath: string }
   ipcMain.handle('copy-project-path-to-dir', async (event, payload) => {

@@ -4,6 +4,18 @@ import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSp
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
+import {
+  wireEditorSettingsUI,
+  loadEditorSettingsFromStorage,
+  saveEditorSettingsToStorage,
+  applyEditorSettingsFilter,
+  setEditorSettingsCategory,
+  rebuildEditorSettingsUI,
+  openEditorSettings,
+  closeEditorSettings,
+} from "./editorSettings.js";
+import { wireAboutUI, openAbout, closeAbout } from "./aboutDialog.js";
+import { wireAddNodeUI, openAddNode, closeAddNode, renderAddNodeDialog } from "./addNodeDialog.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
@@ -57,6 +69,7 @@ const ui = {
   addNodeRecent: /** @type {HTMLDivElement|null} */ (null),
   addNodeMatches: /** @type {HTMLDivElement|null} */ (null),
   addNodeDescription: /** @type {HTMLDivElement|null} */ (null),
+  addNodeOkBtn: /** @type {HTMLButtonElement|null} */ (null),
   assetUpBtn: /** @type {HTMLButtonElement|null} */ (null),
   assetPath: /** @type {HTMLDivElement|null} */ (null),
   assetFolders: /** @type {HTMLDivElement|null} */ (null),
@@ -305,6 +318,7 @@ const game = {
     ui.addNodeRecent = /** @type {HTMLDivElement} */ (document.getElementById('addNodeRecent'));
     ui.addNodeMatches = /** @type {HTMLDivElement} */ (document.getElementById('addNodeMatches'));
     ui.addNodeDescription = /** @type {HTMLDivElement} */ (document.getElementById('addNodeDescription'));
+    ui.addNodeOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById('addNodeOkBtn'));
     ui.assetUpBtn = /** @type {HTMLButtonElement} */ (document.getElementById("assetUpBtn"));
     ui.assetPath = /** @type {HTMLDivElement} */ (document.getElementById("assetPath"));
     ui.assetFolders = /** @type {HTMLDivElement} */ (document.getElementById("assetFolders"));
@@ -362,83 +376,14 @@ const game = {
 
     this._setupTopbarMenus(renderer);
 
-    // About modal close behavior
-    ui.aboutCloseBtn?.addEventListener('click', () => this._closeAbout());
-    ui.aboutModal?.addEventListener('mousedown', (e) => {
-      // Click outside the dialog closes.
-      if (e.target === ui.aboutModal) this._closeAbout();
-    });
+    // About modal behavior (extracted to module)
+    wireAboutUI(this, ui);
 
-    // Editor Settings modal close behavior
-    ui.editorSettingsCloseBtn?.addEventListener('click', () => this._closeEditorSettings());
-    ui.editorSettingsModal?.addEventListener('mousedown', (e) => {
-      if (e.target === ui.editorSettingsModal) this._closeEditorSettings();
-    });
-    ui.editorSettingsNav?.addEventListener('click', (e) => {
-      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
-      const btn = /** @type {HTMLButtonElement|null} */ (t?.closest('button[data-cat]') || null);
-      const cat = /** @type {any} */ (btn?.getAttribute('data-cat'));
-      if (cat !== 'general' && cat !== 'grid2d' && cat !== 'grid3d') return;
-      this._editorSettingsCategory = cat;
-      this._rebuildEditorSettingsUI();
-    });
-    ui.editorSettingsFilterInput?.addEventListener('input', () => {
-      this._editorSettingsFilter = String(ui.editorSettingsFilterInput?.value || '');
-      this._applyEditorSettingsFilter();
-    });
+    // Editor Settings modal behavior (extracted to module)
+    wireEditorSettingsUI(this, ui);
 
-    // Add Node modal close behavior
-    ui.addNodeCloseBtn?.addEventListener('click', () => this._closeAddNode());
-    ui.addNodeModal?.addEventListener('mousedown', (e) => {
-      if (e.target === ui.addNodeModal) this._closeAddNode();
-    });
-    ui.addNodeSearchInput?.addEventListener('input', () => {
-      this._addNodeSearch = String(ui.addNodeSearchInput?.value || '');
-      this._renderAddNodeDialog();
-    });
-    ui.addNodeSearchInput?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        if (this._addNodeSelectedId) this._add2DNodeByType(this._addNodeSelectedId);
-      }
-    });
-
-    ui.addNodeMatches?.addEventListener('click', (e) => {
-      const rawT = /** @type {any} */ (e.target);
-      const t = /** @type {HTMLElement|null} */ (
-        rawT instanceof HTMLElement
-          ? rawT
-          : (rawT && rawT.parentElement instanceof HTMLElement ? rawT.parentElement : null)
-      );
-      const row = t?.closest('[data-node-id]');
-      const id = row?.getAttribute('data-node-id');
-      if (!id) return;
-
-      // Group toggle
-      if (id.startsWith('group:')) {
-        const key = id.slice('group:'.length);
-        // @ts-ignore
-        this._addNodeExpanded[key] = !this._addNodeExpanded[key];
-        this._renderAddNodeDialog();
-        return;
-      }
-
-      this._addNodeSelectedId = id;
-      this._renderAddNodeDialog();
-    });
-
-    ui.addNodeMatches?.addEventListener('dblclick', (e) => {
-      const rawT = /** @type {any} */ (e.target);
-      const t = /** @type {HTMLElement|null} */ (
-        rawT instanceof HTMLElement
-          ? rawT
-          : (rawT && rawT.parentElement instanceof HTMLElement ? rawT.parentElement : null)
-      );
-      const row = t?.closest('[data-node-id]');
-      const id = row?.getAttribute('data-node-id');
-      if (!id || id.startsWith('group:')) return;
-      this._add2DNodeByType(id);
-    });
+    // Add Node modal behavior (extracted to module)
+    wireAddNodeUI(this, ui);
 
     // AnimatedSprite modal close behavior
     ui.animSpriteCloseBtn?.addEventListener('click', () => this._closeAnimSpriteEditor());
@@ -452,12 +397,6 @@ const game = {
         e.preventDefault();
         this._applyAnimSpriteRename();
       }
-    });
-
-    ui.aboutCopyBtn?.addEventListener('click', () => {
-      const text = String(ui.aboutVersionsText?.value || '').trim();
-      if (!text) return;
-      this._copyTextToClipboard(text).catch(console.error);
     });
 
     // Project Select behavior (mandatory - cannot dismiss without choosing/creating)
@@ -480,6 +419,14 @@ const game = {
     });
 
     window.addEventListener("keydown", (e) => {
+      // Don't trigger global shortcuts while typing.
+      const keyTarget = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      if (keyTarget) {
+        const tag = String(keyTarget.tagName || '').toLowerCase();
+        const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select' || !!keyTarget.isContentEditable;
+        if (isTyping) return;
+      }
+
       // Menu actions
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "r") {
         // Match browser/Electron refresh behavior.
@@ -515,6 +462,18 @@ const game = {
         else if (this._aboutOpen) this._closeAbout();
         else this._closeTopbarMenus();
       }
+
+      // Delete selected node (viewport/tree selection) with confirmation.
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Avoid deleting while any modal/dialog is open.
+        if (this._projectSelectOpen || this._addNodeOpen || this._editorSettingsOpen || this._aboutOpen || this._animSpriteOpen || this._createProjectDialog?.isOpen()) {
+          return;
+        }
+        const did = this._confirmAndDeleteSelectedNode();
+        if (did) e.preventDefault();
+        return;
+      }
+
       if (e.key === "F1") {
         e.preventDefault();
         this._helpVisible = !this._helpVisible;
@@ -2078,185 +2037,23 @@ const game = {
   },
 
   _openAbout() {
-    if (!ui.aboutModal) return;
-    this._aboutOpen = true;
-    ui.aboutModal.hidden = false;
-    this._populateAboutVersions().catch(console.error);
-    this._closeTopbarMenus();
-    ui.aboutCloseBtn?.focus();
+    openAbout(this, ui);
   },
 
   _openEditorSettings() {
-    if (!ui.editorSettingsModal) return;
-    this._editorSettingsOpen = true;
-    ui.editorSettingsModal.hidden = false;
-
-    this._rebuildEditorSettingsUI();
-    this._closeTopbarMenus();
-    ui.editorSettingsCloseBtn?.focus();
+    openEditorSettings(this, ui);
   },
 
   _closeEditorSettings() {
-    if (!ui.editorSettingsModal) return;
-    this._editorSettingsOpen = false;
-    ui.editorSettingsModal.hidden = true;
+    closeEditorSettings(this, ui);
   },
 
   _openAddNode() {
-    if (!ui.addNodeModal) return;
-
-    // Add Node currently creates only 2D nodes; disable when 2D is disabled for the project.
-    const { allow2D } = this._getProjectRenderEnableFlags();
-    if (!allow2D) return;
-
-    this._addNodeOpen = true;
-    ui.addNodeModal.hidden = false;
-    this._closeTopbarMenus();
-
-    // Reset selection and render the dialog.
-    this._addNodeSelectedId = this._addNodeSelectedId || 'Sprite';
-    this._renderAddNodeDialog();
-    ui.addNodeSearchInput?.focus();
+    openAddNode(this, ui);
   },
 
   _renderAddNodeDialog() {
-    if (!this._addNodeOpen) return;
-    const reg = this._getAddNodeRegistry();
-
-    const q = String(this._addNodeSearch || '').trim().toLowerCase();
-    const filtered = q ? reg.filter(n => n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)) : reg;
-
-    // Sidebar lists (visual only)
-    /** @param {HTMLDivElement|null} el @param {string[]} ids */
-    const renderSideList = (el, ids) => {
-      if (!el) return;
-      el.innerHTML = '';
-      for (const id of ids) {
-        const n = reg.find(x => x.id === id);
-        if (!n) continue;
-        const row = document.createElement('div');
-        row.className = 'nodeRow' + (id === this._addNodeSelectedId ? ' selected' : '');
-        row.setAttribute('data-node-id', id);
-        const icon = document.createElement('div');
-        icon.className = 'nodeRowIcon';
-        const label = document.createElement('div');
-        label.className = 'nodeRowLabel';
-        label.textContent = n.label;
-        row.appendChild(icon);
-        row.appendChild(label);
-        row.addEventListener('click', () => {
-          this._addNodeSelectedId = id;
-          this._renderAddNodeDialog();
-        });
-        row.addEventListener('dblclick', () => this._add2DNodeByType(id));
-        el.appendChild(row);
-      }
-    };
-
-    renderSideList(ui.addNodeFavorites, this._addNodeFavorites);
-    renderSideList(ui.addNodeRecent, this._addNodeRecent);
-
-    // Matches list: Godot-like grouping
-    if (ui.addNodeMatches) {
-      ui.addNodeMatches.innerHTML = '';
-
-      /** @param {string} name @param {number} depth @param {boolean} expanded */
-      const mkGroup = (name, depth, expanded) => {
-        const row = document.createElement('div');
-        row.className = 'nodeRow' + (` depth${depth}`);
-        row.style.paddingLeft = `${10 + depth * 14}px`;
-        row.setAttribute('data-node-id', `group:${name}`);
-        const caret = document.createElement('div');
-        caret.className = 'nodeRowCaret';
-        caret.textContent = expanded ? '▾' : '▸';
-        const icon = document.createElement('div');
-        icon.className = 'nodeRowIcon';
-        const label = document.createElement('div');
-        label.className = 'nodeRowLabel';
-        label.textContent = name;
-        row.appendChild(caret);
-        row.appendChild(icon);
-        row.appendChild(label);
-        return row;
-      };
-
-      /** @param {{id:string,label:string,group:string,description:string}} node @param {number} depth */
-      const mkNode = (node, depth) => {
-        const row = document.createElement('div');
-        row.className = 'nodeRow' + (node.id === this._addNodeSelectedId ? ' selected' : '');
-        row.style.paddingLeft = `${10 + depth * 14}px`;
-        row.setAttribute('data-node-id', node.id);
-        const caret = document.createElement('div');
-        caret.className = 'nodeRowCaret';
-        caret.textContent = '';
-        const icon = document.createElement('div');
-        icon.className = 'nodeRowIcon';
-        const label = document.createElement('div');
-        label.className = 'nodeRowLabel';
-        label.textContent = node.label;
-        row.appendChild(caret);
-        row.appendChild(icon);
-        row.appendChild(label);
-        return row;
-      };
-
-      const expCanvas = !!this._addNodeExpanded.CanvasItem;
-      const expNode2D = !!this._addNodeExpanded.Node2D;
-      const expControl = !!this._addNodeExpanded.Control;
-
-      ui.addNodeMatches.appendChild(mkGroup('CanvasItem', 0, expCanvas));
-
-      if (expCanvas) {
-        ui.addNodeMatches.appendChild(mkGroup('Node2D', 1, expNode2D));
-        if (expNode2D) {
-          for (const n of filtered.filter(x => x.group === 'Node2D')) {
-            ui.addNodeMatches.appendChild(mkNode(n, 2));
-          }
-        }
-
-        ui.addNodeMatches.appendChild(mkGroup('Control', 1, expControl));
-        if (expControl) {
-          for (const n of filtered.filter(x => x.group === 'Control')) {
-            ui.addNodeMatches.appendChild(mkNode(n, 2));
-          }
-        }
-      }
-    }
-
-    // Description
-    const sel = this._addNodeSelectedId ? reg.find(n => n.id === this._addNodeSelectedId) : null;
-    if (ui.addNodeDescription) {
-      ui.addNodeDescription.textContent = sel ? sel.description : '';
-    }
-  },
-
-  _getAddNodeRegistry() {
-    return [
-      {
-        id: 'Sprite',
-        label: 'Sprite',
-        group: 'Node2D',
-        description: 'Represents a 2D sprite object that can be rendered on the screen.',
-      },
-      {
-        id: 'AnimatedSprite',
-        label: 'AnimatedSprite',
-        group: 'Node2D',
-        description: 'A Sprite that supports animations (sprite sheets or multi-image animations).',
-      },
-      {
-        id: 'ClickableArea',
-        label: 'ClickableArea',
-        group: 'Node2D',
-        description: 'A clickable area that detects mouse interactions (typically attached to a parent Sprite).',
-      },
-      {
-        id: 'Text',
-        label: 'Text',
-        group: 'Control',
-        description: 'Text object rendered to a texture (editable text content, font size, and color).',
-      },
-    ];
+    renderAddNodeDialog(this, ui);
   },
 
   /** @param {string} type */
@@ -2792,83 +2589,12 @@ const game = {
     this._updateAnimSpriteFramePreview();
   },
 
-  /** @param {string} text */
-  async _copyTextToClipboard(text) {
-    try {
-      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-        await navigator.clipboard.writeText(String(text));
-        return;
-      }
-    } catch {}
-
-    // Fallback: select textarea content and use execCommand.
-    const ta = ui.aboutVersionsText;
-    if (ta) {
-      ta.focus();
-      ta.select();
-      document.execCommand?.('copy');
-    }
-  },
-
-  async _populateAboutVersions() {
-    if (!ui.aboutVersionsText) return;
-
-    ui.aboutVersionsText.value = 'Loading...';
-
-    /** @type {string[]} */
-    const lines = [];
-
-    let engine = null;
-    const electronAPI = /** @type {any} */ (window).electronAPI;
-    if (electronAPI && typeof electronAPI.getVersions === 'function') {
-      const res = await electronAPI.getVersions();
-      if (res && res.ok) {
-        engine = res.engine || null;
-        if (res.app && (res.app.name || res.app.version)) {
-          lines.push(`App: ${String(res.app.name || 'Fluxion')}${res.app.version ? ' ' + String(res.app.version) : ''}`);
-        }
-        if (res.electron) lines.push(`Electron: ${String(res.electron)}`);
-        if (res.npm) lines.push(`npm: ${String(res.npm)}`);
-        if (res.node) lines.push(`Node: ${String(res.node)}`);
-        if (res.chrome) lines.push(`Chrome: ${String(res.chrome)}`);
-      }
-    }
-
-    // Fallback for engine version if not provided via IPC.
-    if (!engine) {
-      try {
-        const r = await fetch('../../Fluxion/version.py');
-        if (r.ok) {
-          const txt = await r.text();
-          const mVer = /^\s*VERSION\s*=\s*\"([^\"]*)\"/m.exec(txt);
-          const mCode = /^\s*CODENAME\s*=\s*\"([^\"]*)\"/m.exec(txt);
-          engine = { version: mVer ? mVer[1] : null, codename: mCode ? mCode[1] : null };
-        }
-      } catch {}
-    }
-
-    if (engine && (engine.version || engine.codename)) {
-      const tag = `${engine.version ? String(engine.version) : ''}${engine.codename ? ' (' + String(engine.codename) + ')' : ''}`.trim();
-      lines.unshift(`Engine: ${tag}`);
-    }
-
-    if (lines.length === 0) {
-      lines.push('Version info unavailable in this runtime.');
-    }
-
-    ui.aboutVersionsText.value = lines.join('\n');
-  },
-
   _closeAbout() {
-    if (!ui.aboutModal) return;
-    this._aboutOpen = false;
-    ui.aboutModal.hidden = true;
+    closeAbout(this, ui);
   },
 
   _closeAddNode() {
-    if (!ui.addNodeModal) return;
-    this._addNodeOpen = false;
-    ui.addNodeModal.hidden = true;
+    closeAddNode(this, ui);
   },
 
   /** @param {Renderer} renderer */
@@ -3078,8 +2804,9 @@ const game = {
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        renderer.resizeCanvas();
-        this._syncActiveCameraSizes();
+        // Layout-driven canvases can settle a frame later (scrollbars/panels/etc).
+        // Use the editor's multi-pass sync to avoid viewport/letterbox drift.
+        this._requestViewportSync(renderer);
       });
     };
 
@@ -3787,6 +3514,91 @@ const game = {
     }
   },
 
+  /**
+   * @param {any} target
+   * @returns {{ parent: any|null, index: number } | null}
+   */
+  _findObjectInSceneObjects(target) {
+    const scene = this.currentScene;
+    if (!scene || !target || !Array.isArray(scene.objects)) return null;
+
+    /**
+     * @param {any} node
+     * @returns {{ parent: any, index: number } | null}
+     */
+    const visit = (node) => {
+      if (!node) return null;
+      const kids = Array.isArray(node.children) ? node.children : [];
+      for (let i = 0; i < kids.length; i++) {
+        const ch = kids[i];
+        if (ch === target) return { parent: node, index: i };
+        /** @type {{ parent: any, index: number } | null} */
+        const r = visit(ch);
+        if (r) return r;
+      }
+      return null;
+    };
+
+    for (let i = 0; i < scene.objects.length; i++) {
+      const root = scene.objects[i];
+      if (root === target) return { parent: null, index: i };
+      const r = visit(root);
+      if (r) return r;
+    }
+    return null;
+  },
+
+  /** @param {any} obj */
+  _getDeleteLabel(obj) {
+    if (!obj) return 'this node';
+    const n = obj?.name ? String(obj.name).trim() : '';
+    if (n) return `"${n}"`;
+    const t = String(obj?.constructor?.name || '').trim();
+    return t ? `this ${t}` : 'this node';
+  },
+
+  /** @returns {boolean} */
+  _confirmAndDeleteSelectedNode() {
+    const scene = this.currentScene;
+    const obj = this.selected;
+    if (!scene || !obj) return false;
+
+    // Only delete real scene objects (scene.objects + their children).
+    // Disallow deleting XML stubs/resources, cameras, lights, audio, etc.
+    if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') return false;
+    if (obj === this._sceneCamera2D || obj === this._sceneCamera3D) return false;
+
+    const loc = this._findObjectInSceneObjects(obj);
+    if (!loc) return false;
+
+    const label = this._getDeleteLabel(obj);
+    const ok = window.confirm(`Delete ${label}?`);
+    if (!ok) return true;
+
+    if (loc.parent === null) {
+      if (typeof scene.remove === 'function') scene.remove(obj);
+      else if (Array.isArray(scene.objects)) scene.objects.splice(loc.index, 1);
+    } else {
+      const kids = Array.isArray(loc.parent.children) ? loc.parent.children : null;
+      if (kids) kids.splice(loc.index, 1);
+      // Best-effort: mark scene sorting dirty if present.
+      if (scene && typeof scene === 'object' && ('_objectsDirty' in scene)) {
+        // @ts-ignore
+        scene._objectsDirty = true;
+      }
+    }
+
+    // Pick a reasonable follow-up selection.
+    this.selected = loc.parent ? loc.parent : this._pickDefaultSelectionForMode();
+
+    // Refresh editor UI.
+    this.rebuildTree();
+    this.rebuildInspector();
+    if (this._renderer) this._requestViewportSync(this._renderer);
+
+    return true;
+  },
+
   _isEditingInspector() {
     const el = /** @type {HTMLElement|null} */ (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     if (!el) return false;
@@ -4167,117 +3979,24 @@ const game = {
   },
 
   _loadEditorSettingsFromStorage() {
-    try {
-      const raw = localStorage.getItem('fluxion.editor.settings.v1');
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return;
-
-      const cur = this._editorSettings;
-      if (!cur) return;
-
-      const p = /** @type {any} */ (parsed);
-      if (p.general && typeof p.general === 'object') {
-        if (typeof p.general.showHelpOverlay === 'boolean') cur.general.showHelpOverlay = p.general.showHelpOverlay;
-      }
-      if (p.grid2d && typeof p.grid2d === 'object') {
-        if (typeof p.grid2d.enabled === 'boolean') cur.grid2d.enabled = p.grid2d.enabled;
-        if (Number.isFinite(Number(p.grid2d.baseMinor))) cur.grid2d.baseMinor = Number(p.grid2d.baseMinor);
-        if (Number.isFinite(Number(p.grid2d.majorMultiplier))) cur.grid2d.majorMultiplier = Number(p.grid2d.majorMultiplier);
-        if (Number.isFinite(Number(p.grid2d.minGridPx))) cur.grid2d.minGridPx = Number(p.grid2d.minGridPx);
-        if (Number.isFinite(Number(p.grid2d.maxGridLines))) cur.grid2d.maxGridLines = Number(p.grid2d.maxGridLines);
-        if (typeof p.grid2d.showAxes === 'boolean') cur.grid2d.showAxes = p.grid2d.showAxes;
-      }
-      if (p.grid3d && typeof p.grid3d === 'object') {
-        if (typeof p.grid3d.enabled === 'boolean') cur.grid3d.enabled = p.grid3d.enabled;
-        if (typeof p.grid3d.autoScale === 'boolean') cur.grid3d.autoScale = p.grid3d.autoScale;
-        if (Number.isFinite(Number(p.grid3d.minor))) cur.grid3d.minor = Number(p.grid3d.minor);
-        if (Number.isFinite(Number(p.grid3d.majorMultiplier))) cur.grid3d.majorMultiplier = Number(p.grid3d.majorMultiplier);
-        if (Number.isFinite(Number(p.grid3d.halfSpan))) cur.grid3d.halfSpan = Number(p.grid3d.halfSpan);
-        if (typeof p.grid3d.showAxes === 'boolean') cur.grid3d.showAxes = p.grid3d.showAxes;
-      }
-    } catch {
-      // ignore
-    }
+    loadEditorSettingsFromStorage(this);
   },
 
   _saveEditorSettingsToStorage() {
-    try {
-      localStorage.setItem('fluxion.editor.settings.v1', JSON.stringify(this._editorSettings));
-    } catch {
-      // ignore
-    }
+    saveEditorSettingsToStorage(this);
   },
 
   _applyEditorSettingsFilter() {
-    const form = ui.editorSettingsForm;
-    if (!form) return;
-    const q = String(this._editorSettingsFilter || '').trim().toLowerCase();
-    const fields = Array.from(form.querySelectorAll('.field'));
-    if (!q) {
-      for (const f of fields) /** @type {HTMLElement} */ (f).style.display = '';
-      return;
-    }
-
-    for (const f of fields) {
-      const label = /** @type {HTMLElement|null} */ (f.querySelector('.label'));
-      const text = String(label?.textContent || '').toLowerCase();
-      /** @type {HTMLElement} */ (f).style.display = text.includes(q) ? '' : 'none';
-    }
+    applyEditorSettingsFilter(this, ui);
   },
 
   /** @param {'general'|'grid2d'|'grid3d'} cat */
   _setEditorSettingsCategory(cat) {
-    this._editorSettingsCategory = cat;
-
-    const items = [ui.editorSettingsCatGeneral, ui.editorSettingsCatGrid2D, ui.editorSettingsCatGrid3D];
-    for (const b of items) {
-      if (!b) continue;
-      const bCat = b.getAttribute('data-cat');
-      const active = bCat === cat;
-      b.classList.toggle('active', active);
-      b.setAttribute('aria-selected', active ? 'true' : 'false');
-    }
+    setEditorSettingsCategory(this, ui, cat);
   },
 
   _rebuildEditorSettingsUI() {
-    if (!ui.editorSettingsForm || !ui.editorSettingsSectionTitle) return;
-
-    this._setEditorSettingsCategory(this._editorSettingsCategory);
-
-    const cat = this._editorSettingsCategory;
-    ui.editorSettingsSectionTitle.textContent = (cat === 'general') ? 'General' : (cat === 'grid2d' ? '2D Grid' : '3D Grid');
-    ui.editorSettingsForm.innerHTML = '';
-
-    if (cat === 'general') {
-      const obj = this._editorSettings.general;
-      this._addToggleWith(ui.editorSettingsForm, 'Show help overlay', obj, 'showHelpOverlay', () => {
-        this._helpVisible = !!obj.showHelpOverlay;
-        if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
-        this._saveEditorSettingsToStorage();
-      });
-    } else if (cat === 'grid2d') {
-      const obj = this._editorSettings.grid2d;
-      this._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => this._saveEditorSettingsToStorage());
-      this._addToggleWith(ui.editorSettingsForm, 'Show axes', obj, 'showAxes', () => this._saveEditorSettingsToStorage());
-      this._addNumberWith(ui.editorSettingsForm, 'Minor spacing', obj, 'baseMinor', () => this._saveEditorSettingsToStorage(), { step: 1, min: 0.0001 });
-      this._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
-      this._addNumberWith(ui.editorSettingsForm, 'Min grid pixels', obj, 'minGridPx', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
-      this._addNumberWith(ui.editorSettingsForm, 'Max grid lines', obj, 'maxGridLines', () => this._saveEditorSettingsToStorage(), { step: 1, min: 10 });
-    } else {
-      const obj = this._editorSettings.grid3d;
-      this._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => this._saveEditorSettingsToStorage());
-      this._addToggleWith(ui.editorSettingsForm, 'Auto scale', obj, 'autoScale', () => this._saveEditorSettingsToStorage());
-      this._addToggleWith(ui.editorSettingsForm, 'Show axes', obj, 'showAxes', () => this._saveEditorSettingsToStorage());
-      this._addNumberWith(ui.editorSettingsForm, 'Minor spacing', obj, 'minor', () => this._saveEditorSettingsToStorage(), { step: 0.1, min: 0.0001 });
-      this._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
-      this._addNumberWith(ui.editorSettingsForm, 'Half span', obj, 'halfSpan', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
-    }
-
-    if (ui.editorSettingsFilterInput) {
-      ui.editorSettingsFilterInput.value = String(this._editorSettingsFilter || '');
-    }
-    this._applyEditorSettingsFilter();
+    rebuildEditorSettingsUI(this, ui);
   },
 
   /**
