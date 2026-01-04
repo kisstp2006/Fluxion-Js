@@ -17,6 +17,9 @@ export default class Camera {
         /** @type {string} */
         this.category = 'camera';
 
+        /** @type {string} */
+        this.name = 'Camera';
+
         this.x = x;
         this.y = y;
         this.zoom = zoom;

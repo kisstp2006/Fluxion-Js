@@ -492,11 +492,15 @@ export default class SceneLoader {
                 scene._sourceOrder.push(obj);
 
                 if (obj instanceof Camera) {
-                    scene.setCamera(obj);
+                    // Support multiple cameras; primary selection is handled by the scene
+                    // (prefers Active="true" when present, else back-compat last wins).
+                    if (typeof scene.registerCamera === 'function') scene.registerCamera(obj);
+                    else scene.setCamera(obj);
                     continue;
                 }
                 if (obj instanceof Camera3D) {
-                    scene.setCamera3D(obj);
+                    if (typeof scene.registerCamera3D === 'function') scene.registerCamera3D(obj);
+                    else scene.setCamera3D(obj);
                     continue;
                 }
                 if (obj instanceof Audio) {

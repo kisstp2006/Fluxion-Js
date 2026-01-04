@@ -11,9 +11,17 @@ export default class Camera3D {
     /** @type {string} */
     this.category = 'camera';
 
+    /** @type {string} */
+    this.name = 'Camera3D';
+
     this.position = new Vector3(0, 0, 5);
     this.target = new Vector3(0, 0, 0);
     this.up = new Vector3(0, 1, 0);
+
+    // Keep parity with 2D Camera for editor + loader.
+    // SceneLoader reads the XML attribute "Active" into obj.active.
+    // Default to true so cameras behave predictably in the inspector.
+    this.active = true;
 
     this.fovY = Math.PI / 3; // 60deg
     this.near = 0.1;

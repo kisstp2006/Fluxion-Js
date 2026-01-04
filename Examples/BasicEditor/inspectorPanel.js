@@ -272,6 +272,36 @@ export function rebuildInspector(host, ui) {
   InspectorFields.addToggle(ui.common, 'active', obj, 'active');
   InspectorFields.addToggle(ui.common, 'visible', obj, 'visible');
 
+  // Primary camera selection (supports multiple cameras per scene).
+  const isCam2D = (obj?.constructor?.name === 'Camera') || (obj?.category === 'camera' && obj?.type === '2D');
+  const isCam3D = (obj?.constructor?.name === 'Camera3D') || (obj?.category === 'camera' && obj?.type === '3D');
+  if (isCam2D || isCam3D) {
+    const isPrimary = isCam2D
+      ? (obj === host._sceneCamera2D)
+      : (obj === host._sceneCamera3D);
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = isPrimary ? 'Primary Camera' : 'Set As Primary';
+    btn.disabled = !!isPrimary;
+    btn.addEventListener('click', () => {
+      try {
+        if (isCam2D && typeof host._setPrimaryAuthoredCamera2D === 'function') host._setPrimaryAuthoredCamera2D(obj);
+        if (isCam3D && typeof host._setPrimaryAuthoredCamera3D === 'function') host._setPrimaryAuthoredCamera3D(obj);
+      } catch (e) {
+        console.warn('Failed to set primary camera', e);
+      }
+    });
+
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.gap = '8px';
+    wrap.style.alignItems = 'center';
+    wrap.appendChild(btn);
+    InspectorFields.addField(ui.common, 'primary', wrap);
+  }
+
   // followCamera + base offsets
   if (obj && typeof obj === 'object' && ('followCamera' in obj)) {
     InspectorFields.addToggle(ui.common, 'followCamera', obj, 'followCamera');
@@ -327,6 +357,34 @@ export function rebuildInspector(host, ui) {
   if (obj && obj.constructor?.name === 'ClickableArea') {
     InspectorFields.addNullableNumber(ui.common, 'width', obj, 'width');
     InspectorFields.addNullableNumber(ui.common, 'height', obj, 'height');
+  }
+
+  // Camera fields
+  if (isCam2D) {
+    InspectorFields.addNumber(host, ui.common, 'x', obj, 'x');
+    InspectorFields.addNumber(host, ui.common, 'y', obj, 'y');
+    InspectorFields.addNumber(host, ui.common, 'zoom', obj, 'zoom');
+    InspectorFields.addNumber(host, ui.common, 'rotation', obj, 'rotation');
+    InspectorFields.addNumber(host, ui.common, 'width', obj, 'width');
+    InspectorFields.addNumber(host, ui.common, 'height', obj, 'height');
+  }
+
+  if (isCam3D) {
+    const p = obj.position;
+    const t = obj.target;
+    if (p) {
+      InspectorFields.addNumber(host, ui.common, 'posX', p, 'x');
+      InspectorFields.addNumber(host, ui.common, 'posY', p, 'y');
+      InspectorFields.addNumber(host, ui.common, 'posZ', p, 'z');
+    }
+    if (t) {
+      InspectorFields.addNumber(host, ui.common, 'targetX', t, 'x');
+      InspectorFields.addNumber(host, ui.common, 'targetY', t, 'y');
+      InspectorFields.addNumber(host, ui.common, 'targetZ', t, 'z');
+    }
+    InspectorFields.addNumber(host, ui.common, 'fovY', obj, 'fovY');
+    InspectorFields.addNumber(host, ui.common, 'near', obj, 'near');
+    InspectorFields.addNumber(host, ui.common, 'far', obj, 'far');
   }
 
   // Audio fields

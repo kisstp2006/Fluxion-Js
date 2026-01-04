@@ -44,6 +44,13 @@
 export function getAddNodeRegistry() {
   return [
     {
+      id: 'Camera',
+      label: 'Camera',
+      group: 'Node2D',
+      kind: '2d',
+      description: '2D camera used for rendering the scene. You can have multiple and choose which is Primary (Active).',
+    },
+    {
       id: 'Sprite',
       label: 'Sprite',
       group: 'Node2D',
@@ -73,6 +80,13 @@ export function getAddNodeRegistry() {
     },
 
     // 3D
+    {
+      id: 'Camera3D',
+      label: 'Camera3D',
+      group: 'Node3D',
+      kind: '3d',
+      description: '3D camera used for the 3D pass. You can have multiple and choose which is Primary (Active).',
+    },
     {
       id: 'MeshNode',
       label: 'MeshNode',

@@ -14,6 +14,16 @@ export default class Scene {
         this.camera = null;
         /** @type {import('./Camera3D.js').default | null} */
         this.camera3D = null;
+
+        /** @type {Camera[]} */
+        this.cameras = [];
+        /** @type {import('./Camera3D.js').default[]} */
+        this.cameras3D = [];
+
+        // If any camera has active===true (i.e. explicit Active="true" in XML),
+        // that becomes the primary and we stop using "last one wins" fallback.
+        this._hasExplicitPrimary2D = false;
+        this._hasExplicitPrimary3D = false;
         /** @type {Map<string, any>} */
         this.meshDefinitions = new Map();
         /** @type {Map<string, any>} */
@@ -113,6 +123,89 @@ export default class Scene {
     }
 
     /**
+     * Register a 2D camera as part of the scene.
+     * Keeps legacy behavior when no explicit Active="true" exists: last camera wins.
+     * When Active="true" is present on any camera, that camera is the primary.
+     * @param {Camera} camera
+     */
+    registerCamera(camera) {
+        if (!camera) return;
+        if (!Array.isArray(this.cameras)) this.cameras = [];
+        if (!this.cameras.includes(camera)) this.cameras.push(camera);
+
+        // Explicit primary overrides fallback.
+        if (camera.active === true) {
+            this._hasExplicitPrimary2D = true;
+            this.camera = camera;
+            return;
+        }
+
+        // Back-compat: if no explicit primary exists, last one wins.
+        if (!this._hasExplicitPrimary2D) {
+            this.camera = camera;
+            return;
+        }
+
+        // If we have an explicit primary elsewhere, ignore non-primary cameras.
+        if (!this.camera) this.camera = camera;
+    }
+
+    /**
+     * Register a 3D camera as part of the scene.
+     * @param {import('./Camera3D.js').default} camera
+     */
+    registerCamera3D(camera) {
+        if (!camera) return;
+        if (!Array.isArray(this.cameras3D)) this.cameras3D = [];
+        if (!this.cameras3D.includes(camera)) this.cameras3D.push(camera);
+
+        if (camera.active === true) {
+            this._hasExplicitPrimary3D = true;
+            this.camera3D = camera;
+            return;
+        }
+
+        if (!this._hasExplicitPrimary3D) {
+            this.camera3D = camera;
+            return;
+        }
+
+        if (!this.camera3D) this.camera3D = camera;
+    }
+
+    /**
+     * Set the primary 2D camera (authoring).
+     * @param {Camera} camera
+     */
+    setPrimaryCamera(camera) {
+        if (!camera) return;
+        if (!Array.isArray(this.cameras)) this.cameras = [];
+        if (!this.cameras.includes(camera)) this.cameras.push(camera);
+        this._hasExplicitPrimary2D = true;
+        for (const c of this.cameras) {
+            if (!c) continue;
+            c.active = (c === camera);
+        }
+        this.camera = camera;
+    }
+
+    /**
+     * Set the primary 3D camera (authoring).
+     * @param {import('./Camera3D.js').default} camera
+     */
+    setPrimaryCamera3D(camera) {
+        if (!camera) return;
+        if (!Array.isArray(this.cameras3D)) this.cameras3D = [];
+        if (!this.cameras3D.includes(camera)) this.cameras3D.push(camera);
+        this._hasExplicitPrimary3D = true;
+        for (const c of this.cameras3D) {
+            if (!c) continue;
+            c.active = (c === camera);
+        }
+        this.camera3D = camera;
+    }
+
+    /**
      * Retrieves an object by its name.
      * @param {string} name - The name of the object to retrieve.
      * @returns {Object|null} The object if found, otherwise null.
@@ -120,6 +213,17 @@ export default class Scene {
     getObjectByName(name) {
         if (this.camera && this.camera.name === name) return this.camera;
         if (this.camera3D && this.camera3D.name === name) return this.camera3D;
+
+        if (Array.isArray(this.cameras)) {
+            for (const c of this.cameras) {
+                if (c && c.name === name) return c;
+            }
+        }
+        if (Array.isArray(this.cameras3D)) {
+            for (const c of this.cameras3D) {
+                if (c && c.name === name) return c;
+            }
+        }
 
         for (const l of this.lights) {
             if (l && l.name === name) return l;

@@ -156,8 +156,12 @@ const game = {
   _editorCamera3D: null,
   /** @type {import("../../Fluxion/Core/Camera.js").default | null} */
   _sceneCamera2D: null,
+  /** @type {import("../../Fluxion/Core/Camera.js").default[]} */
+  _sceneCameras2D: [],
   /** @type {import("../../Fluxion/Core/Camera3D.js").default | null} */
   _sceneCamera3D: null,
+  /** @type {import("../../Fluxion/Core/Camera3D.js").default[]} */
+  _sceneCameras3D: [],
   _usingEditorCamera2D: false,
   _usingEditorCamera3D: false,
 
@@ -1462,6 +1466,105 @@ const game = {
     }
   },
 
+  /** @param {Renderer} renderer @param {any} dbg @param {boolean} depth */
+  _drawAuthoredCamera3D(renderer, dbg, depth) {
+    if (!dbg || typeof dbg.drawLine3D !== 'function') return;
+
+    const cam = /** @type {any} */ (this._sceneCamera3D || null);
+    if (!cam || !cam.position || !cam.target) return;
+
+    const pos = new Vector3(Number(cam.position.x) || 0, Number(cam.position.y) || 0, Number(cam.position.z) || 0);
+    const tgt = new Vector3(Number(cam.target.x) || 0, Number(cam.target.y) || 0, Number(cam.target.z) || 0);
+    const up0 = new Vector3(
+      Number(cam.up?.x) || 0,
+      Number(cam.up?.y) || 1,
+      Number(cam.up?.z) || 0,
+    );
+
+    let forward = Vector3.subtract(tgt, pos);
+    if (!Number.isFinite(forward.lengthSq()) || forward.lengthSq() < 1e-10) forward = new Vector3(0, 0, -1);
+    forward.normalize();
+
+    let right = Vector3.cross(forward, up0);
+    if (!Number.isFinite(right.lengthSq()) || right.lengthSq() < 1e-10) right = Vector3.cross(forward, new Vector3(0, 1, 0));
+    right.normalize();
+
+    const up = Vector3.cross(right, forward);
+    up.normalize();
+
+    const fovY = Number.isFinite(Number(cam.fovY)) ? Number(cam.fovY) : (Math.PI / 3);
+    const fov = Math.max(0.05, Math.min(Math.PI - 0.05, fovY));
+
+    const near = Math.max(0.001, Number.isFinite(Number(cam.near)) ? Number(cam.near) : 0.1);
+    const far = Math.max(near + 0.001, Number.isFinite(Number(cam.far)) ? Number(cam.far) : 100.0);
+
+    const aspect = (renderer && Number(renderer.targetWidth) > 0 && Number(renderer.targetHeight) > 0)
+      ? (Number(renderer.targetWidth) / Number(renderer.targetHeight))
+      : 1;
+
+    const tan = Math.tan(fov * 0.5);
+    const nh = tan * near;
+    const nw = nh * aspect;
+    const fh = tan * far;
+    const fw = fh * aspect;
+
+    const nc = pos.copy().add(forward.copy().scale(near));
+    const fc = pos.copy().add(forward.copy().scale(far));
+
+    const upN = up.copy().scale(nh);
+    const rightN = right.copy().scale(nw);
+    const upF = up.copy().scale(fh);
+    const rightF = right.copy().scale(fw);
+
+    const ntl = nc.copy().add(upN).subtract(rightN);
+    const ntr = nc.copy().add(upN).add(rightN);
+    const nbl = nc.copy().subtract(upN).subtract(rightN);
+    const nbr = nc.copy().subtract(upN).add(rightN);
+
+    const ftl = fc.copy().add(upF).subtract(rightF);
+    const ftr = fc.copy().add(upF).add(rightF);
+    const fbl = fc.copy().subtract(upF).subtract(rightF);
+    const fbr = fc.copy().subtract(upF).add(rightF);
+
+    const cFrustum = [255, 220, 80, 200];
+    const cDir = [255, 220, 80, 255];
+
+    /**
+     * @param {Vector3} a
+     * @param {Vector3} b
+     * @param {number[]} c
+     * @param {number=} w
+     */
+    const dl = (a, b, c, w = 2) => dbg.drawLine3D(a.x, a.y, a.z, b.x, b.y, b.z, c, w, depth);
+
+    // Small camera marker
+    const m = Math.max(0.2, Math.min(1.0, near * 0.5));
+    dl(pos.copy().add(right.copy().scale(-m)), pos.copy().add(right.copy().scale(m)), cDir, 2);
+    dl(pos.copy().add(up.copy().scale(-m)), pos.copy().add(up.copy().scale(m)), cDir, 2);
+    dl(pos.copy().add(forward.copy().scale(-m)), pos.copy().add(forward.copy().scale(m)), cDir, 2);
+
+    // Forward direction to near plane center
+    dl(pos, nc, cDir, 2);
+
+    // Near plane rectangle
+    dl(ntl, ntr, cFrustum, 2);
+    dl(ntr, nbr, cFrustum, 2);
+    dl(nbr, nbl, cFrustum, 2);
+    dl(nbl, ntl, cFrustum, 2);
+
+    // Far plane rectangle
+    dl(ftl, ftr, cFrustum, 2);
+    dl(ftr, fbr, cFrustum, 2);
+    dl(fbr, fbl, cFrustum, 2);
+    dl(fbl, ftl, cFrustum, 2);
+
+    // Connect near-to-far
+    dl(ntl, ftl, cFrustum, 2);
+    dl(ntr, ftr, cFrustum, 2);
+    dl(nbl, fbl, cFrustum, 2);
+    dl(nbr, fbr, cFrustum, 2);
+  },
+
   /** @param {Renderer} renderer */
   _setupTopbarMenus(renderer) {
     const roots = Array.from(document.querySelectorAll('.topbar .menuRoot'));
@@ -1661,38 +1764,48 @@ const game = {
     const sceneName = scene.name ? String(scene.name) : 'Untitled';
     lines.push(`<Scene name="${esc(sceneName)}">`);
 
-    // Cameras: use authored cameras if available (editor forces rendering cameras).
-    const cam2 = /** @type {any} */ (this._sceneCamera2D || null);
-    if (cam2) {
-      /** @type {string[]} */
-      const parts = [];
-      addAttr(parts, 'name', cam2.name || 'MainCamera');
-      addNumAttr(parts, 'x', cam2.x ?? 0);
-      addNumAttr(parts, 'y', cam2.y ?? 0);
-      addNumAttr(parts, 'zoom', cam2.zoom ?? 1);
-      // Rotation is optional in many scenes.
-      if (Number.isFinite(Number(cam2.rotation)) && Number(cam2.rotation) !== 0) addNumAttr(parts, 'rotation', cam2.rotation);
-      addNumAttr(parts, 'width', cam2.width ?? 1920);
-      addNumAttr(parts, 'height', cam2.height ?? 1080);
-      lines.push(`    <Camera ${parts.join(' ')} />`);
+    // Cameras: serialize all authored cameras; mark primary via Active="true" when multiple exist.
+    const cams2 = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.filter(Boolean) : [];
+    const primary2 = /** @type {any} */ (this._sceneCamera2D || cams2.find(c => c && c.active === true) || cams2[cams2.length - 1] || null);
+    if (cams2.length > 0) {
+      for (const cam2 of cams2) {
+        if (!cam2) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'name', cam2.name || 'MainCamera');
+        addNumAttr(parts, 'x', cam2.x ?? 0);
+        addNumAttr(parts, 'y', cam2.y ?? 0);
+        addNumAttr(parts, 'zoom', cam2.zoom ?? 1);
+        // Rotation is optional in many scenes.
+        if (Number.isFinite(Number(cam2.rotation)) && Number(cam2.rotation) !== 0) addNumAttr(parts, 'rotation', cam2.rotation);
+        addNumAttr(parts, 'width', cam2.width ?? 1920);
+        addNumAttr(parts, 'height', cam2.height ?? 1080);
+        if (cams2.length > 1) addAttr(parts, 'Active', (cam2 === primary2) ? 'true' : 'false');
+        lines.push(`    <Camera ${parts.join(' ')} />`);
+      }
       lines.push('');
     }
 
-    const cam3 = /** @type {any} */ (this._sceneCamera3D || null);
-    if (cam3) {
-      /** @type {string[]} */
-      const parts = [];
-      addAttr(parts, 'name', cam3.name || 'Camera3D');
-      addNumAttr(parts, 'x', cam3.position?.x);
-      addNumAttr(parts, 'y', cam3.position?.y);
-      addNumAttr(parts, 'z', cam3.position?.z);
-      addNumAttr(parts, 'targetX', cam3.target?.x);
-      addNumAttr(parts, 'targetY', cam3.target?.y);
-      addNumAttr(parts, 'targetZ', cam3.target?.z);
-      if (Number.isFinite(Number(cam3.fovY))) addNumAttr(parts, 'fovY', cam3.fovY);
-      if (Number.isFinite(Number(cam3.near))) addNumAttr(parts, 'near', cam3.near);
-      if (Number.isFinite(Number(cam3.far))) addNumAttr(parts, 'far', cam3.far);
-      lines.push(`    <Camera3D ${parts.join(' ')} />`);
+    const cams3 = Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D.filter(Boolean) : [];
+    const primary3 = /** @type {any} */ (this._sceneCamera3D || cams3.find(c => c && c.active === true) || cams3[cams3.length - 1] || null);
+    if (cams3.length > 0) {
+      for (const cam3 of cams3) {
+        if (!cam3) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'name', cam3.name || 'Camera3D');
+        addNumAttr(parts, 'x', cam3.position?.x);
+        addNumAttr(parts, 'y', cam3.position?.y);
+        addNumAttr(parts, 'z', cam3.position?.z);
+        addNumAttr(parts, 'targetX', cam3.target?.x);
+        addNumAttr(parts, 'targetY', cam3.target?.y);
+        addNumAttr(parts, 'targetZ', cam3.target?.z);
+        if (Number.isFinite(Number(cam3.fovY))) addNumAttr(parts, 'fovY', cam3.fovY);
+        if (Number.isFinite(Number(cam3.near))) addNumAttr(parts, 'near', cam3.near);
+        if (Number.isFinite(Number(cam3.far))) addNumAttr(parts, 'far', cam3.far);
+        if (cams3.length > 1) addAttr(parts, 'Active', (cam3 === primary3) ? 'true' : 'false');
+        lines.push(`    <Camera3D ${parts.join(' ')} />`);
+      }
       lines.push('');
     }
 
@@ -2154,11 +2267,45 @@ const game = {
       this._addSkyboxByStub();
       return;
     }
-    if (id === 'MeshNode' || id === 'DirectionalLight' || id === 'PointLight' || id === 'SpotLight') {
+    if (id === 'Camera3D' || id === 'MeshNode' || id === 'DirectionalLight' || id === 'PointLight' || id === 'SpotLight') {
       this._add3DNodeByType(id);
       return;
     }
     this._add2DNodeByType(id);
+  },
+
+  /** @param {any} cam */
+  _setPrimaryAuthoredCamera2D(cam) {
+    if (!cam) return;
+    const list = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D : [];
+    if (!list.includes(cam)) list.push(cam);
+    for (const c of list) {
+      if (!c) continue;
+      c.active = (c === cam);
+    }
+    this._sceneCameras2D = list;
+    this._sceneCamera2D = cam;
+
+    // If the editor camera was initialized from the old authored camera,
+    // keep the authored pointer consistent so saving and debug overlays match.
+
+    this.rebuildTree();
+    this.rebuildInspector();
+  },
+
+  /** @param {any} cam */
+  _setPrimaryAuthoredCamera3D(cam) {
+    if (!cam) return;
+    const list = Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D : [];
+    if (!list.includes(cam)) list.push(cam);
+    for (const c of list) {
+      if (!c) continue;
+      c.active = (c === cam);
+    }
+    this._sceneCameras3D = list;
+    this._sceneCamera3D = cam;
+    this.rebuildTree();
+    this.rebuildInspector();
   },
 
   _addSkyboxByStub() {
@@ -2300,6 +2447,9 @@ const game = {
       if (Array.isArray(scene.audio)) {
         for (const a of scene.audio) addName(a);
       }
+      if (Array.isArray(/** @type {any} */ (scene).cameras)) {
+        for (const c of /** @type {any} */ (scene).cameras) addName(c);
+      }
       const b = String(base || 'Node').trim() || 'Node';
       if (!used.has(b)) return b;
       for (let i = 2; i < 1000; i++) {
@@ -2313,6 +2463,27 @@ const game = {
     let created = null;
 
     switch (String(type)) {
+      case 'Camera': {
+        const w = Math.max(1, Number(r?.targetWidth) || 1920);
+        const h = Math.max(1, Number(r?.targetHeight) || 1080);
+        const cam = new Camera(spawnX, spawnY, 1, 0, w, h);
+        // @ts-ignore
+        cam.name = uniqueName('Camera');
+
+        // If there is already a primary camera, don't steal it.
+        cam.active = (Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.length : 0) === 0;
+
+        const sceneAny = /** @type {any} */ (scene);
+        if (typeof sceneAny.registerCamera === 'function') sceneAny.registerCamera(cam);
+        else sceneAny.setCamera?.(cam);
+
+        // Refresh authored caches.
+        this._sceneCameras2D = Array.isArray(sceneAny.cameras) ? sceneAny.cameras.filter(Boolean) : [...(this._sceneCameras2D || []), cam];
+        if (cam.active) this._sceneCamera2D = cam;
+
+        created = cam;
+        break;
+      }
       case 'Sprite': {
         const sp = new Sprite(r, iconUrl, spawnX, spawnY, 96, 96);
         // @ts-ignore
@@ -2430,6 +2601,9 @@ const game = {
       if (Array.isArray(scene.lights)) {
         for (const l of scene.lights) addName(l);
       }
+      if (Array.isArray(/** @type {any} */ (scene).cameras3D)) {
+        for (const c of /** @type {any} */ (scene).cameras3D) addName(c);
+      }
       const b = String(base || 'Node').trim() || 'Node';
       if (!used.has(b)) return b;
       for (let i = 2; i < 1000; i++) {
@@ -2443,6 +2617,28 @@ const game = {
     let created = null;
 
     switch (String(type)) {
+      case 'Camera3D': {
+        const cam = new Camera3D();
+        cam.name = uniqueName('Camera3D');
+        cam.position.x = px;
+        cam.position.y = py;
+        cam.position.z = pz;
+        cam.target.x = px + fx;
+        cam.target.y = py + fy;
+        cam.target.z = pz + fz;
+
+        cam.active = (Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D.length : 0) === 0;
+
+        const sceneAny = /** @type {any} */ (scene);
+        if (typeof sceneAny.registerCamera3D === 'function') sceneAny.registerCamera3D(cam);
+        else sceneAny.setCamera3D?.(cam);
+
+        this._sceneCameras3D = Array.isArray(sceneAny.cameras3D) ? sceneAny.cameras3D.filter(Boolean) : [...(this._sceneCameras3D || []), cam];
+        if (cam.active) this._sceneCamera3D = cam;
+
+        created = cam;
+        break;
+      }
       case 'MeshNode': {
         const m = new MeshNode();
         m.name = uniqueName('MeshNode');
@@ -3441,8 +3637,12 @@ const game = {
         cam2.name = 'MainCamera';
         cam2.active = true;
         // Store as the scene's authored camera.
-        // @ts-ignore
-        empty.camera = cam2;
+        if (typeof empty.registerCamera === 'function') {
+          empty.registerCamera(cam2);
+        } else {
+          // @ts-ignore
+          empty.camera = cam2;
+        }
       } catch {}
 
       this.currentScene = empty;
@@ -3479,8 +3679,10 @@ const game = {
     if (!scene || !r) return;
 
     // Store authored cameras (if any), but always render using editor cameras.
-    this._sceneCamera2D = scene.camera || null;
-    this._sceneCamera3D = scene.camera3D || null;
+    this._sceneCameras2D = Array.isArray(/** @type {any} */ (scene).cameras) ? /** @type {any} */ (scene).cameras.filter(Boolean) : [];
+    this._sceneCameras3D = Array.isArray(/** @type {any} */ (scene).cameras3D) ? /** @type {any} */ (scene).cameras3D.filter(Boolean) : [];
+    this._sceneCamera2D = scene.camera || this._sceneCameras2D[0] || null;
+    this._sceneCamera3D = scene.camera3D || this._sceneCameras3D[0] || null;
 
     const authoredW = Number(this._sceneCamera2D?.width);
     const authoredH = Number(this._sceneCamera2D?.height);
@@ -3859,12 +4061,29 @@ const game = {
     for (const m of materials) entries.push({ obj: m, depth: 0, label: nameOf(m, 'Material') });
 
     // Cameras: show authored cameras (editor forces render cameras).
-    const authoredCam2D = /** @type {any} */ (this._sceneCamera2D || null);
-    const authoredCam3D = /** @type {any} */ (this._sceneCamera3D || null);
+    const cams2 = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.filter(Boolean) : [];
+    const cams3 = Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D.filter(Boolean) : [];
+    const primary2 = /** @type {any} */ (this._sceneCamera2D || cams2.find(c => c && c.active === true) || cams2[cams2.length - 1] || null);
+    const primary3 = /** @type {any} */ (this._sceneCamera3D || cams3.find(c => c && c.active === true) || cams3[cams3.length - 1] || null);
+
     if (this.mode === '2d') {
-      if (authoredCam2D) entries.push({ obj: authoredCam2D, depth: 0, label: `Camera: ${nameOf(authoredCam2D, 'Camera')}` });
+      if (cams2.length > 0) {
+        for (const c of cams2) {
+          const star = (c === primary2) ? '★ ' : '';
+          entries.push({ obj: c, depth: 0, label: `${star}Camera: ${nameOf(c, 'Camera')}` });
+        }
+      } else if (primary2) {
+        entries.push({ obj: primary2, depth: 0, label: `Camera: ${nameOf(primary2, 'Camera')}` });
+      }
     } else {
-      if (authoredCam3D) entries.push({ obj: authoredCam3D, depth: 0, label: `Camera3D: ${nameOf(authoredCam3D, 'Camera3D')}` });
+      if (cams3.length > 0) {
+        for (const c of cams3) {
+          const star = (c === primary3) ? '★ ' : '';
+          entries.push({ obj: c, depth: 0, label: `${star}Camera3D: ${nameOf(c, 'Camera3D')}` });
+        }
+      } else if (primary3) {
+        entries.push({ obj: primary3, depth: 0, label: `Camera3D: ${nameOf(primary3, 'Camera3D')}` });
+      }
     }
 
     // Audio & lights
@@ -3958,6 +4177,8 @@ const game = {
     // Disallow deleting XML stubs/resources, cameras, lights, audio, etc.
     if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') return false;
     if (obj === this._sceneCamera2D || obj === this._sceneCamera3D) return false;
+    if (Array.isArray(this._sceneCameras2D) && this._sceneCameras2D.includes(obj)) return false;
+    if (Array.isArray(this._sceneCameras3D) && this._sceneCameras3D.includes(obj)) return false;
 
     const loc = this._findObjectInSceneObjects(obj);
     if (!loc) return false;
@@ -4963,6 +5184,7 @@ const game = {
     // 3D viewport grid should show regardless of selection and is not part of the scene.
     if (this.mode === '3d') {
       this._draw3DViewportGrid(dbg, depth);
+      this._drawAuthoredCamera3D(renderer, dbg, depth);
     }
 
     if (didBeginEmpty3DPass) {
