@@ -112,6 +112,8 @@ const ui = {
   scriptView: /** @type {HTMLDivElement|null} */ (null),
   scriptPath: /** @type {HTMLDivElement|null} */ (null),
   scriptSaveBtn: /** @type {HTMLButtonElement|null} */ (null),
+  scriptEditorWrap: /** @type {HTMLDivElement|null} */ (null),
+  scriptHighlight: /** @type {HTMLPreElement|null} */ (null),
   scriptEditorText: /** @type {HTMLTextAreaElement|null} */ (null),
   mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
   mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
@@ -390,6 +392,8 @@ const game = {
     ui.scriptView = /** @type {HTMLDivElement} */ (document.getElementById('scriptView'));
     ui.scriptPath = /** @type {HTMLDivElement} */ (document.getElementById('scriptPath'));
     ui.scriptSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById('scriptSaveBtn'));
+    ui.scriptEditorWrap = /** @type {HTMLDivElement} */ (document.getElementById('scriptEditorWrap'));
+    ui.scriptHighlight = /** @type {HTMLPreElement} */ (document.getElementById('scriptHighlight'));
     ui.scriptEditorText = /** @type {HTMLTextAreaElement} */ (document.getElementById('scriptEditorText'));
 
     // Ensure About starts closed.
@@ -431,7 +435,11 @@ const game = {
     // Main tabs (viewport + scripts)
     ui.mainTabViewportBtn?.addEventListener('click', () => this._setMainTab('viewport'));
     ui.scriptSaveBtn?.addEventListener('click', () => this._saveActiveScript().catch(console.error));
-    ui.scriptEditorText?.addEventListener('input', () => this._markActiveScriptDirty());
+    ui.scriptEditorText?.addEventListener('input', () => {
+      this._markActiveScriptDirty();
+      this._updateScriptHighlight();
+    });
+    ui.scriptEditorText?.addEventListener('scroll', () => this._syncScriptHighlightScroll());
     this._setMainTab('viewport');
 
     // Capture logs into the Console tab
@@ -1203,7 +1211,135 @@ const game = {
     const s = this._openScripts.find(x => x.pathRel === p) || null;
     if (ui.scriptPath) ui.scriptPath.textContent = s ? s.pathRel : 'No script opened';
     if (ui.scriptEditorText) ui.scriptEditorText.value = s ? s.text : '';
+    this._updateScriptHighlight();
     this._renderMainScriptTabs();
+  },
+
+  _syncScriptHighlightScroll() {
+    if (!ui.scriptEditorText || !ui.scriptHighlight) return;
+    ui.scriptHighlight.scrollTop = ui.scriptEditorText.scrollTop;
+    ui.scriptHighlight.scrollLeft = ui.scriptEditorText.scrollLeft;
+  },
+
+  _updateScriptHighlight() {
+    if (!ui.scriptEditorText || !ui.scriptHighlight) return;
+
+    const text = String(ui.scriptEditorText.value ?? '');
+    // Avoid locking up the UI on huge files.
+    if (text.length > 200_000) {
+      ui.scriptHighlight.textContent = text;
+      this._syncScriptHighlightScroll();
+      return;
+    }
+
+    ui.scriptHighlight.innerHTML = this._highlightJsToHtml(text);
+    this._syncScriptHighlightScroll();
+  },
+
+  /** @param {string} s */
+  _escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  },
+
+  /** @param {string} text */
+  _highlightJsToHtml(text) {
+    const esc = (s) => this._escapeHtml(s);
+    const out = [];
+
+    /** @type {Set<string>} */
+    const keywords = new Set([
+      'break','case','catch','class','const','continue','debugger','default','delete','do','else','export','extends','finally',
+      'for','function','if','import','in','instanceof','let','new','return','super','switch','this','throw','try','typeof',
+      'var','void','while','with','yield','await','async','from','as'
+    ]);
+
+    const isIdStart = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_' || c === '$';
+    const isId = (c) => isIdStart(c) || (c >= '0' && c <= '9');
+    const isDigit = (c) => (c >= '0' && c <= '9');
+
+    const s = String(text ?? '');
+    const n = s.length;
+    let i = 0;
+
+    while (i < n) {
+      const c = s[i];
+      const c2 = i + 1 < n ? s[i + 1] : '';
+
+      // Line comment
+      if (c === '/' && c2 === '/') {
+        let j = i + 2;
+        while (j < n && s[j] !== '\n') j++;
+        out.push('<span class="tok-comment">' + esc(s.slice(i, j)) + '</span>');
+        i = j;
+        continue;
+      }
+
+      // Block comment
+      if (c === '/' && c2 === '*') {
+        let j = i + 2;
+        while (j < n) {
+          if (s[j] === '*' && j + 1 < n && s[j + 1] === '/') { j += 2; break; }
+          j++;
+        }
+        out.push('<span class="tok-comment">' + esc(s.slice(i, j)) + '</span>');
+        i = j;
+        continue;
+      }
+
+      // String / template literal
+      if (c === '"' || c === "'" || c === '`') {
+        const quote = c;
+        let j = i + 1;
+        let escaped = false;
+        while (j < n) {
+          const ch = s[j];
+          if (escaped) { escaped = false; j++; continue; }
+          if (ch === '\\') { escaped = true; j++; continue; }
+          if (ch === quote) { j++; break; }
+          j++;
+        }
+        out.push('<span class="tok-string">' + esc(s.slice(i, j)) + '</span>');
+        i = j;
+        continue;
+      }
+
+      // Number (very small heuristic)
+      if (isDigit(c)) {
+        let j = i + 1;
+        while (j < n) {
+          const ch = s[j];
+          if (isDigit(ch) || ch === '.' || ch === '_' || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F') || ch === 'x' || ch === 'X' || ch === 'b' || ch === 'B' || ch === 'o' || ch === 'O' || ch === 'e' || ch === 'E' || ch === '+' || ch === '-') {
+            j++;
+            continue;
+          }
+          break;
+        }
+        out.push('<span class="tok-number">' + esc(s.slice(i, j)) + '</span>');
+        i = j;
+        continue;
+      }
+
+      // Identifier / keyword
+      if (isIdStart(c)) {
+        let j = i + 1;
+        while (j < n && isId(s[j])) j++;
+        const word = s.slice(i, j);
+        if (keywords.has(word)) out.push('<span class="tok-keyword">' + esc(word) + '</span>');
+        else out.push('<span class="tok-ident">' + esc(word) + '</span>');
+        i = j;
+        continue;
+      }
+
+      out.push(esc(c));
+      i++;
+    }
+
+    return out.join('');
   },
 
   _markActiveScriptDirty() {
