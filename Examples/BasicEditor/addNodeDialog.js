@@ -81,6 +81,13 @@ export function getAddNodeRegistry() {
       description: 'A 3D scene node for rendering a primitive mesh (Cube/Sphere/etc).',
     },
     {
+      id: 'Skybox',
+      label: 'Skybox',
+      group: 'Node3D',
+      kind: '3d',
+      description: 'Scene environment settings (skybox + PBR ambientColor / u_ambientColor).',
+    },
+    {
       id: 'DirectionalLight',
       label: 'DirectionalLight',
       group: 'Light',

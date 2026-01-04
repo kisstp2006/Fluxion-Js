@@ -493,6 +493,11 @@ export function addCssColor(container, label, obj, key) {
 
 	const syncPickerFromText = () => {
 		const v = String(text.value ?? '').trim();
+		if (!v) {
+			picker.disabled = false;
+			picker.value = '#ffffff';
+			return;
+		}
 		const hex = cssColorToHex(v);
 		if (hex) {
 			picker.disabled = false;
@@ -558,6 +563,11 @@ export function addCssColorWith(container, label, obj, key, onChanged) {
 
 	const syncPickerFromText = () => {
 		const v = String(text.value ?? '').trim();
+		if (!v) {
+			picker.disabled = false;
+			picker.value = '#ffffff';
+			return;
+		}
 		const hex = cssColorToHex(v);
 		if (hex) {
 			picker.disabled = false;

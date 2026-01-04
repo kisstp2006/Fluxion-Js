@@ -1840,11 +1840,59 @@ const game = {
   /** @param {string} type */
   _addNodeByType(type) {
     const id = String(type);
+    if (id === 'Skybox') {
+      this._addSkyboxByStub();
+      return;
+    }
     if (id === 'MeshNode' || id === 'DirectionalLight' || id === 'PointLight' || id === 'SpotLight') {
       this._add3DNodeByType(id);
       return;
     }
     this._add2DNodeByType(id);
+  },
+
+  _addSkyboxByStub() {
+    const scene = this.currentScene;
+    if (!scene) return;
+
+    // Project may disable 3D rendering.
+    const { allow3D } = this._getProjectRenderEnableFlags();
+    if (!allow3D) return;
+
+    // Environment edits are 3D-centric.
+    if (this.mode !== '3d') this.setMode('3d');
+
+    const sceneAny = /** @type {any} */ (scene);
+
+    if (!sceneAny._skyboxXml || typeof sceneAny._skyboxXml !== 'object') {
+      sceneAny._skyboxXml = {
+        __xmlTag: 'Skybox',
+        color: '',
+        ambientColor: '',
+        source: '',
+        equirectangular: false,
+        right: '',
+        left: '',
+        top: '',
+        bottom: '',
+        front: '',
+        back: '',
+      };
+    } else {
+      // Ensure newly-added fields exist for older scenes.
+      if (!('ambientColor' in sceneAny._skyboxXml)) sceneAny._skyboxXml.ambientColor = '';
+    }
+
+    // Track recents (UI only)
+    const id = 'Skybox';
+    this._addNodeRecent = [id, ...this._addNodeRecent.filter(x => x !== id)].slice(0, 12);
+
+    this.selected = sceneAny._skyboxXml;
+    this.rebuildTree();
+    this.rebuildInspector();
+    if (this._renderer) this._requestViewportSync(this._renderer);
+
+    this._closeAddNode();
   },
 
   /** @param {string} type */

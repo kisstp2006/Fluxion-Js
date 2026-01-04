@@ -5,7 +5,7 @@
  */
 
 import * as InspectorFields from "./inspectorFields.js";
-import { SceneLoader } from "../../Fluxion/index.js";
+import { SceneLoader, Skybox } from "../../Fluxion/index.js";
 
 /**
  * @typedef {{
@@ -96,12 +96,21 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
     return;
   }
   if (tag === 'Skybox') {
-    InspectorFields.addCssColor(ui.common, 'color', stub, 'color');
+    const getRenderer = () => /** @type {any} */ (host?._renderer || host?.engine?.renderer || null);
 
-    // PBR indirect ambient (u_ambientColor). Stored as a color string in XML.
-    if (!('ambientColor' in stub)) stub.ambientColor = '';
-    InspectorFields.addCssColorWith(ui.common, 'ambientColor', stub, 'ambientColor', () => {
-      const r = /** @type {any} */ (host?._renderer || host?.engine?.renderer || null);
+    const getSceneBaseUrl = () => {
+      try {
+        const p = String(host?._scenePath || '').trim();
+        if (!p) throw new Error('no scene path');
+        const sceneUrl = new URL(p, window.location.href);
+        return new URL('.', sceneUrl).toString();
+      } catch {
+        return (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+      }
+    };
+
+    const applyAmbientFromStub = () => {
+      const r = getRenderer();
       if (!r) return;
       const s = String(stub.ambientColor || '').trim();
       if (!s) {
@@ -110,16 +119,93 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       }
       const c = SceneLoader._parseColor(s);
       r.pbrAmbientColor = [c[0], c[1], c[2]];
+    };
+
+    const applySkyboxFromStub = () => {
+      const r = getRenderer();
+      if (!r || !r.gl) return;
+
+      const baseUrl = getSceneBaseUrl();
+      const colorStr = String(stub.color || '').trim();
+      const srcStr = String(stub.source || '').trim();
+
+      const right = String(stub.right || '').trim();
+      const left = String(stub.left || '').trim();
+      const top = String(stub.top || '').trim();
+      const bottom = String(stub.bottom || '').trim();
+      const front = String(stub.front || '').trim();
+      const back = String(stub.back || '').trim();
+
+      try {
+        if (colorStr) {
+          const c = SceneLoader._parseColor(colorStr);
+          r.setSkybox(new Skybox(r.gl, [c[0], c[1], c[2], c[3]]));
+          return;
+        }
+
+        if (srcStr && !!stub.equirectangular) {
+          const src = SceneLoader._resolveSceneResourceUrl(srcStr, baseUrl);
+          r.setSkybox(new Skybox(r.gl, src, true));
+          return;
+        }
+
+        if (right && left && top && bottom && front && back) {
+          const faces = [right, left, top, bottom, front, back].map((p) => SceneLoader._resolveSceneResourceUrl(p, baseUrl));
+          r.setSkybox(new Skybox(r.gl, faces, false));
+          return;
+        }
+
+        // No valid skybox inputs => disable skybox.
+        r.setSkybox(null);
+      } catch (e) {
+        console.warn('Failed to apply skybox from inspector', e);
+      }
+    };
+
+    // Ensure fields exist (older scenes)
+    if (!('ambientColor' in stub)) stub.ambientColor = '';
+    if (!('equirectangular' in stub)) stub.equirectangular = false;
+    for (const k of ['color', 'source', 'right', 'left', 'top', 'bottom', 'front', 'back']) {
+      if (!(k in stub)) stub[k] = '';
+    }
+
+    InspectorFields.addCssColorWith(ui.common, 'color', stub, 'color', () => {
+      applySkyboxFromStub();
     });
 
-    InspectorFields.addString(ui.common, 'source', stub, 'source');
-    InspectorFields.addToggle(ui.common, 'equirectangular', stub, 'equirectangular');
-    InspectorFields.addString(ui.common, 'right', stub, 'right');
-    InspectorFields.addString(ui.common, 'left', stub, 'left');
-    InspectorFields.addString(ui.common, 'top', stub, 'top');
-    InspectorFields.addString(ui.common, 'bottom', stub, 'bottom');
-    InspectorFields.addString(ui.common, 'front', stub, 'front');
-    InspectorFields.addString(ui.common, 'back', stub, 'back');
+    // PBR indirect ambient (u_ambientColor). Stored as a color string in XML.
+    InspectorFields.addCssColorWith(ui.common, 'ambientColor', stub, 'ambientColor', () => {
+      applyAmbientFromStub();
+    });
+
+    InspectorFields.addStringWith(ui.common, 'source', stub, 'source', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addToggleWith(ui.common, 'equirectangular', stub, 'equirectangular', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'right', stub, 'right', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'left', stub, 'left', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'top', stub, 'top', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'bottom', stub, 'bottom', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'front', stub, 'front', () => {
+      applySkyboxFromStub();
+    });
+    InspectorFields.addStringWith(ui.common, 'back', stub, 'back', () => {
+      applySkyboxFromStub();
+    });
+
+    // Apply current values once so selecting the stub syncs renderer state.
+    applyAmbientFromStub();
+    applySkyboxFromStub();
     return;
   }
 }
