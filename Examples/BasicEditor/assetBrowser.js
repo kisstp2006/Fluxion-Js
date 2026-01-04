@@ -62,6 +62,9 @@ export function createAssetBrowser(opts) {
     const root = state.root;
     const cwd = state.cwd;
 
+    // Expose current folder for inspector OS-file import drops.
+    try { /** @type {any} */ (window).__fluxionAssetCwd = cwd; } catch {}
+
     if (ui.assetPath) ui.assetPath.textContent = cwd;
 
     // Left: root folder list (root + its subfolders)
@@ -96,6 +99,19 @@ export function createAssetBrowser(opts) {
         item.className = 'assetItem' + (state.selected === ent.path ? ' selected' : '');
         item.setAttribute('data-path', ent.path);
         item.setAttribute('data-isdir', ent.isDir ? '1' : '0');
+
+        // Drag & drop support: allow dragging files into inspector fields.
+        // Payload is a project-relative path like "Model/Foo.mat".
+        if (!ent.isDir) {
+          item.draggable = true;
+          item.addEventListener('dragstart', (e) => {
+            try {
+              if (!e.dataTransfer) return;
+              e.dataTransfer.effectAllowed = 'copy';
+              e.dataTransfer.setData('text/plain', String(ent.path || ''));
+            } catch {}
+          });
+        }
 
         const thumb = document.createElement('div');
         thumb.className = 'assetThumb';
@@ -201,6 +217,46 @@ export function createAssetBrowser(opts) {
     // If we deleted the currently selected item, clear selection.
     if (state.selected === p) state.selected = null;
     render().catch(console.error);
+  }
+
+  /** @param {string} dirRel */
+  async function doCreateFolder(dirRel) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canUse = !!(electronAPI && typeof electronAPI.createProjectDir === 'function' && typeof electronAPI.listProjectDir === 'function');
+    if (!canUse) {
+      alert('Create Folder is only available in the Electron editor.');
+      return;
+    }
+
+    const baseDir = _cleanRel(String(dirRel || state.cwd || ''));
+    const nameRaw = prompt('Folder name:', 'NewFolder');
+    if (nameRaw === null) return;
+    const name = _safeNameOrNull(nameRaw);
+    if (!name) return;
+
+    // Avoid collisions by suffixing like NewFolder2, NewFolder3...
+    const res = await list(baseDir || '.');
+    const entries = /** @type {{ name?: string }[]} */ (res.entries || []);
+    const existing = new Set(entries.map(e => String(e?.name || '')).filter(Boolean));
+    let finalName = name;
+    if (existing.has(finalName)) {
+      for (let i = 2; i < 10000; i++) {
+        const cand = `${name}${i}`;
+        if (!existing.has(cand)) { finalName = cand; break; }
+      }
+      if (existing.has(finalName)) finalName = `${name}${Date.now()}`;
+    }
+
+    const folderRel = baseDir ? `${baseDir}/${finalName}` : finalName;
+    const createRes = await electronAPI.createProjectDir(folderRel);
+    if (!createRes || !createRes.ok) {
+      alert(createRes && createRes.error ? createRes.error : 'Create folder failed');
+      return;
+    }
+
+    state.selected = folderRel;
+    state.selectedIsDir = true;
+    await render();
   }
 
   async function doOpenExternal() {
@@ -537,6 +593,12 @@ export function createAssetBrowser(opts) {
     addMenuSep();
     // Create
     addMenuItem({
+      label: 'Create Folder...',
+      enabled: true,
+      onClick: () => doCreateFolder(ctx.pasteDestDir || state.cwd),
+    });
+    addMenuSep();
+    addMenuItem({
       label: 'Create Scene (.xml)',
       enabled: true,
       onClick: () => doCreate('scene', ctx.pasteDestDir || state.cwd),
@@ -591,6 +653,26 @@ export function createAssetBrowser(opts) {
       ui.assetGrid.focus();
     }
 
+    // Single-click selects only. Double-click opens.
+    state.selected = p;
+    state.selectedIsDir = !!isDir;
+    render().catch(console.error);
+  }
+
+  /** @param {MouseEvent} e */
+  async function onGridDblClick(e) {
+    const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+    const item = t?.closest('.assetItem');
+    if (!item) return;
+    const p = item.getAttribute('data-path');
+    const isDir = item.getAttribute('data-isdir') === '1';
+    if (!p) return;
+
+    state.focused = true;
+    if (ui.assetGrid && typeof ui.assetGrid.focus === 'function') {
+      ui.assetGrid.focus();
+    }
+
     if (isDir) {
       state.cwd = p;
       state.selected = null;
@@ -625,7 +707,58 @@ export function createAssetBrowser(opts) {
 
     ui.assetUpBtn?.addEventListener('click', () => navigateUp());
     ui.assetGrid?.addEventListener('click', (e) => onGridClick(e).catch(console.error));
+    ui.assetGrid?.addEventListener('dblclick', (e) => onGridDblClick(e).catch(console.error));
     ui.assetGrid?.addEventListener('contextmenu', onGridContextMenu);
+
+    // Drop external OS files into the current folder (import/copy into workspace).
+    if (ui.assetGrid) {
+      ui.assetGrid.addEventListener('dragover', (e) => {
+        // Allow OS drops.
+        e.preventDefault();
+        try {
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        } catch {}
+      });
+
+      ui.assetGrid.addEventListener('drop', (e) => {
+        const electronAPI = /** @type {any} */ (window).electronAPI;
+        const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
+        if (!canImport) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const dt = e.dataTransfer;
+        if (!dt || !dt.files || dt.files.length === 0) return;
+
+        // In Electron, File objects usually have a .path property.
+        const paths = [];
+        for (const f of Array.from(dt.files)) {
+          // @ts-ignore
+          const p = String(f && (f.path || f.webkitRelativePath || f.name) ? (f.path || f.webkitRelativePath || f.name) : '').trim();
+          if (p) paths.push(p);
+        }
+        if (paths.length === 0) return;
+
+        Promise.resolve(electronAPI.importExternalFiles(paths, state.cwd))
+          .then(async (res) => {
+            if (!res || !res.ok) {
+              alert(res && res.error ? res.error : 'Import failed');
+              return;
+            }
+            const imported = Array.isArray(res.imported) ? res.imported : [];
+            if (imported.length > 0) {
+              const rel = String(imported[0]?.destRel || '');
+              if (rel) state.selected = rel;
+            }
+            await render();
+          })
+          .catch((err) => {
+            console.error(err);
+            alert('Import failed');
+          });
+      });
+    }
 
     if (ui.assetGrid) {
       ui.assetGrid.tabIndex = 0;

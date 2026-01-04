@@ -101,10 +101,27 @@
       </aside>
 
       <main class="viewport">
+        <div class="mainTabs" role="tablist" aria-label="Main Tabs">
+          <button id="mainTabViewport2dBtn" class="mainTabBtn active" type="button" role="tab" aria-selected="true">Viewport 2D</button>
+          <button id="mainTabViewport3dBtn" class="mainTabBtn" type="button" role="tab" aria-selected="false">Viewport 3D</button>
+          <div id="mainTabsDynamic" class="mainTabsDynamic" aria-hidden="false"></div>
+        </div>
+
+        <div id="viewportView" class="viewportView" aria-label="Viewport View">
         <canvas id="gameCanvas"></canvas>
         <div class="viewportOverlay" id="overlay">
           <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
           <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
+        </div>
+        </div>
+
+        <div id="scriptView" class="scriptView" aria-label="Script Editor" hidden>
+          <div class="scriptHeader">
+            <div id="scriptPath" class="scriptPath">No script opened</div>
+            <div class="scriptHeaderSpacer" aria-hidden="true"></div>
+            <button id="scriptSaveBtn" class="assetToolBtn" type="button">Save (Ctrl+S)</button>
+          </div>
+          <textarea id="scriptEditorText" class="scriptEditorText" spellcheck="false"></textarea>
         </div>
       </main>
 

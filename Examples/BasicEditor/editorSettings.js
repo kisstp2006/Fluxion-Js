@@ -35,13 +35,14 @@
  *  _editorSettingsCategory: 'general'|'grid2d'|'grid3d',
  *  _editorSettingsFilter: string,
  *  _editorSettings: {
- *    general: { showHelpOverlay: boolean },
+ *    general: { showHelpOverlay: boolean, fluxionInstallPath?: string },
  *    grid2d: { enabled: boolean, baseMinor: number, majorMultiplier: number, minGridPx: number, maxGridLines: number, showAxes: boolean },
  *    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean }
  *  },
  *  _helpVisible: boolean,
  *  _addToggleWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void) => void,
  *  _addNumberWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void, opts?: any) => void,
+ *  _addStringWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void, opts?: any) => void,
  *  _closeTopbarMenus: () => void,
  * }} EditorSettingsHost
  */
@@ -59,6 +60,7 @@ export function loadEditorSettingsFromStorage(/** @type {EditorSettingsHost} */ 
     const p = /** @type {any} */ (parsed);
     if (p.general && typeof p.general === 'object') {
       if (typeof p.general.showHelpOverlay === 'boolean') cur.general.showHelpOverlay = p.general.showHelpOverlay;
+      if (typeof p.general.fluxionInstallPath === 'string') cur.general.fluxionInstallPath = p.general.fluxionInstallPath;
     }
     if (p.grid2d && typeof p.grid2d === 'object') {
       if (typeof p.grid2d.enabled === 'boolean') cur.grid2d.enabled = p.grid2d.enabled;
@@ -134,6 +136,11 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
     host._addToggleWith(ui.editorSettingsForm, 'Show help overlay', obj, 'showHelpOverlay', () => {
       host._helpVisible = !!obj.showHelpOverlay;
       if (ui.overlay) ui.overlay.style.display = host._helpVisible ? 'block' : 'none';
+      saveEditorSettingsToStorage(host);
+    });
+
+    // Used by project generation to avoid copying the engine into each project.
+    host._addStringWith(ui.editorSettingsForm, 'Fluxion install path', obj, 'fluxionInstallPath', () => {
       saveEditorSettingsToStorage(host);
     });
   } else if (cat === 'grid2d') {

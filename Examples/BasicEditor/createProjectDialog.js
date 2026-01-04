@@ -17,11 +17,12 @@
  */
 
 /**
- * @param {{ ui: CreateProjectUI, closeMenus?: (() => void) | null }} opts
+ * @param {{ ui: CreateProjectUI, closeMenus?: (() => void) | null, getFluxionInstallPath?: (() => string) | null }} opts
  */
 export function createProjectDialog(opts) {
   const ui = opts.ui;
   const closeMenus = opts.closeMenus || null;
+  const getFluxionInstallPath = opts.getFluxionInstallPath || null;
 
   let open = false;
   /** @type {((v: {name: string, parentDir: string, template: string} | null) => void) | null} */
@@ -119,7 +120,9 @@ export function createProjectDialog(opts) {
     const cfg = await promptOptions(initialName);
     if (!cfg) return;
 
-    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name, template: cfg.template });
+    const engineRoot = getFluxionInstallPath ? String(getFluxionInstallPath() || '').trim() : '';
+
+    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name, template: cfg.template, engineRoot });
     if (!res || !res.ok) {
       alert(`Failed to create project: ${res && res.error ? res.error : 'Unknown error'}`);
       return;

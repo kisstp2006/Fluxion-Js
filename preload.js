@@ -23,6 +23,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   renameProjectPath: (relativePath, newName) => ipcRenderer.invoke('rename-project-path', { relativePath, newName }),
   copyProjectPathToDir: (srcRelativePath, destDirRelativePath) => ipcRenderer.invoke('copy-project-path-to-dir', { srcRelativePath, destDirRelativePath }),
 
+  // Create a folder inside the workspace
+  createProjectDir: (dirRelativePath) => ipcRenderer.invoke('create-project-dir', { dirRelativePath }),
+
+  // Simple script editor helpers
+  readProjectTextFile: (relativePath) => ipcRenderer.invoke('read-project-text-file', relativePath),
+  writeProjectTextFile: (relativePath, content) => ipcRenderer.invoke('write-project-text-file', { relativePath, content }),
+
+  // Import external OS files into the project workspace (editor workflow)
+  // payload: { files: string[], destDirRelativePath: string }
+  importExternalFiles: (files, destDirRelativePath) => ipcRenderer.invoke('import-external-files', { files, destDirRelativePath }),
+
   // Workspace root (lets the editor browse/load files outside this repo)
   setWorkspaceRoot: (absolutePath) => ipcRenderer.invoke('set-workspace-root', absolutePath),
   getWorkspaceRoot: () => ipcRenderer.invoke('get-workspace-root'),

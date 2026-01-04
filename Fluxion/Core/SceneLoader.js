@@ -16,6 +16,57 @@ import { loadGLTF } from './GLTFLoader.js';
  * Utility class for loading scenes from XML files.
  */
 export default class SceneLoader {
+
+        /**
+         * Apply XML Material override attributes onto an already-created Material.
+         * This is used for both inline <Material> and <Material source="...">.
+         * @param {Element} node
+         * @param {any} mat
+         */
+        static _applyMaterialOverrides(node, mat) {
+            if (!node || !mat) return;
+
+            // Factors
+            const baseColorAttr = node.getAttribute('baseColorFactor') || node.getAttribute('albedoColor') || node.getAttribute('color');
+            if (baseColorAttr) {
+                const c = SceneLoader._parseColor(baseColorAttr);
+                mat.baseColorFactor = [c[0], c[1], c[2], c[3]];
+                // Back-compat alias in case a consumer uses albedoColor.
+                try { mat.albedoColor = [c[0], c[1], c[2], c[3]]; } catch {}
+            }
+
+            if (node.hasAttribute('metallicFactor') || node.hasAttribute('metallic')) {
+                const m = parseFloat(node.getAttribute('metallicFactor') || node.getAttribute('metallic') || '0');
+                mat.metallicFactor = Math.min(1, Math.max(0, m));
+            }
+            if (node.hasAttribute('roughnessFactor') || node.hasAttribute('roughness')) {
+                const r = parseFloat(node.getAttribute('roughnessFactor') || node.getAttribute('roughness') || '1');
+                mat.roughnessFactor = Math.min(1, Math.max(0.04, r));
+            }
+
+            // Normal/AO
+            if (node.hasAttribute('normalScale')) {
+                mat.normalScale = parseFloat(node.getAttribute('normalScale') || '1');
+            }
+            if (node.hasAttribute('aoStrength')) {
+                mat.aoStrength = parseFloat(node.getAttribute('aoStrength') || '1');
+            }
+
+            // Emissive
+            const emissiveAttr = node.getAttribute('emissiveFactor') || node.getAttribute('emissive');
+            if (emissiveAttr) {
+                const c = SceneLoader._parseColor(emissiveAttr);
+                mat.emissiveFactor = [c[0], c[1], c[2]];
+            }
+
+            // Alpha
+            if (node.hasAttribute('alphaMode')) {
+                mat.alphaMode = String(node.getAttribute('alphaMode') || 'OPAQUE').toUpperCase();
+            }
+            if (node.hasAttribute('alphaCutoff')) {
+                mat.alphaCutoff = parseFloat(node.getAttribute('alphaCutoff') || '0.5');
+            }
+        }
         /**
          * Resolve a resource URL found in a scene.
          *
@@ -259,28 +310,27 @@ export default class SceneLoader {
                     /** @type {any} */
                     const matXml = { __xmlTag: 'Material', name };
 
-                    // Raw authoring attributes (keep strings so we can re-save faithfully)
+                    // Raw authoring attributes (keep strings so we can re-save faithfully).
+                    // Note: even when using source="...mat", we still allow override attributes.
                     const srcAttr = child.getAttribute('source') || child.getAttribute('src') || '';
-                    if (srcAttr) {
-                        matXml.source = srcAttr;
-                    } else {
-                        matXml.baseColorFactor = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color') || '';
-                        matXml.metallicFactor = child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '';
-                        matXml.roughnessFactor = child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '';
-                        matXml.normalScale = child.getAttribute('normalScale') || '';
-                        matXml.aoStrength = child.getAttribute('aoStrength') || '';
-                        matXml.emissiveFactor = child.getAttribute('emissiveFactor') || child.getAttribute('emissive') || '';
-                        matXml.alphaMode = child.getAttribute('alphaMode') || '';
-                        matXml.alphaCutoff = child.getAttribute('alphaCutoff') || '';
+                    if (srcAttr) matXml.source = srcAttr;
 
-                        matXml.baseColorTexture = child.getAttribute('baseColorTexture') || child.getAttribute('albedoTexture') || '';
-                        matXml.metallicTexture = child.getAttribute('metallicTexture') || '';
-                        matXml.roughnessTexture = child.getAttribute('roughnessTexture') || '';
-                        matXml.normalTexture = child.getAttribute('normalTexture') || '';
-                        matXml.aoTexture = child.getAttribute('aoTexture') || child.getAttribute('occlusionTexture') || child.getAttribute('occlusion') || '';
-                        matXml.emissiveTexture = child.getAttribute('emissiveTexture') || '';
-                        matXml.alphaTexture = child.getAttribute('alphaTexture') || '';
-                    }
+                    matXml.baseColorFactor = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color') || '';
+                    matXml.metallicFactor = child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '';
+                    matXml.roughnessFactor = child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '';
+                    matXml.normalScale = child.getAttribute('normalScale') || '';
+                    matXml.aoStrength = child.getAttribute('aoStrength') || '';
+                    matXml.emissiveFactor = child.getAttribute('emissiveFactor') || child.getAttribute('emissive') || '';
+                    matXml.alphaMode = child.getAttribute('alphaMode') || '';
+                    matXml.alphaCutoff = child.getAttribute('alphaCutoff') || '';
+
+                    matXml.baseColorTexture = child.getAttribute('baseColorTexture') || child.getAttribute('albedoTexture') || '';
+                    matXml.metallicTexture = child.getAttribute('metallicTexture') || '';
+                    matXml.roughnessTexture = child.getAttribute('roughnessTexture') || '';
+                    matXml.normalTexture = child.getAttribute('normalTexture') || '';
+                    matXml.aoTexture = child.getAttribute('aoTexture') || child.getAttribute('occlusionTexture') || child.getAttribute('occlusion') || '';
+                    matXml.emissiveTexture = child.getAttribute('emissiveTexture') || '';
+                    matXml.alphaTexture = child.getAttribute('alphaTexture') || '';
 
                     // @ts-ignore
                     scene._materialXml.push(matXml);
@@ -289,7 +339,11 @@ export default class SceneLoader {
                     if (src) {
                         // Resolve relative to the scene URL (not the caller page).
                         const matUrl = new URL(src, baseUrl).toString();
-                        const p = Material.load(matUrl, renderer);
+                        const p = Material.load(matUrl, renderer).then((mat) => {
+                            // Apply XML overrides on top of the loaded .mat.
+                            try { SceneLoader._applyMaterialOverrides(child, mat); } catch {}
+                            return mat;
+                        });
                         // Track loading promise on renderer so loading flows can wait
                         renderer?.trackAssetPromise?.(p);
                         // Store promise in scene so callers can await when resolving references

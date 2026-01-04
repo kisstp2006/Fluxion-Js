@@ -217,6 +217,119 @@ export function addStringWith(container, label, obj, key, onChanged) {
 }
 
 /**
+ * Like addStringWith but also supports dropping a file/path onto the input.
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {() => void} onChanged
+ * @param {{ acceptExtensions?: string[], importToWorkspaceUrl?: boolean }=} opts
+ */
+export function addStringWithDrop(container, label, obj, key, onChanged, opts = {}) {
+	if (!obj) return;
+	if (!(key in obj)) return;
+	const input = document.createElement('input');
+	input.type = 'text';
+	input.value = String(obj[key] ?? '');
+
+	const accept = Array.isArray(opts.acceptExtensions)
+		? opts.acceptExtensions.map((s) => String(s || '').toLowerCase()).filter(Boolean)
+		: null;
+
+	const acceptValue = (v) => {
+		if (!accept || accept.length === 0) return true;
+		const s = String(v || '').toLowerCase();
+		return accept.some((ext) => s.endsWith(ext));
+	};
+
+	const apply = () => {
+		obj[key] = String(input.value ?? '');
+		try {
+			onChanged();
+		} catch {}
+	};
+
+	input.addEventListener('input', apply);
+	input.addEventListener('change', apply);
+
+	input.addEventListener('dragover', (e) => {
+		// Allow drop.
+		e.preventDefault();
+		try {
+			if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+		} catch {}
+	});
+
+	input.addEventListener('drop', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		const dt = e.dataTransfer;
+		if (!dt) return;
+
+		// If OS files are dropped, import them into the project via Electron IPC.
+		// This enables: drag from Windows Explorer -> drop on inspector field.
+		try {
+			const electronAPI = /** @type {any} */ ((window && window.electronAPI) ? window.electronAPI : null);
+			const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
+			if (canImport && dt.files && dt.files.length > 0) {
+				const paths = [];
+				for (const f of Array.from(dt.files)) {
+					// In Electron, File usually has .path.
+					// @ts-ignore
+					const p = String(f && (f.path || '') ? f.path : '').trim();
+					if (p) paths.push(p);
+				}
+				if (paths.length > 0) {
+					const destDir = String((/** @type {any} */ (window)).__fluxionAssetCwd || 'Model');
+					Promise.resolve(electronAPI.importExternalFiles(paths, destDir))
+						.then((res) => {
+							if (!res || !res.ok) return;
+							const imported = Array.isArray(res.imported) ? res.imported : [];
+							const rel = String(imported[0]?.destRel || '').trim();
+							if (!rel) return;
+							if (!acceptValue(rel)) return;
+							const next = opts.importToWorkspaceUrl ? `fluxion://workspace/${rel.replace(/^\/+/, '')}` : rel;
+							input.value = next;
+							apply();
+						})
+						.catch(() => {});
+					return;
+				}
+			}
+		} catch {}
+
+		// Prefer plain text payload from our asset browser.
+		let text = '';
+		try {
+			text = String(dt.getData('text/plain') || '').trim();
+		} catch {}
+		if (!text) {
+			try {
+				text = String(dt.getData('text/uri-list') || '').trim();
+			} catch {}
+		}
+		if (!text && dt.files && dt.files.length > 0) {
+			// Best-effort: if an OS file is dropped, use its name.
+			// (Project-relative wiring is handled by the asset browser drag payload.)
+			try {
+				text = String(dt.files[0]?.name || '').trim();
+			} catch {}
+		}
+
+		if (!text) return;
+		// Use the first line only.
+		text = String(text.split(/\r?\n/)[0] || '').trim();
+		if (!text) return;
+		if (!acceptValue(text)) return;
+
+		input.value = text;
+		apply();
+	});
+
+	addField(container, label, input);
+}
+
+/**
  * Nullable number input: allows clearing the field to represent "unset".
  * - For ClickableArea width/height, empty sets to null.
  * - For plain objects (e.g. mesh params), empty deletes the key.

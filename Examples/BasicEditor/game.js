@@ -106,6 +106,14 @@ const ui = {
   assetPanelAssets: /** @type {HTMLDivElement|null} */ (null),
   assetPanelConsole: /** @type {HTMLDivElement|null} */ (null),
   consoleOutput: /** @type {HTMLDivElement|null} */ (null),
+  mainTabViewport2dBtn: /** @type {HTMLButtonElement|null} */ (null),
+  mainTabViewport3dBtn: /** @type {HTMLButtonElement|null} */ (null),
+  mainTabsDynamic: /** @type {HTMLDivElement|null} */ (null),
+  viewportView: /** @type {HTMLDivElement|null} */ (null),
+  scriptView: /** @type {HTMLDivElement|null} */ (null),
+  scriptPath: /** @type {HTMLDivElement|null} */ (null),
+  scriptSaveBtn: /** @type {HTMLButtonElement|null} */ (null),
+  scriptEditorText: /** @type {HTMLTextAreaElement|null} */ (null),
   mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
   mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
   tree: /** @type {HTMLDivElement|null} */ (null),
@@ -198,11 +206,11 @@ const game = {
   _editorSettingsFilter: '',
 
   _editorSettings: /** @type {{
-    general: { showHelpOverlay: boolean },
+    general: { showHelpOverlay: boolean, fluxionInstallPath: string },
     grid2d: { enabled: boolean, baseMinor: number, majorMultiplier: number, minGridPx: number, maxGridLines: number, showAxes: boolean },
     grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean }
   }} */ ({
-    general: { showHelpOverlay: true },
+    general: { showHelpOverlay: true, fluxionInstallPath: '' },
     grid2d: { enabled: true, baseMinor: 32, majorMultiplier: 2, minGridPx: 10, maxGridLines: 240, showAxes: true },
     grid3d: { enabled: true, autoScale: true, minor: 1, majorMultiplier: 5, halfSpan: 50, showAxes: true },
   }),
@@ -221,6 +229,13 @@ const game = {
 
   /** @type {'assets'|'console'} */
   _bottomTab: 'assets',
+
+  /** @type {'viewport2d'|'viewport3d'|'script'} */
+  _mainTab: 'viewport2d',
+  /** @type {string|null} */
+  _activeScriptPath: null,
+  /** @type {{ pathRel: string, name: string, text: string, dirty: boolean }[]} */
+  _openScripts: [],
 
   _consoleCaptureInstalled: false,
   _consoleMaxLines: 500,
@@ -364,6 +379,15 @@ const game = {
     ui.assetPanelConsole = /** @type {HTMLDivElement} */ (document.getElementById('assetPanelConsole'));
     ui.consoleOutput = /** @type {HTMLDivElement} */ (document.getElementById('consoleOutput'));
 
+    ui.mainTabViewport2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewport2dBtn'));
+    ui.mainTabViewport3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewport3dBtn'));
+    ui.mainTabsDynamic = /** @type {HTMLDivElement} */ (document.getElementById('mainTabsDynamic'));
+    ui.viewportView = /** @type {HTMLDivElement} */ (document.getElementById('viewportView'));
+    ui.scriptView = /** @type {HTMLDivElement} */ (document.getElementById('scriptView'));
+    ui.scriptPath = /** @type {HTMLDivElement} */ (document.getElementById('scriptPath'));
+    ui.scriptSaveBtn = /** @type {HTMLButtonElement} */ (document.getElementById('scriptSaveBtn'));
+    ui.scriptEditorText = /** @type {HTMLTextAreaElement} */ (document.getElementById('scriptEditorText'));
+
     // Ensure About starts closed.
     if (ui.aboutModal) ui.aboutModal.hidden = true;
     if (ui.editorSettingsModal) ui.editorSettingsModal.hidden = true;
@@ -399,6 +423,13 @@ const game = {
     ui.assetTabAssetsBtn?.addEventListener('click', () => this._setBottomTab('assets'));
     ui.assetTabConsoleBtn?.addEventListener('click', () => this._setBottomTab('console'));
     this._setBottomTab('assets');
+
+    // Main tabs (viewport + scripts)
+    ui.mainTabViewport2dBtn?.addEventListener('click', () => this._setMainTab('viewport2d'));
+    ui.mainTabViewport3dBtn?.addEventListener('click', () => this._setMainTab('viewport3d'));
+    ui.scriptSaveBtn?.addEventListener('click', () => this._saveActiveScript().catch(console.error));
+    ui.scriptEditorText?.addEventListener('input', () => this._markActiveScriptDirty());
+    this._setMainTab('viewport2d');
 
     // Capture logs into the Console tab
     this._installEditorConsoleCapture();
@@ -439,6 +470,7 @@ const game = {
     this._createProjectDialog = createProjectDialog({
       ui: /** @type {any} */ (ui),
       closeMenus: () => this._closeTopbarMenus(),
+      getFluxionInstallPath: () => String(this._editorSettings?.general?.fluxionInstallPath || ''),
     });
     this._createProjectDialog.init();
 
@@ -450,6 +482,17 @@ const game = {
     });
 
     window.addEventListener("keydown", (e) => {
+      // Ctrl+S / Cmd+S should work even while typing.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (this._mainTab === 'script') {
+          this._saveActiveScript().catch(console.error);
+        } else {
+          this.saveCurrentScene().catch(console.error);
+        }
+        return;
+      }
+
       // Don't trigger global shortcuts while typing.
       const keyTarget = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
       if (keyTarget) {
@@ -466,14 +509,6 @@ const game = {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-        // Save currently open scene (editor workflow).
-        if (this._scenePath) {
-          e.preventDefault();
-          this.saveCurrentScene().catch(console.error);
-        }
-        return;
-      }
       if (e.key === "Escape") {
         // Mandatory project selection screen: Escape does nothing.
         if (this._projectSelectOpen) {
@@ -998,10 +1033,21 @@ const game = {
       this._assetBrowserCtl = createAssetBrowser({
         ui,
         root: this._assetBrowser.root,
-        onOpenFile: (pathRel) => this._tryOpenSceneFromAsset(pathRel),
+        onOpenFile: (pathRel) => this._tryOpenAssetFromBrowser(pathRel),
       });
     }
     this._assetBrowserCtl.init();
+  },
+
+  /** @param {string} pathRel */
+  async _tryOpenAssetFromBrowser(pathRel) {
+    const p = String(pathRel || '');
+    const lower = p.toLowerCase();
+    if (lower.endsWith('.js')) {
+      await this._openScript(p);
+      return;
+    }
+    await this._tryOpenSceneFromAsset(p);
   },
 
   /**
@@ -1066,6 +1112,138 @@ const game = {
     const clean = String(pathRel || '').replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
     this._scenePath = `fluxion://workspace/${clean}`;
     await this.loadSelectedScene(r);
+  },
+
+  /** @param {'viewport2d'|'viewport3d'|'script'} tab */
+  _setMainTab(tab) {
+    this._mainTab = tab;
+
+    const is2d = tab === 'viewport2d';
+    const is3d = tab === 'viewport3d';
+    const isScript = tab === 'script';
+
+    if (ui.mainTabViewport2dBtn) {
+      ui.mainTabViewport2dBtn.classList.toggle('active', is2d);
+      ui.mainTabViewport2dBtn.setAttribute('aria-selected', is2d ? 'true' : 'false');
+    }
+    if (ui.mainTabViewport3dBtn) {
+      ui.mainTabViewport3dBtn.classList.toggle('active', is3d);
+      ui.mainTabViewport3dBtn.setAttribute('aria-selected', is3d ? 'true' : 'false');
+    }
+
+    if (ui.viewportView) {
+      ui.viewportView.hidden = isScript;
+      ui.viewportView.style.display = isScript ? 'none' : '';
+      ui.viewportView.setAttribute('aria-hidden', isScript ? 'true' : 'false');
+    }
+    if (ui.scriptView) {
+      ui.scriptView.hidden = !isScript;
+      ui.scriptView.style.display = isScript ? '' : 'none';
+      ui.scriptView.setAttribute('aria-hidden', isScript ? 'false' : 'true');
+    }
+
+    if (is2d) this.setMode('2d');
+    else if (is3d) this.setMode('3d');
+    else if (isScript) {
+      // Ensure the editor has focus when switching to script.
+      ui.scriptEditorText?.focus();
+    }
+
+    this._renderMainScriptTabs();
+  },
+
+  _renderMainScriptTabs() {
+    const host = ui.mainTabsDynamic;
+    if (!host) return;
+    host.innerHTML = '';
+
+    for (const s of this._openScripts) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'mainTabBtn' + (this._mainTab === 'script' && this._activeScriptPath === s.pathRel ? ' active' : '');
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', (this._mainTab === 'script' && this._activeScriptPath === s.pathRel) ? 'true' : 'false');
+      btn.textContent = (s.dirty ? '*' : '') + s.name;
+      btn.addEventListener('click', () => {
+        this._activeScriptPath = s.pathRel;
+        this._loadActiveScriptIntoEditor();
+        this._setMainTab('script');
+      });
+      host.appendChild(btn);
+    }
+  },
+
+  /** @param {string} pathRel */
+  async _openScript(pathRel) {
+    const p = String(pathRel || '').replace(/^\.(?:\/)?/, '').replace(/^\/+/, '').replace(/\\/g, '/');
+    if (!p) return;
+
+    const existing = this._openScripts.find(s => s.pathRel === p);
+    if (!existing) {
+      const electronAPI = /** @type {any} */ (window).electronAPI;
+      const canRead = !!(electronAPI && typeof electronAPI.readProjectTextFile === 'function');
+      if (!canRead) {
+        alert('Script editor is only available in the Electron editor.');
+        return;
+      }
+
+      const res = await electronAPI.readProjectTextFile(p);
+      if (!res || !res.ok) {
+        alert(res && res.error ? res.error : 'Failed to open script');
+        return;
+      }
+
+      const base = p.split('/').pop() || p;
+      this._openScripts.push({ pathRel: p, name: base, text: String(res.content ?? ''), dirty: false });
+    }
+
+    this._activeScriptPath = p;
+    this._loadActiveScriptIntoEditor();
+    this._setMainTab('script');
+  },
+
+  _loadActiveScriptIntoEditor() {
+    const p = String(this._activeScriptPath || '');
+    const s = this._openScripts.find(x => x.pathRel === p) || null;
+    if (ui.scriptPath) ui.scriptPath.textContent = s ? s.pathRel : 'No script opened';
+    if (ui.scriptEditorText) ui.scriptEditorText.value = s ? s.text : '';
+    this._renderMainScriptTabs();
+  },
+
+  _markActiveScriptDirty() {
+    if (this._mainTab !== 'script') return;
+    const p = String(this._activeScriptPath || '');
+    const s = this._openScripts.find(x => x.pathRel === p);
+    if (!s || !ui.scriptEditorText) return;
+    const next = String(ui.scriptEditorText.value ?? '');
+    s.text = next;
+    if (!s.dirty) {
+      s.dirty = true;
+      this._renderMainScriptTabs();
+    }
+  },
+
+  async _saveActiveScript() {
+    const p = String(this._activeScriptPath || '');
+    const s = this._openScripts.find(x => x.pathRel === p) || null;
+    if (!s || !ui.scriptEditorText) return;
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canWrite = !!(electronAPI && typeof electronAPI.writeProjectTextFile === 'function');
+    if (!canWrite) {
+      alert('Script editor is only available in the Electron editor.');
+      return;
+    }
+
+    const content = String(ui.scriptEditorText.value ?? '');
+    const res = await electronAPI.writeProjectTextFile(s.pathRel, content);
+    if (!res || !res.ok) {
+      alert(res && res.error ? res.error : 'Failed to save script');
+      return;
+    }
+    s.text = content;
+    s.dirty = false;
+    this._renderMainScriptTabs();
   },
 
   /**
@@ -1426,13 +1604,9 @@ const game = {
         /** @type {string[]} */
         const parts = [];
         addAttr(parts, 'name', m.name);
-        if (m.source) {
-          addAttr(parts, 'source', m.source);
-          lines.push(`    <Material ${parts.join(' ')} />`);
-          continue;
-        }
+        if (m.source) addAttr(parts, 'source', m.source);
 
-        // Inline material definition: save only non-empty values.
+        // Inline fields (and optional overrides when source is present): save only non-empty values.
         addAttr(parts, 'baseColorFactor', m.baseColorFactor);
         addAttr(parts, 'metallicFactor', m.metallicFactor);
         addAttr(parts, 'roughnessFactor', m.roughnessFactor);

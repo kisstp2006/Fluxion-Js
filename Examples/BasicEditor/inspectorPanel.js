@@ -5,7 +5,7 @@
  */
 
 import * as InspectorFields from "./inspectorFields.js";
-import { SceneLoader, Skybox } from "../../Fluxion/index.js";
+import { SceneLoader, Skybox, Material } from "../../Fluxion/index.js";
 
 /**
  * @typedef {{
@@ -191,28 +191,28 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
     // Show only the relevant inputs.
     if (!!stub.equirectangular) {
-      InspectorFields.addStringWith(ui.common, 'source', stub, 'source', () => {
+      InspectorFields.addStringWithDrop(ui.common, 'source', stub, 'source', () => {
         applySkyboxFromStub();
-      });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
     } else {
-      InspectorFields.addStringWith(ui.common, 'right', stub, 'right', () => {
+      InspectorFields.addStringWithDrop(ui.common, 'right', stub, 'right', () => {
         applySkyboxFromStub();
-      });
-      InspectorFields.addStringWith(ui.common, 'left', stub, 'left', () => {
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      InspectorFields.addStringWithDrop(ui.common, 'left', stub, 'left', () => {
         applySkyboxFromStub();
-      });
-      InspectorFields.addStringWith(ui.common, 'top', stub, 'top', () => {
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      InspectorFields.addStringWithDrop(ui.common, 'top', stub, 'top', () => {
         applySkyboxFromStub();
-      });
-      InspectorFields.addStringWith(ui.common, 'bottom', stub, 'bottom', () => {
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      InspectorFields.addStringWithDrop(ui.common, 'bottom', stub, 'bottom', () => {
         applySkyboxFromStub();
-      });
-      InspectorFields.addStringWith(ui.common, 'front', stub, 'front', () => {
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      InspectorFields.addStringWithDrop(ui.common, 'front', stub, 'front', () => {
         applySkyboxFromStub();
-      });
-      InspectorFields.addStringWith(ui.common, 'back', stub, 'back', () => {
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      InspectorFields.addStringWithDrop(ui.common, 'back', stub, 'back', () => {
         applySkyboxFromStub();
-      });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
     }
 
     // Apply current values once so selecting the stub syncs renderer state.
@@ -285,7 +285,7 @@ export function rebuildInspector(host, ui) {
 
   // Sprite / AnimatedSprite image source
   if (obj && typeof obj === 'object' && ('imageSrc' in obj)) {
-    InspectorFields.addStringWith(ui.common, 'imageSrc', obj, 'imageSrc', () => {
+    InspectorFields.addStringWithDrop(ui.common, 'imageSrc', obj, 'imageSrc', () => {
       // Best-effort live reload for sprites.
       try {
         if (typeof obj.loadTexture === 'function') {
@@ -299,7 +299,7 @@ export function rebuildInspector(host, ui) {
           obj.loadTexture(String(obj.imageSrc || ''));
         }
       } catch {}
-    });
+    }, { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'], importToWorkspaceUrl: true });
   }
 
   // AnimatedSprite frame size
@@ -323,9 +323,9 @@ export function rebuildInspector(host, ui) {
 
   // Audio fields
   if (obj && obj.constructor?.name === 'Audio') {
-    InspectorFields.addStringWith(ui.common, 'src', obj, 'src', () => {
+    InspectorFields.addStringWithDrop(ui.common, 'src', obj, 'src', () => {
       // Note: src is authoring-only here; live reload requires scene URL resolution.
-    });
+    }, { acceptExtensions: ['.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'], importToWorkspaceUrl: true });
     InspectorFields.addToggle(ui.common, 'loop', obj, 'loop');
     InspectorFields.addToggle(ui.common, 'autoplay', obj, 'autoplay');
     InspectorFields.addToggle(ui.common, 'stopOnSceneChange', obj, 'stopOnSceneChange');
@@ -335,15 +335,223 @@ export function rebuildInspector(host, ui) {
   // MeshNode fields
   if (obj && obj.constructor?.name === 'MeshNode') {
     InspectorFields.addString(ui.common, 'source', obj, 'source');
-    // Preserve authoring name even if material resolves to an instance.
-    if (!('materialName' in obj) && typeof obj.material === 'string') {
-      obj.materialName = obj.material;
-    }
-    InspectorFields.addStringWith(ui.common, 'material', obj, 'materialName', () => {
-      try { obj.material = String(obj.materialName || ''); } catch {}
-    });
-    if (Array.isArray(obj.color) && obj.color.length >= 3) {
-      InspectorFields.addColorVec3(ui.common, 'color', obj.color);
+    // --- Material (.mat) input + inline overrides ---
+    const sceneAny = /** @type {any} */ (host.currentScene || null);
+    const getRenderer = () => /** @type {any} */ (host?._renderer || host?.engine?.renderer || null);
+    const getSceneBaseUrl = () => {
+      try {
+        const p = String(host?._scenePath || '').trim();
+        if (!p) throw new Error('no scene path');
+        const sceneUrl = new URL(p, window.location.href);
+        return new URL('.', sceneUrl).toString();
+      } catch {
+        return (typeof document !== 'undefined' && document.baseURI) ? document.baseURI : (typeof window !== 'undefined' ? window.location.href : '');
+      }
+    };
+
+    /** @returns {any[]} */
+    const getMaterialsXml = () => {
+      if (!sceneAny) return [];
+      if (!Array.isArray(sceneAny._materialXml)) sceneAny._materialXml = [];
+      return sceneAny._materialXml;
+    };
+
+    /** @param {string} name */
+    const findMatStub = (name) => {
+      if (!name) return null;
+      const mats = getMaterialsXml();
+      return mats.find((m) => m && m.__xmlTag === 'Material' && String(m.name) === String(name)) || null;
+    };
+
+    /** @param {string} base */
+    const makeUniqueMatName = (base) => {
+      const mats = getMaterialsXml();
+      const used = new Set(mats.map((m) => String(m?.name || '')).filter(Boolean));
+      const clean = String(base || 'Material').replace(/[^a-zA-Z0-9_\-]/g, '_') || 'Material';
+      if (!used.has(clean)) return clean;
+      for (let i = 2; i < 10000; i++) {
+        const n = `${clean}_${i}`;
+        if (!used.has(n)) return n;
+      }
+      return `${clean}_${Date.now()}`;
+    };
+
+    /** @param {string} suggestedSource */
+    const ensureMatStubForNode = (suggestedSource) => {
+      // Preserve authoring name even if material resolves to an instance.
+      if (!('materialName' in obj) && typeof obj.material === 'string') {
+        obj.materialName = obj.material;
+      }
+
+      const existing = findMatStub(String(obj.materialName || ''));
+      if (existing) return existing;
+
+      const mats = getMaterialsXml();
+      const src = String(suggestedSource || '').trim();
+      const baseFromFile = src ? src.split('/').pop()?.split('\\').pop()?.replace(/\.[^.]+$/, '') : '';
+      const baseFromNode = String(obj.name || 'Mesh') + '_Mat';
+      const name = makeUniqueMatName(baseFromFile || baseFromNode);
+      /** @type {any} */
+      const stub = {
+        __xmlTag: 'Material',
+        name,
+        source: '',
+        baseColorFactor: '',
+        metallicFactor: '',
+        roughnessFactor: '',
+        normalScale: '',
+        aoStrength: '',
+        emissiveFactor: '',
+        alphaMode: '',
+        alphaCutoff: '',
+      };
+      mats.push(stub);
+
+      // Bind node to this material name.
+      obj.materialName = name;
+      try { obj.material = name; } catch {}
+
+      // Tree includes scene-level stubs.
+      try { host.rebuildTree(); } catch {}
+      return stub;
+    };
+
+    /** @param {any} stub @param {any} mat */
+    const applyStubOverridesToMaterial = (stub, mat) => {
+      if (!stub || !mat) return;
+      const baseColor = String(stub.baseColorFactor || '').trim();
+      if (baseColor) {
+        const c = SceneLoader._parseColor(baseColor);
+        mat.baseColorFactor = [c[0], c[1], c[2], c[3]];
+        try { mat.albedoColor = [c[0], c[1], c[2], c[3]]; } catch {}
+      }
+
+      const metallic = parseFloat(String(stub.metallicFactor || '').trim());
+      if (Number.isFinite(metallic)) mat.metallicFactor = Math.min(1, Math.max(0, metallic));
+
+      const roughness = parseFloat(String(stub.roughnessFactor || '').trim());
+      if (Number.isFinite(roughness)) mat.roughnessFactor = Math.min(1, Math.max(0.04, roughness));
+
+      const normalScale = parseFloat(String(stub.normalScale || '').trim());
+      if (Number.isFinite(normalScale)) mat.normalScale = normalScale;
+
+      const aoStrength = parseFloat(String(stub.aoStrength || '').trim());
+      if (Number.isFinite(aoStrength)) mat.aoStrength = aoStrength;
+
+      const emissive = String(stub.emissiveFactor || '').trim();
+      if (emissive) {
+        const c = SceneLoader._parseColor(emissive);
+        mat.emissiveFactor = [c[0], c[1], c[2]];
+      }
+
+      const alphaMode = String(stub.alphaMode || '').trim();
+      if (alphaMode) mat.alphaMode = alphaMode.toUpperCase();
+
+      const alphaCutoff = parseFloat(String(stub.alphaCutoff || '').trim());
+      if (Number.isFinite(alphaCutoff)) mat.alphaCutoff = alphaCutoff;
+    };
+
+    /** @param {any} stub */
+    const applyLiveMaterialFromStub = (stub) => {
+      if (!sceneAny || !stub) return;
+      const name = String(stub.name || '').trim();
+      if (!name) return;
+      const def = sceneAny.getMaterialDefinition?.(name) || null;
+      if (!def) return;
+
+      /** @param {any} mat */
+      const apply = (mat) => {
+        applyStubOverridesToMaterial(stub, mat);
+        // If this MeshNode references this material, ensure it uses the instance.
+        if (String(obj.materialName || '') === name) {
+          try { obj.setMaterial?.(mat); } catch {}
+        }
+      };
+
+      if (def && typeof def.then === 'function') {
+        def.then((/** @type {any} */ mat) => {
+          if (mat) apply(mat);
+        }).catch(() => {});
+      } else {
+        apply(def);
+      }
+    };
+
+    // Bind a UI field to the material source path (stored on the scene-level Material stub).
+    const currentStub = findMatStub(String(obj.materialName || ''));
+    obj.materialFile = currentStub?.source || '';
+
+    InspectorFields.addStringWithDrop(ui.common, 'material', obj, 'materialFile', () => {
+      const raw = String(obj.materialFile || '').trim();
+      if (!raw) {
+        // Unassign explicit material (falls back to default material).
+        obj.materialName = '';
+        try { obj.material = ''; } catch {}
+        try { obj.setMaterial?.(null); } catch {}
+        return;
+      }
+
+      const stub = ensureMatStubForNode(raw);
+      stub.source = raw;
+
+      // Load and register material for this scene.
+      const r = getRenderer();
+      if (!r) return;
+      const baseUrl = getSceneBaseUrl();
+      const resolved = SceneLoader._resolveSceneResourceUrl(stub.source, baseUrl);
+
+      // Ensure node references this material name.
+      obj.materialName = String(stub.name || '');
+      try { obj.material = obj.materialName; } catch {}
+
+      // Load .mat and apply overrides on top.
+      const p = Material.load(resolved, r).then((mat) => {
+        applyStubOverridesToMaterial(stub, mat);
+        return mat;
+      });
+      r?.trackAssetPromise?.(p);
+      sceneAny.registerMaterial?.(obj.materialName, p);
+      p.then((mat) => {
+        if (mat) obj.setMaterial?.(mat);
+      }).catch(() => {});
+    }, { acceptExtensions: ['.mat'] });
+
+    // Inline material settings (stored on the Material stub; applied live to the loaded material).
+    const matStub = findMatStub(String(obj.materialName || ''));
+    if (matStub) {
+      if (!('baseColorFactor' in matStub)) matStub.baseColorFactor = '';
+      if (!('metallicFactor' in matStub)) matStub.metallicFactor = '';
+      if (!('roughnessFactor' in matStub)) matStub.roughnessFactor = '';
+      if (!('normalScale' in matStub)) matStub.normalScale = '';
+      if (!('aoStrength' in matStub)) matStub.aoStrength = '';
+      if (!('emissiveFactor' in matStub)) matStub.emissiveFactor = '';
+      if (!('alphaMode' in matStub)) matStub.alphaMode = '';
+      if (!('alphaCutoff' in matStub)) matStub.alphaCutoff = '';
+
+      InspectorFields.addCssColorWith(ui.common, 'baseColor', matStub, 'baseColorFactor', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'metallic', matStub, 'metallicFactor', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'roughness', matStub, 'roughnessFactor', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'normalScale', matStub, 'normalScale', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'aoStrength', matStub, 'aoStrength', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addCssColorWith(ui.common, 'emissive', matStub, 'emissiveFactor', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'alphaMode', matStub, 'alphaMode', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
+      InspectorFields.addStringWith(ui.common, 'alphaCutoff', matStub, 'alphaCutoff', () => {
+        applyLiveMaterialFromStub(matStub);
+      });
     }
 
     // Primitive params when meshDefinition is inline

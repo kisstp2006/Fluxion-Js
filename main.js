@@ -27,9 +27,9 @@ function parseNpmVersionFromEnv() {
   }
 }
 
-function readFluxionEngineVersion() {
+function readFluxionEngineVersion(engineRootAbs = __dirname) {
   try {
-    const p = path.join(__dirname, 'Fluxion', 'version.py');
+    const p = path.join(path.resolve(String(engineRootAbs || __dirname)), 'Fluxion', 'version.py');
     const txt = fs.readFileSync(p, 'utf8');
     const get = (key) => {
       const re = new RegExp(`^\\s*${key}\\s*=\\s*\"([^\"]*)\"`, 'm');
@@ -45,6 +45,42 @@ function readFluxionEngineVersion() {
   } catch {
     return { name: null, version: null, codename: null, license: null };
   }
+}
+
+function resolveFluxionInstall(enginePathAbs) {
+  const p = path.resolve(String(enginePathAbs || __dirname));
+
+  // Accept either:
+  // - an engine root folder that contains a "Fluxion" folder
+  // - a direct path to the "Fluxion" folder itself
+  const asRoot = path.join(p, 'Fluxion');
+  const rootHasFluxion = (() => {
+    try {
+      return fs.statSync(asRoot).isDirectory();
+    } catch {
+      return false;
+    }
+  })();
+
+  const isFluxionFolder = (() => {
+    try {
+      if (!fs.statSync(p).isDirectory()) return false;
+      const hasIndex = fs.existsSync(path.join(p, 'index.js'));
+      const hasVer = fs.existsSync(path.join(p, 'version.py'));
+      return hasIndex && hasVer;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (rootHasFluxion) return { engineRootAbs: p, fluxionDirAbs: asRoot };
+  if (isFluxionFolder) return { engineRootAbs: path.dirname(p), fluxionDirAbs: p };
+  return { engineRootAbs: p, fluxionDirAbs: null };
+}
+
+function createFluxionDirLink(targetFluxionDirAbs, linkPathAbs) {
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  fs.symlinkSync(String(targetFluxionDirAbs), String(linkPathAbs), type);
 }
 
 function normSlashes(p) {
@@ -64,6 +100,19 @@ function isEmptyDir(dir) {
 function writeFile(filePath, content) {
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, String(content ?? ''), 'utf8');
+}
+
+function pickUniqueDestPath(destDirAbs, filename) {
+  const parsed = path.parse(String(filename || ''));
+  const baseName = (parsed.name || 'file').replace(/\.+$/g, '');
+  const ext = parsed.ext || '';
+  let candidate = path.join(destDirAbs, `${baseName}${ext}`);
+  if (!fs.existsSync(candidate)) return candidate;
+  for (let i = 2; i < 10000; i++) {
+    candidate = path.join(destDirAbs, `${baseName}_${i}${ext}`);
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(destDirAbs, `${baseName}_${Date.now()}${ext}`);
 }
 
 function safeProjectFilenameFromName(name) {
@@ -496,6 +545,117 @@ if (!gotTheLock) {
     }
   });
 
+  // Import external OS files into the workspace (copy into a project-relative folder).
+  // payload: { files: string[], destDirRelativePath: string }
+  ipcMain.handle('import-external-files', async (_event, payload) => {
+    try {
+      if (app.isPackaged) {
+        return { ok: false, error: 'App is packaged; importing into project directory is disabled.' };
+      }
+
+      const filesIn = Array.isArray(payload?.files) ? payload.files : [];
+      const destRel = String(payload?.destDirRelativePath || '');
+      if (filesIn.length === 0) return { ok: false, error: 'No files provided.' };
+
+      const destDirAbs = resolveWorkspaceRelPath(destRel);
+      if (!destDirAbs) {
+        return { ok: false, error: `Invalid destination folder: ${destRel}` };
+      }
+      ensureDir(destDirAbs);
+
+      /** @type {{ src: string, destAbs: string, destRel: string }[]} */
+      const imported = [];
+
+      for (const srcRaw of filesIn) {
+        const src = path.resolve(String(srcRaw || ''));
+        if (!src) continue;
+        if (!fs.existsSync(src)) continue;
+        const st = fs.statSync(src);
+        if (!st.isFile()) continue;
+
+        const filename = path.basename(src);
+        const destAbs = pickUniqueDestPath(destDirAbs, filename);
+        await fs.promises.copyFile(src, destAbs);
+
+        const rel = path.relative(getWorkspaceRootAbs(), destAbs);
+        imported.push({ src, destAbs, destRel: normSlashes(rel) });
+      }
+
+      return { ok: true, imported };
+    } catch (err) {
+      console.error('import-external-files failed', err);
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Create a folder inside the workspace.
+  // payload: { dirRelativePath: string }
+  ipcMain.handle('create-project-dir', async (_event, payload) => {
+    try {
+      if (app.isPackaged) {
+        return { ok: false, error: 'App is packaged; creating folders in project directory is disabled.' };
+      }
+      const dirRel = String(payload?.dirRelativePath || '').replace(/^\/+/, '');
+      if (!dirRel) return { ok: false, error: 'No directory path provided.' };
+
+      const abs = resolveWorkspaceRelPath(dirRel);
+      if (!abs) return { ok: false, error: `Invalid path: ${dirRel}` };
+
+      ensureDir(abs);
+      return { ok: true, path: normSlashes(path.relative(getWorkspaceRootAbs(), abs)) };
+    } catch (err) {
+      console.error('create-project-dir failed', err);
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Read a UTF-8 text file under the workspace root.
+  // relativePath: string
+  ipcMain.handle('read-project-text-file', async (_event, relativePath) => {
+    try {
+      const rel = String(relativePath ?? '').replace(/^\/+/, '');
+      if (!rel) return { ok: false, error: 'No file path provided.' };
+
+      const abs = resolveWorkspaceRelPath(rel);
+      if (!abs) return { ok: false, error: 'Refusing to read outside workspace root.' };
+      if (!rel.toLowerCase().endsWith('.js')) return { ok: false, error: 'Only .js files are supported.' };
+
+      const st = await fs.promises.stat(abs);
+      if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
+
+      const content = await fs.promises.readFile(abs, 'utf8');
+      return { ok: true, content: String(content ?? '') };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Write a UTF-8 text file under the workspace root (dev only).
+  // payload: { relativePath: string, content: string }
+  ipcMain.handle('write-project-text-file', async (_event, payload) => {
+    try {
+      if (app.isPackaged) {
+        return { ok: false, error: 'App is packaged; writing to project directory is disabled.' };
+      }
+
+      const rel = String(payload?.relativePath ?? '').replace(/^\/+/, '');
+      if (!rel) return { ok: false, error: 'No file path provided.' };
+
+      if (!rel.toLowerCase().endsWith('.js')) return { ok: false, error: 'Only .js files are supported.' };
+
+      const abs = resolveWorkspaceRelPath(rel);
+      if (!abs) return { ok: false, error: 'Refusing to write outside workspace root.' };
+
+      const st = await fs.promises.stat(abs);
+      if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
+
+      await fs.promises.writeFile(abs, String(payload?.content ?? ''), 'utf8');
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
   // Switch the workspace root used by list-project-dir and fluxion://workspace/ loading.
   ipcMain.handle('set-workspace-root', async (event, absolutePath) => {
     try {
@@ -552,6 +712,7 @@ if (!gotTheLock) {
 
   // Create a new Fluxion project in a chosen folder.
   // opts: { parentDir: string, name: string, template?: string, force?: boolean }
+  // opts: { parentDir: string, name: string, template?: string, force?: boolean, engineRoot?: string }
   ipcMain.handle('create-fluxion-project', async (event, opts) => {
     try {
       if (app.isPackaged) {
@@ -563,6 +724,7 @@ if (!gotTheLock) {
       const name = String(o.name || '').trim();
       const template = String(o.template || 'empty').trim() || 'empty';
       const force = !!o.force;
+      const engineRootIn = String(o.engineRoot || '').trim();
       if (!parentDir || !name) return { ok: false, error: 'Missing parentDir or name.' };
 
       const targetDir = path.join(parentDir, name);
@@ -577,9 +739,25 @@ if (!gotTheLock) {
 
       ensureDir(targetDir);
 
-      const engineRoot = path.resolve(__dirname);
-      const relEngine = path.relative(targetDir, engineRoot) || '.';
-      const engineDep = `file:${normSlashes(relEngine)}`;
+
+      const install = resolveFluxionInstall(engineRootIn ? path.resolve(engineRootIn) : path.resolve(__dirname));
+      if (!install.fluxionDirAbs) {
+        return {
+          ok: false,
+          error: `Invalid Fluxion install path. Expected either a folder containing "Fluxion/" or the "Fluxion" folder itself.\n\nGot: ${engineRootIn || path.resolve(__dirname)}`,
+        };
+      }
+
+      // Link the engine into the project so it is not copied per-project.
+      try {
+        createFluxionDirLink(install.fluxionDirAbs, path.join(targetDir, 'Fluxion'));
+      } catch (err) {
+        return {
+          ok: false,
+          error: `Failed to link Fluxion engine into project.\n\nOn Windows, enable Developer Mode or run with sufficient permissions.\n\nDetails: ${String(err && err.message ? err.message : err)}`,
+        };
+      }
+
       const safePkgName = name.toLowerCase().replace(/\s+/g, '-');
 
       const pkg = {
@@ -592,8 +770,7 @@ if (!gotTheLock) {
           start: 'electron .'
         },
         dependencies: {
-          "gl-matrix": '^3.4.4',
-          "fluxionwebengine": engineDep
+          'gl-matrix': '^3.4.4'
         },
         devDependencies: {
           electron: '^35.0.1'
@@ -606,7 +783,7 @@ if (!gotTheLock) {
 
       writeFile(path.join(targetDir, 'preload.js'), `const { contextBridge } = require('electron');\n\ncontextBridge.exposeInMainWorld('fluxionProject', {\n  name: ${JSON.stringify(name)},\n});\n`);
 
-      const engine = readFluxionEngineVersion();
+      const engine = readFluxionEngineVersion(install.engineRootAbs);
 
       writeFile(path.join(targetDir, 'fluxion.project.json'), JSON.stringify({
         name,
@@ -629,6 +806,8 @@ if (!gotTheLock) {
       writeFile(path.join(targetDir, 'scene.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<Scene name="Main">\n  <Camera x="0" y="0" zoom="1" rotation="0" width="1280" height="720" />\n</Scene>\n`);
 
       writeFile(path.join(targetDir, 'index.html'), `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n  <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n  <title>${name.replace(/</g, '&lt;')}</title>\n  <style>\n    html, body { height: 100%; margin: 0; background: #111; overflow: hidden; }\n    canvas { width: 100%; height: 100%; display: block; }\n  </style>\n  <script type="importmap">\n  {\n    "imports": {\n      "gl-matrix": "./node_modules/gl-matrix/esm/index.js",\n      "fluxion": "./node_modules/fluxionwebengine/Fluxion/index.js"\n    }\n  }\n  </script>\n</head>\n<body>\n  <canvas id="gameCanvas"></canvas>\n  <script type="module" src="src/game.js"></script>\n</body>\n</html>\n`);
+
+
 
       writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine, SceneLoader } from 'fluxion';\n\nconst canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));\nconst engine = new Engine(canvas);\nconst renderer = engine.renderer;\n\nasync function main() {\n  const scene = await SceneLoader.load('./scene.xml', renderer);\n  engine.setScene(scene);\n  engine.start();\n}\n\nmain().catch(console.error);\n`);
 
