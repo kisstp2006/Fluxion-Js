@@ -1274,6 +1274,7 @@ export default class Renderer {
               // Contact shadows (camera depth prepass + ray-march)
               sceneDepthTex: this.gl.getUniformLocation(this.program3D, 'u_sceneDepthTex'),
               hasSceneDepth: this.gl.getUniformLocation(this.program3D, 'u_hasSceneDepth'),
+              sceneViewportUv: this.gl.getUniformLocation(this.program3D, 'u_sceneViewportUv'),
               contactShadowStrength: this.gl.getUniformLocation(this.program3D, 'u_contactShadowStrength'),
               contactShadowMaxDistance: this.gl.getUniformLocation(this.program3D, 'u_contactShadowMaxDistance'),
               contactShadowSteps: this.gl.getUniformLocation(this.program3D, 'u_contactShadowSteps'),
@@ -2096,6 +2097,15 @@ export default class Renderer {
     // Contact shadow uniforms (camera depth prepass)
     const hasSceneDepth = !!(this.sceneDepthTexture && this.contactShadowsEnabled);
     if (u?.hasSceneDepth) gl.uniform1i(u.hasSceneDepth, hasSceneDepth ? 1 : 0);
+    if (u?.sceneViewportUv) {
+      const cw = Math.max(1, this.canvas.width | 0);
+      const ch = Math.max(1, this.canvas.height | 0);
+      const ox = (this.viewport.x || 0) / cw;
+      const oy = (this.viewport.y || 0) / ch;
+      const sx = (this.viewport.width || cw) / cw;
+      const sy = (this.viewport.height || ch) / ch;
+      gl.uniform4f(u.sceneViewportUv, ox, oy, sx, sy);
+    }
     if (u?.contactShadowStrength) gl.uniform1f(u.contactShadowStrength, Number.isFinite(this.contactShadowStrength) ? this.contactShadowStrength : 0.35);
     if (u?.contactShadowMaxDistance) gl.uniform1f(u.contactShadowMaxDistance, Number.isFinite(this.contactShadowMaxDistance) ? this.contactShadowMaxDistance : 0.35);
     if (u?.contactShadowSteps) gl.uniform1i(u.contactShadowSteps, (this.contactShadowSteps | 0) || 0);

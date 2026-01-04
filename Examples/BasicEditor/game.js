@@ -313,6 +313,11 @@ const game = {
     this._renderer = renderer;
     this._input = new Input();
 
+    // Editor-friendly lighting: keep ambient/IBL visible even in shadow.
+    // This prevents selected meshes from going pitch-black when fully shadowed.
+    if (typeof renderer.setShadowAffectsIndirect === 'function') renderer.setShadowAffectsIndirect(false);
+    else renderer.shadowAffectsIndirect = false;
+
     // Best-effort preload for the Audio viewport icon.
     // (If it isn't ready yet, it will be lazily loaded on first draw.)
     this._ensureSpeakerIconTexture(renderer);
@@ -5625,6 +5630,8 @@ const game = {
         const p = this._getGizmoPos3D(obj);
         if (p) {
           // Translate/Rotate gizmo (3D)
+          // Always render the gizmo on top (no depth testing) so it stays visible when selected.
+          const gizmoDepth = false;
           const s = 1.2;
           const cX = (this._gizmo.active && this._gizmo.axis === 'x') ? [255, 180, 180, 255] : [255, 80, 80, 255];
           const cY = (this._gizmo.active && this._gizmo.axis === 'y') ? [180, 255, 180, 255] : [80, 255, 80, 255];
@@ -5632,13 +5639,13 @@ const game = {
 
           if (this._gizmo.mode === 'rotate' && this._canRotate3D(obj)) {
             const ringR = 1.0;
-            this._drawCircle3D(dbg, p, ringR, 'x', cX, 2, depth);
-            this._drawCircle3D(dbg, p, ringR, 'y', cY, 2, depth);
-            this._drawCircle3D(dbg, p, ringR, 'z', cZ, 2, depth);
+            this._drawCircle3D(dbg, p, ringR, 'x', cX, 2, gizmoDepth);
+            this._drawCircle3D(dbg, p, ringR, 'y', cY, 2, gizmoDepth);
+            this._drawCircle3D(dbg, p, ringR, 'z', cZ, 2, gizmoDepth);
           } else {
-            dbg.drawLine3D(p.x, p.y, p.z, p.x + s, p.y, p.z, cX, 2, depth);
-            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y + s, p.z, cY, 2, depth);
-            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y, p.z - s, cZ, 2, depth);
+            dbg.drawLine3D(p.x, p.y, p.z, p.x + s, p.y, p.z, cX, 2, gizmoDepth);
+            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y + s, p.z, cY, 2, gizmoDepth);
+            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y, p.z - s, cZ, 2, gizmoDepth);
           }
 
           if (ui.dbgShowAxes?.checked) {

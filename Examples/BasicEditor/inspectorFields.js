@@ -547,7 +547,202 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		apply();
 	});
 
-	addField(container, label, input);
+	// Optional asset picker button (shows project files matching acceptExtensions).
+	const electronAPI = /** @type {any} */ ((window && window.electronAPI) ? window.electronAPI : null);
+	const canPick = !!(accept && accept.length > 0 && electronAPI && typeof electronAPI.listProjectDir === 'function');
+
+	/** @param {string} rel */
+	const toValue = (rel) => {
+		const cleanRel = String(rel || '').replace(/^\/+/, '');
+		if (!opts.importToWorkspaceUrl) return cleanRel;
+		// Avoid double-prefix.
+		if (cleanRel.startsWith('fluxion://')) return cleanRel;
+		return `fluxion://workspace/${cleanRel}`;
+	};
+
+	/** @param {HTMLElement} anchor */
+	const openPicker = (anchor) => {
+		if (!canPick) return;
+		// Reuse the existing menu styling (same as context menus).
+		const menu = document.createElement('div');
+		menu.className = 'menu contextMenu open';
+		menu.setAttribute('role', 'menu');
+		menu.style.display = 'block';
+		menu.style.zIndex = '200';
+		document.body.appendChild(menu);
+
+		let closed = false;
+		const close = () => {
+			if (closed) return;
+			closed = true;
+			try { menu.remove(); } catch {}
+			window.removeEventListener('blur', close);
+			document.removeEventListener('mousedown', onDocMouseDown, true);
+			document.removeEventListener('keydown', onKeyDown, true);
+		};
+
+		const onDocMouseDown = (e) => {
+			const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+			if (!t) return;
+			if (t === menu || menu.contains(t)) return;
+			close();
+		};
+
+		const onKeyDown = (e) => {
+			if (e.key === 'Escape') close();
+		};
+
+		window.addEventListener('blur', close);
+		document.addEventListener('mousedown', onDocMouseDown, true);
+		document.addEventListener('keydown', onKeyDown, true);
+
+		// Position near the anchor.
+		try {
+			const r = anchor.getBoundingClientRect();
+			menu.style.left = `${Math.max(4, Math.floor(r.left))}px`;
+			menu.style.top = `${Math.max(4, Math.floor(r.bottom + 6))}px`;
+			requestAnimationFrame(() => {
+				if (closed) return;
+				const mr = menu.getBoundingClientRect();
+				const maxX = Math.max(4, window.innerWidth - mr.width - 4);
+				const maxY = Math.max(4, window.innerHeight - mr.height - 4);
+				const nextX = Math.min(Math.max(4, Math.floor(r.left)), maxX);
+				const nextY = Math.min(Math.max(4, Math.floor(r.bottom + 6)), maxY);
+				menu.style.left = `${nextX}px`;
+				menu.style.top = `${nextY}px`;
+			});
+		} catch {}
+
+		const addItem = (labelText, onClick, enabled = true) => {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'menuItem';
+			btn.textContent = String(labelText);
+			if (!enabled) {
+				btn.disabled = true;
+				btn.style.opacity = '0.6';
+				btn.style.cursor = 'default';
+			}
+			btn.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				if (!enabled) return;
+				try { onClick(); } catch {}
+			});
+			menu.appendChild(btn);
+		};
+
+		addItem('Loading…', () => {}, false);
+
+		/** @returns {Promise<string[]>} */
+		const listMatchingFiles = async () => {
+			// Prefer scanning typical asset folders first.
+			const preferredRoots = ['Model', 'Texture', 'Textures', 'Images', 'Image', 'Audio', 'Sounds', 'Sound', 'Assets', 'Asset'];
+			/** @type {string[]} */
+			const roots = [];
+			const ignore = new Set(['node_modules', '.git', '.vscode', 'Fluxion', 'Examples', 'Docs', '3rdParty', '_GeneratedTestGame']);
+
+			// Keep only roots that exist.
+			for (const d of preferredRoots) {
+				try {
+					const res = await electronAPI.listProjectDir(d);
+					if (res && res.ok) roots.push(d);
+				} catch {}
+			}
+			if (roots.length === 0) roots.push('.');
+
+			/** @type {string[]} */
+			const out = [];
+			/** @type {string[]} */
+			const stack = roots.map((r) => String(r));
+			let dirOps = 0;
+			const maxDirOps = 2500;
+			const maxFiles = 2000;
+
+			while (stack.length > 0) {
+				const dir = String(stack.pop() || '');
+				if (!dir && dir !== '.') continue;
+				if (dirOps++ > maxDirOps) break;
+
+				// Skip ignored folder names.
+				const last = dir.split('/').pop() || dir.split('\\').pop() || dir;
+				if (ignore.has(String(last))) continue;
+
+				let res;
+				try {
+					res = await electronAPI.listProjectDir(dir === '.' ? '.' : dir);
+				} catch {
+					continue;
+				}
+				if (!res || !res.ok) continue;
+				const entries = Array.isArray(res.entries) ? res.entries : [];
+				for (const ent of entries) {
+					if (!ent) continue;
+					const p = String(ent.path || '').trim();
+					if (!p) continue;
+					if (ent.isDir) {
+						stack.push(p);
+						continue;
+					}
+					if (!acceptValue(p)) continue;
+					out.push(p);
+					if (out.length >= maxFiles) break;
+				}
+				if (out.length >= maxFiles) break;
+			}
+
+			out.sort((a, b) => a.localeCompare(b));
+			return out;
+		};
+
+		Promise.resolve(listMatchingFiles())
+			.then((files) => {
+				if (closed) return;
+				menu.innerHTML = '';
+				if (!files || files.length === 0) {
+					addItem('No matching files found', () => {}, false);
+					return;
+				}
+				for (const rel of files) {
+					addItem(rel, () => {
+						input.value = toValue(rel);
+						apply();
+						close();
+					});
+				}
+			})
+			.catch(() => {
+				if (closed) return;
+				menu.innerHTML = '';
+				addItem('Failed to list project files', () => {}, false);
+			});
+	};
+
+	if (!canPick) {
+		addField(container, label, input);
+		return;
+	}
+
+	const pickBtn = document.createElement('button');
+	pickBtn.type = 'button';
+	pickBtn.className = 'btn';
+	pickBtn.textContent = 'Pick';
+	pickBtn.style.flex = '0 0 auto';
+	pickBtn.style.padding = '8px 10px';
+	pickBtn.addEventListener('click', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		openPicker(pickBtn);
+	});
+
+	const row = document.createElement('div');
+	row.style.display = 'flex';
+	row.style.gap = '6px';
+	row.style.alignItems = 'center';
+	row.style.width = '100%';
+	row.appendChild(input);
+	row.appendChild(pickBtn);
+	addField(container, label, row);
 }
 
 /**

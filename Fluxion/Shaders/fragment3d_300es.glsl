@@ -94,6 +94,10 @@ uniform float u_lightingWrap;
 // Contact shadows (camera depth prepass)
 uniform sampler2D u_sceneDepthTex;
 uniform int u_hasSceneDepth;
+// Viewport remap for sampling the depth prepass.
+// xy = offset in UV space, zw = scale in UV space.
+// Needed because the depth prepass renders into the engine's letterboxed viewport region.
+uniform vec4 u_sceneViewportUv;
 uniform float u_contactShadowStrength;     // 0..1
 uniform float u_contactShadowMaxDistance;  // world units
 uniform int u_contactShadowSteps;          // e.g. 8..16
@@ -491,7 +495,10 @@ float computeContactOcclusion(vec3 worldPos, vec3 dirToLight) {
       continue;
     }
 
-    float sceneDepth = texture(u_sceneDepthTex, uvz.xy).r;
+    // Depth was rendered only inside the engine viewport region (letterboxed).
+    // Remap clip-space UVs into that sub-rect so we sample the correct pixel.
+    vec2 depthUv = u_sceneViewportUv.xy + uvz.xy * u_sceneViewportUv.zw;
+    float sceneDepth = texture(u_sceneDepthTex, depthUv).r;
     // If our ray point is behind geometry that the camera sees, we found a nearby occluder.
     if (uvz.z - u_contactShadowThickness > sceneDepth) {
       // Stronger when hit is closer.

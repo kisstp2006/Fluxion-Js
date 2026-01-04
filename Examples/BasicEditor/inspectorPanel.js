@@ -7,6 +7,11 @@
 import * as InspectorFields from "./inspectorFields.js";
 import { SceneLoader, Skybox, Material } from "../../Fluxion/index.js";
 
+// Cache last-applied values for Skybox stubs so inspector rebuilds don't
+// constantly recreate skyboxes (which can flash black while textures upload).
+/** @type {WeakMap<any, { skyboxKey?: string, ambientKey?: string }>} */
+const _skyboxApplyCache = new WeakMap();
+
 /**
  * @typedef {{
  *  inspectorSubtitle: HTMLDivElement|null,
@@ -59,12 +64,18 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
   const tag = String(stub.__xmlTag || '');
   if (tag === 'Font') {
     InspectorFields.addStringWith(ui.common, 'family', stub, 'family', () => host.rebuildTree());
-    InspectorFields.addString(ui.common, 'src', stub, 'src');
+    InspectorFields.addStringWithDrop(ui.common, 'src', stub, 'src', () => {}, {
+      acceptExtensions: ['.ttf', '.otf', '.woff', '.woff2'],
+      importToWorkspaceUrl: true,
+    });
     return;
   }
   if (tag === 'Mesh') {
     InspectorFields.addStringWith(ui.common, 'name', stub, 'name', () => host.rebuildTree());
-    InspectorFields.addString(ui.common, 'source', stub, 'source');
+      InspectorFields.addStringWithDrop(ui.common, 'source', stub, 'source', () => {}, {
+        acceptExtensions: ['.gltf', '.glb'],
+        importToWorkspaceUrl: true,
+      });
     InspectorFields.addString(ui.common, 'type', stub, 'type');
     InspectorFields.addCssColor(ui.common, 'color', stub, 'color');
 
@@ -99,6 +110,15 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
     ];
 
     for (const [label, key] of fields) {
+      const k = String(key || '');
+      const isTexture = k.toLowerCase().endsWith('texture');
+      if (isTexture) {
+        InspectorFields.addStringWithDrop(ui.common, label, stub, key, () => {}, {
+          acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'],
+          importToWorkspaceUrl: true,
+        });
+        continue;
+      }
       InspectorFields.addAutoWith(ui.common, label, stub, key, () => {});
     }
     return;
@@ -121,6 +141,13 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       const r = getRenderer();
       if (!r) return;
       const s = String(stub.ambientColor || '').trim();
+
+		const cache = _skyboxApplyCache.get(stub) || {};
+		const ambientKey = `ambient:${s}`;
+		if (cache.ambientKey === ambientKey) return;
+		cache.ambientKey = ambientKey;
+		_skyboxApplyCache.set(stub, cache);
+
       if (!s) {
         r.pbrAmbientColor = [0.03, 0.03, 0.03];
         return;
@@ -143,6 +170,23 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
       const bottom = String(stub.bottom || '').trim();
       const front = String(stub.front || '').trim();
       const back = String(stub.back || '').trim();
+
+    // Skip re-applying if nothing changed; avoids black flashing.
+    const cache = _skyboxApplyCache.get(stub) || {};
+    const skyboxKey = JSON.stringify({
+      equirectangular: !!stub.equirectangular,
+      src: srcStr,
+      color: colorStr,
+      right,
+      left,
+      top,
+      bottom,
+      front,
+      back,
+    });
+    if (cache.skyboxKey === skyboxKey) return;
+    cache.skyboxKey = skyboxKey;
+    _skyboxApplyCache.set(stub, cache);
 
       try {
         if (!!stub.equirectangular) {

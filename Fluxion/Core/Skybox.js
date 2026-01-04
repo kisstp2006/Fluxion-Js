@@ -266,8 +266,10 @@ export default class Skybox {
     const glFaces = [
       gl.TEXTURE_CUBE_MAP_POSITIVE_X, // right (+X)
       gl.TEXTURE_CUBE_MAP_NEGATIVE_X, // left (-X)
-      gl.TEXTURE_CUBE_MAP_POSITIVE_Y, // top (+Y)
-      gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, // bottom (-Y)
+      // NOTE: Our skybox sampling convention expects +Y/-Y swapped compared
+      // to the naive equirect->cubemap assignment (otherwise top/bottom appear flipped).
+      gl.TEXTURE_CUBE_MAP_NEGATIVE_Y, // top (+Y)
+      gl.TEXTURE_CUBE_MAP_POSITIVE_Y, // bottom (-Y)
       gl.TEXTURE_CUBE_MAP_POSITIVE_Z, // front (+Z)
       gl.TEXTURE_CUBE_MAP_NEGATIVE_Z, // back (-Z)
     ];
