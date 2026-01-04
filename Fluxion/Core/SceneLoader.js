@@ -60,6 +60,14 @@ export default class SceneLoader {
                 scene.name = sceneNode.getAttribute("name");
             }
 
+            // When reusing a renderer across scene loads, ensure environment defaults
+            // don't leak from a previous scene if this scene doesn't declare a <Skybox>.
+            if (renderer) {
+                renderer.pbrAmbientColor = [0.03, 0.03, 0.03];
+                renderer.pbrEnvIntensity = 1.0;
+                if (typeof renderer.setSkybox === 'function') renderer.setSkybox(null);
+            }
+
             // Resolve base URL for relative path resolution
             let baseUrl;
             try {
