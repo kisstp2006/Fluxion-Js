@@ -360,28 +360,7 @@ export function rebuildInspector(host, ui) {
   }
 
   // Camera fields
-  if (isCam2D) {
-    InspectorFields.addNumber(host, ui.common, 'x', obj, 'x');
-    InspectorFields.addNumber(host, ui.common, 'y', obj, 'y');
-    InspectorFields.addNumber(host, ui.common, 'zoom', obj, 'zoom');
-    InspectorFields.addNumber(host, ui.common, 'rotation', obj, 'rotation');
-    InspectorFields.addNumber(host, ui.common, 'width', obj, 'width');
-    InspectorFields.addNumber(host, ui.common, 'height', obj, 'height');
-  }
-
   if (isCam3D) {
-    const p = obj.position;
-    const t = obj.target;
-    if (p) {
-      InspectorFields.addNumber(host, ui.common, 'posX', p, 'x');
-      InspectorFields.addNumber(host, ui.common, 'posY', p, 'y');
-      InspectorFields.addNumber(host, ui.common, 'posZ', p, 'z');
-    }
-    if (t) {
-      InspectorFields.addNumber(host, ui.common, 'targetX', t, 'x');
-      InspectorFields.addNumber(host, ui.common, 'targetY', t, 'y');
-      InspectorFields.addNumber(host, ui.common, 'targetZ', t, 'z');
-    }
     InspectorFields.addNumber(host, ui.common, 'fovY', obj, 'fovY');
     InspectorFields.addNumber(host, ui.common, 'near', obj, 'near');
     InspectorFields.addNumber(host, ui.common, 'far', obj, 'far');

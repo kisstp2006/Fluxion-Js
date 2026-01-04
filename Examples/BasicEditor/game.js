@@ -2633,6 +2633,13 @@ const game = {
         if (typeof sceneAny.registerCamera3D === 'function') sceneAny.registerCamera3D(cam);
         else sceneAny.setCamera3D?.(cam);
 
+        // The editor always renders/navigates using its own camera.
+        // Registering an authored camera may set scene.camera3D, so restore the editor camera.
+        if (this._editorCamera3D && typeof scene?.setCamera3D === 'function') {
+          scene.setCamera3D(this._editorCamera3D);
+          this._usingEditorCamera3D = true;
+        }
+
         this._sceneCameras3D = Array.isArray(sceneAny.cameras3D) ? sceneAny.cameras3D.filter(Boolean) : [...(this._sceneCameras3D || []), cam];
         if (cam.active) this._sceneCamera3D = cam;
 
@@ -4540,9 +4547,23 @@ const game = {
       return;
     }
     if (obj.position && typeof obj.position.x === 'number') {
+      const prevX = Number(obj.position.x) || 0;
+      const prevY = Number(obj.position.y) || 0;
+      const prevZ = Number(obj.position.z) || 0;
+      const dx = (Number(x) || 0) - prevX;
+      const dy = (Number(y) || 0) - prevY;
+      const dz = (Number(z) || 0) - prevZ;
+
       obj.position.x = x;
       obj.position.y = y;
       obj.position.z = z;
+
+      // Camera3D-like: keep look direction stable by translating target with position.
+      if (obj.target && typeof obj.target.x === 'number') {
+        obj.target.x = (Number(obj.target.x) || 0) + dx;
+        obj.target.y = (Number(obj.target.y) || 0) + dy;
+        obj.target.z = (Number(obj.target.z) || 0) + dz;
+      }
       return;
     }
     if (typeof obj.x === 'number') obj.x = x;
@@ -5119,15 +5140,23 @@ const game = {
     // Sprite.followCamera) should use the authored scene camera, not the editor camera.
     const scene = this.currentScene;
     const prevCam2D = scene.camera;
+    const prevCam3D = scene.camera3D;
     const authoredCam2D = this._sceneCamera2D;
+    const authoredCam3D = this._sceneCamera3D;
     try {
       if (authoredCam2D && prevCam2D && authoredCam2D !== prevCam2D) {
         scene.camera = authoredCam2D;
+      }
+
+      // Use authored 3D camera for scene logic (scripts), but keep editor camera for rendering.
+      if (authoredCam3D && prevCam3D && authoredCam3D !== prevCam3D) {
+        scene.camera3D = authoredCam3D;
       }
       scene.update(dt);
     } finally {
       // Restore editor camera for rendering/picking.
       if (prevCam2D) scene.camera = prevCam2D;
+      if (prevCam3D) scene.camera3D = prevCam3D;
     }
 
     // Keep inspector values reasonably fresh, but don’t fight user input while typing.
