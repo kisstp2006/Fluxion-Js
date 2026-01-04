@@ -1647,6 +1647,7 @@ export default class Renderer {
         iSize: this.gl.getAttribLocation(this.instancedProgram, 'a_i_size'),
         iUv: this.gl.getAttribLocation(this.instancedProgram, 'a_i_uv'),
         iColor: this.gl.getAttribLocation(this.instancedProgram, 'a_i_color'),
+        iRot: this.gl.getAttribLocation(this.instancedProgram, 'a_i_rot'),
       };
       this._instancedUniforms = {
         texture: this.gl.getUniformLocation(this.instancedProgram, 'u_texture'),
@@ -1673,8 +1674,8 @@ export default class Renderer {
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.baseQuadBuffer);
       this.gl.bufferData(this.gl.ARRAY_BUFFER, baseQuad, this.gl.STATIC_DRAW);
 
-      // Per-instance layout: pos(2), size(2), uv(4), color(4) = 12 floats
-      this._instanceFloats = 12;
+      // Per-instance layout: pos(2), size(2), uv(4), color(4), rot(1) = 13 floats
+      this._instanceFloats = 13;
       this._instanceStride = this._instanceFloats * 4;
       this.instanceData = new Float32Array(this.MAX_QUADS * this._instanceFloats);
 
@@ -1710,6 +1711,10 @@ export default class Renderer {
       this.gl.enableVertexAttribArray(this._instancedAttribs.iColor);
       this.gl.vertexAttribPointer(this._instancedAttribs.iColor, 4, this.gl.FLOAT, false, this._instanceStride, 32);
       this.gl.vertexAttribDivisor(this._instancedAttribs.iColor, 1);
+
+      this.gl.enableVertexAttribArray(this._instancedAttribs.iRot);
+      this.gl.vertexAttribPointer(this._instancedAttribs.iRot, 1, this.gl.FLOAT, false, this._instanceStride, 48);
+      this.gl.vertexAttribDivisor(this._instancedAttribs.iRot, 1);
 
       this.gl.bindVertexArray(null);
       this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
@@ -2207,20 +2212,13 @@ export default class Renderer {
     colInt.fill(0);
     params.fill(0);
 
-    // Choose active lights: override (code) > scene (XAML/XML) > default sun.
+    // Choose active lights: override (code) > scene (XAML/XML).
     const srcLights = (this._overrideLights && this._overrideLights.length > 0)
       ? this._overrideLights
       : this._sceneLights;
 
-    // If nothing is provided, use a default sun light.
-    const activeLights = (srcLights && srcLights.length > 0)
-      ? srcLights
-      : [{
-          type: LightType.Directional,
-          direction: this.pbrLightDirection,
-          color: this.pbrLightColor,
-          intensity: 1.0,
-        }];
+    // If nothing is provided, render with zero direct lights.
+    const activeLights = (srcLights && srcLights.length > 0) ? srcLights : [];
 
     let count = 0;
     for (let i = 0; i < activeLights.length && count < max; i++) {
@@ -3875,7 +3873,7 @@ export default class Renderer {
     this.gl.uniform2f(this.resolutionLocation, this.targetWidth, this.targetHeight);
   }
 
-  drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255]) {
+  drawQuad(texture, x, y, width, height, srcX, srcY, srcWidth, srcHeight, color = [255, 255, 255, 255], rotation = 0) {
     if (!this.isReady) return;
 
     this._spritesThisFrame++;
@@ -3888,13 +3886,17 @@ export default class Renderer {
     }
     
     let finalColor = color;
+    let rot = Number(rotation) || 0;
     let u0 = 0, v0 = 0, u1 = 1, v1 = 1;
 
     // Handle overloaded arguments
-    // Case 1: drawQuad(tex, x, y, w, h, colorArray)
+    // Case 1: drawQuad(tex, x, y, w, h, colorArray [, rotation])
     if (Array.isArray(srcX)) {
-        finalColor = srcX;
-    } 
+      finalColor = srcX;
+      if (typeof srcY === 'number') {
+        rot = Number(srcY) || 0;
+      }
+    }
     // Case 2: drawQuad(tex, x, y, w, h, srcX, srcY, srcW, srcH, [color])
     else if (typeof srcX === 'number') {
         const dims = this._textureDimensions.get(texture);
@@ -3944,6 +3946,7 @@ export default class Renderer {
       this.instanceData[i++] = g;
       this.instanceData[i++] = b;
       this.instanceData[i++] = a;
+      this.instanceData[i++] = rot;
       this.quadCount++;
       return;
     }
@@ -3951,9 +3954,39 @@ export default class Renderer {
     // Append to vertex data
     let offset = this.quadCount * 4 * this.VERTEX_SIZE;
 
+    // Optional per-sprite rotation around quad center (legacy path)
+    let tlx = x, tly = y;
+    let trx = x + width, try_ = y;
+    let brx = x + width, bry = y + height;
+    let blx = x, bly = y + height;
+    if (rot !== 0) {
+      const cx = x + width * 0.5;
+      const cy = y + height * 0.5;
+      const cosO = Math.cos(rot);
+      const sinO = Math.sin(rot);
+
+      const rotPoint = (px, py) => {
+        const lx = px - cx;
+        const ly = py - cy;
+        return {
+          x: cx + (lx * cosO - ly * sinO),
+          y: cy + (lx * sinO + ly * cosO),
+        };
+      };
+
+      const tl = rotPoint(tlx, tly);
+      const tr = rotPoint(trx, try_);
+      const br = rotPoint(brx, bry);
+      const bl = rotPoint(blx, bly);
+      tlx = tl.x; tly = tl.y;
+      trx = tr.x; try_ = tr.y;
+      brx = br.x; bry = br.y;
+      blx = bl.x; bly = bl.y;
+    }
+
     // Top-left
-    this.vertexData[offset++] = x;
-    this.vertexData[offset++] = y;
+    this.vertexData[offset++] = tlx;
+    this.vertexData[offset++] = tly;
     this.vertexData[offset++] = u0;
     this.vertexData[offset++] = v0;
     this.vertexData[offset++] = r;
@@ -3962,8 +3995,8 @@ export default class Renderer {
     this.vertexData[offset++] = a;
 
     // Top-right
-    this.vertexData[offset++] = x + width;
-    this.vertexData[offset++] = y;
+    this.vertexData[offset++] = trx;
+    this.vertexData[offset++] = try_;
     this.vertexData[offset++] = u1;
     this.vertexData[offset++] = v0;
     this.vertexData[offset++] = r;
@@ -3972,8 +4005,8 @@ export default class Renderer {
     this.vertexData[offset++] = a;
 
     // Bottom-right
-    this.vertexData[offset++] = x + width;
-    this.vertexData[offset++] = y + height;
+    this.vertexData[offset++] = brx;
+    this.vertexData[offset++] = bry;
     this.vertexData[offset++] = u1;
     this.vertexData[offset++] = v1;
     this.vertexData[offset++] = r;
@@ -3982,8 +4015,8 @@ export default class Renderer {
     this.vertexData[offset++] = a;
 
     // Bottom-left
-    this.vertexData[offset++] = x;
-    this.vertexData[offset++] = y + height;
+    this.vertexData[offset++] = blx;
+    this.vertexData[offset++] = bly;
     this.vertexData[offset++] = u0;
     this.vertexData[offset++] = v1;
     this.vertexData[offset++] = r;

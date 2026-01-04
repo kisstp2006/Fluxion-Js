@@ -1,9 +1,25 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea, MeshNode, DirectionalLight, PointLight, SpotLight } from "../../Fluxion/index.js";
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
+import {
+  wireProjectSelectionUI,
+  openProjectSelect,
+  closeProjectSelect,
+  createAndOpenNewProject,
+  openProjectFolderStrict,
+  openLegacyProjectFolder,
+  loadRecentProjectsFromStorage,
+  saveRecentProjectsToStorage,
+  rememberRecentProject,
+  removeRecentProject,
+  renderProjectSelectRecents,
+  openRecentProject,
+  openWorkspaceAtPath,
+  openProjectAtPathStrict,
+} from "./projectSelection.js";
 import {
   wireEditorSettingsUI,
   loadEditorSettingsFromStorage,
@@ -16,6 +32,15 @@ import {
 } from "./editorSettings.js";
 import { wireAboutUI, openAbout, closeAbout } from "./aboutDialog.js";
 import { wireAddNodeUI, openAddNode, closeAddNode, renderAddNodeDialog } from "./addNodeDialog.js";
+import {
+  isEditingInspector,
+  blockInspectorAutoRefresh,
+  setupInspectorInteractionGuards,
+  rebuildInspector as rebuildInspectorPanel,
+  rebuildInspectorXmlStub as rebuildInspectorXmlStubPanel,
+} from "./inspectorPanel.js";
+
+import * as InspectorFields from "./inspectorFields.js";
 
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
@@ -146,11 +171,17 @@ const game = {
 
   _gizmo: {
     active: false,
-    mode: /** @type {'translate'} */ ('translate'),
-    axis: /** @type {'x'|'y'|'z'|'center'|null} */ (null),
+    mode: /** @type {'translate'|'rotate'} */ ('translate'),
+    axis: /** @type {'x'|'y'|'z'|'center'|'rot'|null} */ (null),
     startPos2D: /** @type {{x:number,y:number}|null} */ (null),
     startPos3D: /** @type {{x:number,y:number,z:number}|null} */ (null),
     startMouseWorld2D: /** @type {{x:number,y:number}|null} */ (null),
+    startMouseAngle2D: 0,
+    startRot2D: 0,
+    startAxisAngle3D: 0,
+    startEuler3D: /** @type {{x:number,y:number,z:number}|null} */ (null),
+    startDir3D: /** @type {[number,number,number]|null} */ (null),
+    startCamDir3D: /** @type {{x:number,y:number,z:number}|null} */ (null),
     startAxisT: 0,
     startPlaneHit: /** @type {{x:number,y:number,z:number}|null} */ (null),
   },
@@ -203,6 +234,8 @@ const game = {
     CanvasItem: true,
     Node2D: true,
     Control: true,
+    Node3D: true,
+    Light: true,
   },
   /** @type {string[]} */
   _addNodeFavorites: [],
@@ -400,9 +433,7 @@ const game = {
     });
 
     // Project Select behavior (mandatory - cannot dismiss without choosing/creating)
-    ui.projectSelectCreateBtn?.addEventListener('click', () => this._createAndOpenNewProject().catch(console.error));
-    ui.projectSelectOpenBtn?.addEventListener('click', () => this._openProjectFolderStrict().catch(console.error));
-    ui.projectSelectOpenLegacyBtn?.addEventListener('click', () => this._openLegacyProjectFolder().catch(console.error));
+    wireProjectSelectionUI(this, /** @type {any} */ (ui));
 
     // Create Project dialog
     this._createProjectDialog = createProjectDialog({
@@ -611,311 +642,60 @@ const game = {
   },
 
   _openProjectSelect() {
-    if (!ui.projectSelectModal) return;
-    this._projectSelectOpen = true;
-    ui.projectSelectModal.hidden = false;
-    this._loadRecentProjectsFromStorage();
-    this._renderProjectSelectRecents();
-    ui.projectSelectOpenBtn?.focus();
+    openProjectSelect(this, /** @type {any} */ (ui));
   },
 
   _closeProjectSelect() {
-    if (!ui.projectSelectModal) return;
-    this._projectSelectOpen = false;
-    ui.projectSelectModal.hidden = true;
+    closeProjectSelect(this, /** @type {any} */ (ui));
   },
 
   async _createAndOpenNewProject() {
-    const electronAPI = /** @type {any} */ (window).electronAPI;
-    if (!electronAPI || typeof electronAPI.createProject !== 'function' || typeof electronAPI.setWorkspaceRoot !== 'function') {
-      alert('Create Project is only available in the Electron editor.');
-      return;
-    }
-
-    const cfg = await this._createProjectDialog?.promptOptions?.('MyFluxionGame');
-    if (!cfg) return;
-
-    const res = await electronAPI.createProject({ parentDir: cfg.parentDir, name: cfg.name, template: cfg.template });
-    if (!res || !res.ok || !res.path) {
-      alert(`Failed to create project: ${res && res.error ? res.error : 'Unknown error'}`);
-      return;
-    }
-
-    const setRes = await electronAPI.setWorkspaceRoot(String(res.path));
-    if (!setRes || !setRes.ok) {
-      alert(`Failed to open project: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
-      return;
-    }
-
-    await this._setAssetBrowserRoot('.');
-    await this._tryLoadProjectMainScene();
-    await this._loadProjectMetaFromWorkspace();
-    this._rememberRecentProject(String(res.path), false);
-    this._closeProjectSelect();
+    return createAndOpenNewProject(this, /** @type {any} */ (ui));
   },
 
   async _openProjectFolderStrict() {
-    const electronAPI = /** @type {any} */ (window).electronAPI;
-    if (!electronAPI || typeof electronAPI.selectFolder !== 'function' || typeof electronAPI.setWorkspaceRoot !== 'function' || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.listProjectDir !== 'function') {
-      alert('Open Project is only available in the Electron editor.');
-      return;
-    }
-
-    const prev = await electronAPI.getWorkspaceRoot();
-    const prevPath = prev && prev.ok && prev.path ? String(prev.path) : null;
-
-    const pick = await electronAPI.selectFolder();
-    if (!pick || !pick.ok || pick.canceled) return;
-    const abs = String(pick.path || '').trim();
-    if (!abs) return;
-
-    const setRes = await electronAPI.setWorkspaceRoot(abs);
-    if (!setRes || !setRes.ok) {
-      alert(`Failed to set workspace root: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
-      return;
-    }
-
-    const rootList = await electronAPI.listProjectDir('.');
-    const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
-      ? /** @type {{ name?: string }[]} */ (rootList.entries)
-      : /** @type {{ name?: string }[]} */ ([]);
-
-    const hasJsonProject = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
-    const fluxProjects = entries
-      .map((ent) => String(ent?.name || ''))
-      .filter((name) => name.toLowerCase().endsWith('.flux'))
-      .sort();
-    const hasFluxProject = fluxProjects.length > 0;
-
-    if (!hasJsonProject && !hasFluxProject) {
-      // Revert
-      if (prevPath) await electronAPI.setWorkspaceRoot(prevPath);
-      alert('That folder does not look like a Fluxion project (missing fluxion.project.json or *.flux).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
-      return;
-    }
-
-    await this._setAssetBrowserRoot('.');
-    await this._tryLoadProjectMainScene(hasJsonProject ? null : (fluxProjects[0] || null));
-    await this._loadProjectMetaFromWorkspace();
-    this._rememberRecentProject(abs, false);
-    this._closeProjectSelect();
+    return openProjectFolderStrict(this, /** @type {any} */ (ui));
   },
 
   async _openLegacyProjectFolder() {
-    const ok = await this._openWorkspaceFolder().catch((e) => {
-      console.error(e);
-      return false;
-    });
-    if (!ok) return;
-
-    try {
-      const electronAPI = /** @type {any} */ (window).electronAPI;
-      if (electronAPI && typeof electronAPI.getWorkspaceRoot === 'function') {
-        const root = await electronAPI.getWorkspaceRoot();
-        const abs = root && root.ok && root.path ? String(root.path) : '';
-        if (abs) this._rememberRecentProject(abs, true);
-      }
-    } catch {}
-
-    // Legacy projects may not have fluxion.project.json; keep the scene as-is.
-    await this._loadProjectMetaFromWorkspace();
-    this._closeProjectSelect();
+    return openLegacyProjectFolder(this, /** @type {any} */ (ui));
   },
 
   _loadRecentProjectsFromStorage() {
-    try {
-      const raw = localStorage.getItem('fluxion.editor.recentProjects');
-      const parsed = raw ? JSON.parse(raw) : null;
-      const arr = Array.isArray(parsed) ? parsed : [];
-      /** @type {{ path: string, legacy: boolean, t: number }[]} */
-      const cleaned = [];
-      for (const it of arr) {
-        const path = String(it && it.path ? it.path : '').trim();
-        if (!path) continue;
-        const legacy = Boolean(it && it.legacy);
-        const t = Math.max(0, Number(it && it.t ? it.t : 0) || 0);
-        cleaned.push({ path, legacy, t });
-      }
-      cleaned.sort((a, b) => (b.t - a.t));
-      this._recentProjects = cleaned.slice(0, Math.max(1, this._recentProjectsMax | 0));
-    } catch {
-      this._recentProjects = [];
-    }
+    loadRecentProjectsFromStorage(this);
   },
 
   _saveRecentProjectsToStorage() {
-    try {
-      localStorage.setItem('fluxion.editor.recentProjects', JSON.stringify(this._recentProjects));
-    } catch {}
+    saveRecentProjectsToStorage(this);
   },
 
   /** @param {string} absPath @param {boolean} legacy */
   _rememberRecentProject(absPath, legacy) {
-    const path = String(absPath || '').trim();
-    if (!path) return;
-
-    const key = path.toLowerCase();
-    this._recentProjects = (Array.isArray(this._recentProjects) ? this._recentProjects : [])
-      .filter((p) => String(p?.path || '').toLowerCase() !== key);
-
-    this._recentProjects.unshift({ path, legacy: Boolean(legacy), t: Date.now() });
-    this._recentProjects = this._recentProjects.slice(0, Math.max(1, this._recentProjectsMax | 0));
-    this._saveRecentProjectsToStorage();
-    this._renderProjectSelectRecents();
+    rememberRecentProject(this, /** @type {any} */ (ui), absPath, legacy);
   },
 
   /** @param {string} absPath */
   _removeRecentProject(absPath) {
-    const path = String(absPath || '').trim();
-    if (!path) return;
-    const key = path.toLowerCase();
-    this._recentProjects = (Array.isArray(this._recentProjects) ? this._recentProjects : [])
-      .filter((p) => String(p?.path || '').toLowerCase() !== key);
-    this._saveRecentProjectsToStorage();
-    this._renderProjectSelectRecents();
+    removeRecentProject(this, /** @type {any} */ (ui), absPath);
   },
 
   _renderProjectSelectRecents() {
-    const wrap = ui.projectSelectRecentList;
-    if (!wrap) return;
-
-    wrap.replaceChildren();
-
-    const items = Array.isArray(this._recentProjects) ? this._recentProjects : [];
-    if (items.length === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'recentProjectEmpty';
-      empty.textContent = 'No recent projects yet.';
-      wrap.appendChild(empty);
-      return;
-    }
-
-    for (const ent of items) {
-      const path = String(ent?.path || '').trim();
-      if (!path) continue;
-      const legacy = Boolean(ent?.legacy);
-
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'recentProjectBtn';
-      btn.addEventListener('click', () => {
-        this._openRecentProject({ path, legacy }).catch(console.error);
-      });
-
-      const top = document.createElement('div');
-      top.className = 'recentProjectTopRow';
-
-      const name = document.createElement('div');
-      name.className = 'recentProjectName';
-      name.textContent = this._pathBaseName(path);
-
-      top.appendChild(name);
-
-      if (legacy) {
-        const badge = document.createElement('div');
-        badge.className = 'recentProjectBadge recentProjectBadgeLegacy';
-        badge.textContent = 'LEGACY';
-        top.appendChild(badge);
-      }
-
-      const p = document.createElement('div');
-      p.className = 'recentProjectPath';
-      p.textContent = path;
-
-      btn.appendChild(top);
-      btn.appendChild(p);
-
-      wrap.appendChild(btn);
-    }
-  },
-
-  /** @param {string} p */
-  _pathBaseName(p) {
-    const s = String(p || '').replace(/[\\/]+$/, '');
-    const parts = s.split(/[\\/]/g).filter(Boolean);
-    return parts.length ? parts[parts.length - 1] : s;
+    renderProjectSelectRecents(this, /** @type {any} */ (ui));
   },
 
   /** @param {{ path: string, legacy: boolean }} ent */
   async _openRecentProject(ent) {
-    const path = String(ent?.path || '').trim();
-    if (!path) return;
-
-    if (ent.legacy) {
-      const ok = await this._openWorkspaceAtPath(path);
-      if (!ok) return;
-      // Legacy projects may not have fluxion.project.json; keep the scene as-is.
-      await this._loadProjectMetaFromWorkspace();
-      this._rememberRecentProject(path, true);
-      this._closeProjectSelect();
-      return;
-    }
-
-    const ok = await this._openProjectAtPathStrict(path);
-    if (!ok) return;
-    this._rememberRecentProject(path, false);
-    this._closeProjectSelect();
+    return openRecentProject(this, /** @type {any} */ (ui), ent);
   },
 
   /** @param {string} abs @returns {Promise<boolean>} */
   async _openWorkspaceAtPath(abs) {
-    const electronAPI = /** @type {any} */ (window).electronAPI;
-    if (!electronAPI || typeof electronAPI.setWorkspaceRoot !== 'function') {
-      alert('Open Folder is only available in the Electron editor.');
-      return false;
-    }
-
-    const res = await electronAPI.setWorkspaceRoot(String(abs));
-    if (!res || !res.ok) {
-      this._removeRecentProject(abs);
-      alert(`Failed to open folder: ${res && res.error ? res.error : 'Unknown error'}`);
-      return false;
-    }
-
-    await this._setAssetBrowserRoot('.');
-    return true;
+    return openWorkspaceAtPath(this, /** @type {any} */ (ui), abs);
   },
 
   /** @param {string} abs @returns {Promise<boolean>} */
   async _openProjectAtPathStrict(abs) {
-    const electronAPI = /** @type {any} */ (window).electronAPI;
-    if (!electronAPI || typeof electronAPI.setWorkspaceRoot !== 'function' || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.listProjectDir !== 'function') {
-      alert('Open Project is only available in the Electron editor.');
-      return false;
-    }
-
-    const prev = await electronAPI.getWorkspaceRoot();
-    const prevPath = prev && prev.ok && prev.path ? String(prev.path) : null;
-
-    const setRes = await electronAPI.setWorkspaceRoot(String(abs));
-    if (!setRes || !setRes.ok) {
-      this._removeRecentProject(abs);
-      alert(`Failed to set workspace root: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
-      return false;
-    }
-
-    const rootList = await electronAPI.listProjectDir('.');
-    const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
-      ? /** @type {{ name?: string }[]} */ (rootList.entries)
-      : /** @type {{ name?: string }[]} */ ([]);
-
-    const hasJsonProject = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
-    const fluxProjects = entries
-      .map((ent) => String(ent?.name || ''))
-      .filter((name) => name.toLowerCase().endsWith('.flux'))
-      .sort();
-    const hasFluxProject = fluxProjects.length > 0;
-
-    if (!hasJsonProject && !hasFluxProject) {
-      if (prevPath) await electronAPI.setWorkspaceRoot(prevPath);
-      alert('That folder does not look like a Fluxion project (missing fluxion.project.json or *.flux).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
-      return false;
-    }
-
-    await this._setAssetBrowserRoot('.');
-    await this._tryLoadProjectMainScene(hasJsonProject ? null : (fluxProjects[0] || null));
-    await this._loadProjectMetaFromWorkspace();
-    return true;
+    return openProjectAtPathStrict(this, /** @type {any} */ (ui), abs);
   },
 
   async _loadProjectMetaFromWorkspace() {
@@ -1680,6 +1460,7 @@ const game = {
       /** @type {string[]} */
       const parts = [];
       if (skyboxXml.color) addAttr(parts, 'color', skyboxXml.color);
+      if (skyboxXml.ambientColor) addAttr(parts, 'ambientColor', skyboxXml.ambientColor);
       if (skyboxXml.source) addAttr(parts, 'source', skyboxXml.source);
       if (skyboxXml.equirectangular) addAttr(parts, 'equirectangular', 'true');
       if (skyboxXml.right) addAttr(parts, 'right', skyboxXml.right);
@@ -2057,6 +1838,16 @@ const game = {
   },
 
   /** @param {string} type */
+  _addNodeByType(type) {
+    const id = String(type);
+    if (id === 'MeshNode' || id === 'DirectionalLight' || id === 'PointLight' || id === 'SpotLight') {
+      this._add3DNodeByType(id);
+      return;
+    }
+    this._add2DNodeByType(id);
+  },
+
+  /** @param {string} type */
   _add2DNodeByType(type) {
     const r = this._renderer;
     const scene = this.currentScene;
@@ -2146,6 +1937,124 @@ const game = {
         host.addChild(area);
         scene.add(host);
         created = area;
+        break;
+      }
+      default:
+        return;
+    }
+
+    // Track recents (UI only)
+    const id = String(type);
+    this._addNodeRecent = [id, ...this._addNodeRecent.filter(x => x !== id)].slice(0, 12);
+
+    if (created) {
+      this.selected = created;
+      this.rebuildTree();
+      this.rebuildInspector();
+      if (this._renderer) this._requestViewportSync(this._renderer);
+    }
+
+    this._closeAddNode();
+  },
+
+  /** @param {string} type */
+  _add3DNodeByType(type) {
+    const scene = this.currentScene;
+    if (!scene) return;
+
+    // Project may disable 3D rendering.
+    const { allow3D } = this._getProjectRenderEnableFlags();
+    if (!allow3D) return;
+
+    // Adding 3D nodes is only really useful in 3D mode (tree filters by mode).
+    if (this.mode !== '3d') this.setMode('3d');
+
+    // Spawn in front of the current 3D camera.
+    const cam3 = /** @type {any} */ (this._editorCamera3D || this._sceneCamera3D || null);
+    const px = Number(cam3?.position?.x) || 0;
+    const py = Number(cam3?.position?.y) || 0;
+    const pz = Number(cam3?.position?.z) || 0;
+
+    const tx = Number(cam3?.target?.x);
+    const ty = Number(cam3?.target?.y);
+    const tz = Number(cam3?.target?.z);
+
+    let fx = Number.isFinite(tx) ? (tx - px) : 0;
+    let fy = Number.isFinite(ty) ? (ty - py) : 0;
+    let fz = Number.isFinite(tz) ? (tz - pz) : -1;
+    let fl = Math.hypot(fx, fy, fz);
+    if (!Number.isFinite(fl) || fl <= 1e-6) {
+      fx = 0; fy = 0; fz = -1;
+      fl = 1;
+    }
+    fx /= fl; fy /= fl; fz /= fl;
+
+    const spawnDist = 3;
+    const spawnX = px + fx * spawnDist;
+    const spawnY = py + fy * spawnDist;
+    const spawnZ = pz + fz * spawnDist;
+
+    /** @param {string} base */
+    const uniqueName = (base) => {
+      const used = new Set();
+      /** @param {any} obj */
+      const addName = (obj) => {
+        const n = obj?.name ? String(obj.name).trim() : '';
+        if (n) used.add(n);
+      };
+      /** @param {any} obj */
+      const visit = (obj) => {
+        if (!obj) return;
+        addName(obj);
+        const kids = Array.isArray(obj.children) ? obj.children : [];
+        for (const ch of kids) visit(ch);
+      };
+      if (Array.isArray(scene.objects)) {
+        for (const o of scene.objects) visit(o);
+      }
+      if (Array.isArray(scene.audio)) {
+        for (const a of scene.audio) addName(a);
+      }
+      if (Array.isArray(scene.lights)) {
+        for (const l of scene.lights) addName(l);
+      }
+      const b = String(base || 'Node').trim() || 'Node';
+      if (!used.has(b)) return b;
+      for (let i = 2; i < 1000; i++) {
+        const n = `${b}${i}`;
+        if (!used.has(n)) return n;
+      }
+      return `${b}${Date.now()}`;
+    };
+
+    /** @type {any|null} */
+    let created = null;
+
+    switch (String(type)) {
+      case 'MeshNode': {
+        const m = new MeshNode();
+        m.name = uniqueName('MeshNode');
+        m.setPosition(spawnX, spawnY, spawnZ);
+        scene.add(m);
+        created = m;
+        break;
+      }
+      case 'DirectionalLight': {
+        const l = new DirectionalLight({ name: uniqueName('DirectionalLight') });
+        scene.addLight(l);
+        created = l;
+        break;
+      }
+      case 'PointLight': {
+        const l = new PointLight({ name: uniqueName('PointLight'), position: [spawnX, spawnY, spawnZ] });
+        scene.addLight(l);
+        created = l;
+        break;
+      }
+      case 'SpotLight': {
+        const l = new SpotLight({ name: uniqueName('SpotLight'), position: [spawnX, spawnY, spawnZ] });
+        scene.addLight(l);
+        created = l;
         break;
       }
       default:
@@ -2785,8 +2694,8 @@ const game = {
     if (this.mode === '2d' && !allow2D && allow3D) this.setMode('3d');
     else if (this.mode === '3d' && !allow3D && allow2D) this.setMode('2d');
 
-    // Add Node currently creates only 2D nodes.
-    if (!allow2D && this._addNodeOpen) this._closeAddNode();
+    // Add Node should be available if either pipeline is enabled.
+    if (!allow2D && !allow3D && this._addNodeOpen) this._closeAddNode();
   },
 
   /** @param {Renderer} renderer */
@@ -3098,6 +3007,12 @@ const game = {
   /** @param {Renderer} renderer */
   async loadSelectedScene(renderer) {
     const path = this._scenePath;
+
+    // Editor: reset environment defaults on load so settings don't leak between scenes.
+    if (renderer) {
+      renderer.pbrAmbientColor = [0.03, 0.03, 0.03];
+    }
+
     if (!path) {
       const empty = new Scene();
       empty.name = 'Empty Scene';
@@ -3600,225 +3515,20 @@ const game = {
   },
 
   _isEditingInspector() {
-    const el = /** @type {HTMLElement|null} */ (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    if (!el) return false;
-
-    const tag = String(el.tagName || '').toLowerCase();
-    const isEditor = tag === 'input' || tag === 'textarea' || tag === 'select';
-    if (!isEditor) return false;
-
-    return !!(el.closest('#inspectorCommon') || el.closest('#inspectorTransform'));
+    return isEditingInspector();
   },
 
   /** @param {number} seconds */
   _blockInspectorAutoRefresh(seconds) {
-    const s = Number(seconds);
-    if (!Number.isFinite(s) || s <= 0) return;
-    this._inspectorRefreshBlockT = Math.max(this._inspectorRefreshBlockT || 0, s);
+    blockInspectorAutoRefresh(this, seconds);
   },
 
   _setupInspectorInteractionGuards() {
-    const panel = /** @type {HTMLElement|null} */ (document.getElementById('rightPanel'));
-    if (!panel) return;
-
-    // Capture so we run before any bubbling handlers.
-    panel.addEventListener('pointerdown', () => this._blockInspectorAutoRefresh(0.35), true);
-    panel.addEventListener('mousedown', () => this._blockInspectorAutoRefresh(0.35), true);
-    panel.addEventListener('wheel', () => this._blockInspectorAutoRefresh(0.25), { capture: true, passive: true });
+    setupInspectorInteractionGuards(this);
   },
 
   rebuildInspector() {
-    const obj = this.selected;
-
-    if (ui.inspectorSubtitle) {
-      const name = obj?.name ? String(obj.name) : (obj ? (obj.constructor?.name || "(object)") : "No selection");
-      ui.inspectorSubtitle.textContent = name;
-    }
-
-    if (ui.common) ui.common.innerHTML = "";
-    if (ui.transform) ui.transform.innerHTML = "";
-
-    // Always show project info (when available) in the inspector.
-    this._rebuildProjectInspector(ui.common);
-
-    if (!obj) {
-      if (ui.inspectorSubtitle) {
-        ui.inspectorSubtitle.textContent = this._projectMeta ? 'Project' : 'No selection';
-      }
-      return;
-    }
-
-    // Editor XML stubs (scene-level declarations)
-    if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') {
-      this._rebuildInspectorXmlStub(obj);
-      return;
-    }
-
-    // Common fields
-    if (ui.common) {
-      const title = document.createElement('div');
-      title.className = 'sectionTitle';
-      title.textContent = 'Selection';
-      title.style.marginTop = '12px';
-      ui.common.appendChild(title);
-    }
-    this._addReadonly(ui.common, "type", obj.constructor?.name || "unknown");
-    this._addStringWith(ui.common, 'name', obj, 'name', () => this.rebuildTree());
-    this._addToggle(ui.common, "active", obj, "active");
-    this._addToggle(ui.common, "visible", obj, "visible");
-
-    // followCamera + base offsets
-    if (obj && typeof obj === 'object' && ('followCamera' in obj)) {
-      this._addToggle(ui.common, 'followCamera', obj, 'followCamera');
-      if (obj.followCamera) {
-        this._addNumber(ui.common, 'baseX', obj, 'baseX');
-        this._addNumber(ui.common, 'baseY', obj, 'baseY');
-      }
-    }
-
-    // Shared 2D tint opacity (Sprite-style). Expose as 0..1.
-    if (obj && typeof obj.setTransparency === 'function' && (('transparency' in obj) || ('color' in obj))) {
-      this._addOpacity01(ui.common, 'opacity', obj);
-    }
-
-    // Text fill color (CSS string) is separate from Sprite tint.
-    if (obj && (typeof obj.textColor === 'string' || typeof obj._textColor === 'string')) {
-      this._addCssColor(ui.common, 'color', obj, 'textColor');
-    }
-
-    // Sprite / AnimatedSprite image source
-    if (obj && typeof obj === 'object' && ('imageSrc' in obj)) {
-      this._addStringWith(ui.common, 'imageSrc', obj, 'imageSrc', () => {
-        // Best-effort live reload for sprites.
-        try {
-          if (typeof obj.loadTexture === 'function') {
-            // Release previous cached texture if renderer supports it.
-            const key = obj.textureKey;
-            if (key && obj.renderer?.releaseTexture) {
-              try { obj.renderer.releaseTexture(key); } catch {}
-            }
-            obj.texture = null;
-            obj.textureKey = null;
-            obj.loadTexture(String(obj.imageSrc || ''));
-          }
-        } catch {}
-      });
-    }
-
-    // AnimatedSprite frame size
-    if (this._isAnimatedSprite(obj)) {
-      if (typeof obj.frameWidth === 'number') this._addNumber(ui.common, 'frameWidth', obj, 'frameWidth');
-      if (typeof obj.frameHeight === 'number') this._addNumber(ui.common, 'frameHeight', obj, 'frameHeight');
-    }
-
-    // Text fields
-    if (obj && obj.constructor?.name === 'Text') {
-      this._addString(ui.common, 'text', obj, 'text');
-      this._addNumber(ui.common, 'fontSize', obj, 'fontSize');
-      this._addTextFontFamily(ui.common, 'fontFamily', obj);
-    }
-
-    // ClickableArea nullable width/height (XML allows omission)
-    if (obj && obj.constructor?.name === 'ClickableArea') {
-      this._addNullableNumber(ui.common, 'width', obj, 'width');
-      this._addNullableNumber(ui.common, 'height', obj, 'height');
-    }
-
-    // Audio fields
-    if (obj && obj.constructor?.name === 'Audio') {
-      this._addStringWith(ui.common, 'src', obj, 'src', () => {
-        // Note: src is authoring-only here; live reload requires scene URL resolution.
-      });
-      this._addToggle(ui.common, 'loop', obj, 'loop');
-      this._addToggle(ui.common, 'autoplay', obj, 'autoplay');
-      this._addToggle(ui.common, 'stopOnSceneChange', obj, 'stopOnSceneChange');
-      this._addNumber(ui.common, 'volume', obj, 'volume');
-    }
-
-    // MeshNode fields
-    if (obj && obj.constructor?.name === 'MeshNode') {
-      this._addString(ui.common, 'source', obj, 'source');
-      // Preserve authoring name even if material resolves to an instance.
-      if (!('materialName' in obj) && typeof obj.material === 'string') {
-        obj.materialName = obj.material;
-      }
-      this._addStringWith(ui.common, 'material', obj, 'materialName', () => {
-        try { obj.material = String(obj.materialName || ''); } catch {}
-      });
-      if (Array.isArray(obj.color) && obj.color.length >= 3) {
-        this._addColorVec3(ui.common, 'color', obj.color);
-      }
-
-      // Primitive params when meshDefinition is inline
-      const p = obj?.meshDefinition?.params;
-      if (p && typeof p === 'object') {
-        for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
-          if (!(k in p)) continue;
-          this._addNumber(ui.common, `param.${k}`, p, k);
-        }
-      }
-    }
-
-    // Lights
-    if (obj && obj.isLight) {
-      if (Array.isArray(obj.color) && obj.color.length >= 3) this._addColorVec3(ui.common, 'color', obj.color);
-      if (typeof obj.intensity === 'number') this._addNumber(ui.common, 'intensity', obj, 'intensity');
-      if (obj.constructor?.name === 'DirectionalLight') {
-        if (Array.isArray(obj.direction) && obj.direction.length >= 3) this._addVec3Array(ui.common, 'direction', obj.direction, { normalize: true });
-      }
-      if (obj.constructor?.name === 'PointLight') {
-        if (Array.isArray(obj.position) && obj.position.length >= 3) this._addVec3Array(ui.common, 'position', obj.position);
-        if (typeof obj.range === 'number') this._addNumber(ui.common, 'range', obj, 'range');
-      }
-      if (obj.constructor?.name === 'SpotLight') {
-        if (Array.isArray(obj.position) && obj.position.length >= 3) this._addVec3Array(ui.common, 'position', obj.position);
-        if (Array.isArray(obj.direction) && obj.direction.length >= 3) this._addVec3Array(ui.common, 'direction', obj.direction, { normalize: true });
-        if (typeof obj.range === 'number') this._addNumber(ui.common, 'range', obj, 'range');
-        if (typeof obj.innerAngleDeg === 'number') this._addNumber(ui.common, 'innerAngleDeg', obj, 'innerAngleDeg');
-        if (typeof obj.outerAngleDeg === 'number') this._addNumber(ui.common, 'outerAngleDeg', obj, 'outerAngleDeg');
-      }
-    }
-
-    if (this._isAnimatedSprite(obj)) {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn';
-      btn.textContent = 'Animations...';
-      btn.addEventListener('click', () => this._openAnimSpriteEditor());
-      this._addField(ui.common, 'animations', btn);
-    }
-
-    // Transform fields (mode-specific)
-    if (this.mode === '2d') {
-      if (typeof obj.x === "number") this._addNumber2DPos(ui.transform, "x", obj, "x");
-      if (typeof obj.y === "number") this._addNumber2DPos(ui.transform, "y", obj, "y");
-      this._add2DLayerField(ui.transform, obj);
-      if (typeof obj.width === "number") this._addNumber(ui.transform, "width", obj, "width");
-      if (typeof obj.height === "number") this._addNumber(ui.transform, "height", obj, "height");
-      if (typeof obj.rotation === "number") this._addNumber(ui.transform, "rotation", obj, "rotation");
-      if (typeof obj.zoom === "number") this._addNumber(ui.transform, "zoom", obj, "zoom");
-    } else {
-      // Support both (x,y,z,rotX,rotY,rotZ) and (position Vector3).
-      if (typeof obj.x === "number") this._addNumber(ui.transform, "x", obj, "x");
-      if (typeof obj.y === "number") this._addNumber(ui.transform, "y", obj, "y");
-      if (typeof obj.z === "number") this._addNumber(ui.transform, "z", obj, "z");
-
-      if (typeof obj.rotX === "number") this._addNumber(ui.transform, "rotX", obj, "rotX");
-      if (typeof obj.rotY === "number") this._addNumber(ui.transform, "rotY", obj, "rotY");
-      if (typeof obj.rotZ === "number") this._addNumber(ui.transform, "rotZ", obj, "rotZ");
-
-      if (obj.position && typeof obj.position.x === "number") {
-        this._addNumber(ui.transform, "pos.x", obj.position, "x");
-        this._addNumber(ui.transform, "pos.y", obj.position, "y");
-        this._addNumber(ui.transform, "pos.z", obj.position, "z");
-      }
-
-      if (obj.target && typeof obj.target.x === "number") {
-        this._addNumber(ui.transform, "target.x", obj.target, "x");
-        this._addNumber(ui.transform, "target.y", obj.target, "y");
-        this._addNumber(ui.transform, "target.z", obj.target, "z");
-      }
-    }
+    rebuildInspectorPanel(this, /** @type {any} */ (ui));
   },
 
   /**
@@ -3826,62 +3536,7 @@ const game = {
    * @param {any} stub
    */
   _rebuildInspectorXmlStub(stub) {
-    if (ui.common) ui.common.innerHTML = '';
-    if (ui.transform) ui.transform.innerHTML = '';
-
-    this._addReadonly(ui.common, 'type', String(stub.__xmlTag || 'XML'));
-
-    const tag = String(stub.__xmlTag || '');
-    if (tag === 'Font') {
-      this._addStringWith(ui.common, 'family', stub, 'family', () => this.rebuildTree());
-      this._addString(ui.common, 'src', stub, 'src');
-      return;
-    }
-    if (tag === 'Mesh') {
-      this._addStringWith(ui.common, 'name', stub, 'name', () => this.rebuildTree());
-      this._addString(ui.common, 'source', stub, 'source');
-      this._addString(ui.common, 'type', stub, 'type');
-      this._addCssColor(ui.common, 'color', stub, 'color');
-
-      if (!stub.params || typeof stub.params !== 'object') stub.params = {};
-      const p = stub.params;
-      for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
-        this._addNullableNumber(ui.common, k, p, k);
-      }
-      return;
-    }
-    if (tag === 'Material') {
-      this._addStringWith(ui.common, 'name', stub, 'name', () => this.rebuildTree());
-      this._addString(ui.common, 'source', stub, 'source');
-      this._addCssColor(ui.common, 'baseColorFactor', stub, 'baseColorFactor');
-      this._addString(ui.common, 'metallicFactor', stub, 'metallicFactor');
-      this._addString(ui.common, 'roughnessFactor', stub, 'roughnessFactor');
-      this._addString(ui.common, 'normalScale', stub, 'normalScale');
-      this._addString(ui.common, 'aoStrength', stub, 'aoStrength');
-      this._addCssColor(ui.common, 'emissiveFactor', stub, 'emissiveFactor');
-      this._addString(ui.common, 'alphaMode', stub, 'alphaMode');
-      this._addString(ui.common, 'alphaCutoff', stub, 'alphaCutoff');
-      this._addString(ui.common, 'baseColorTexture', stub, 'baseColorTexture');
-      this._addString(ui.common, 'metallicTexture', stub, 'metallicTexture');
-      this._addString(ui.common, 'roughnessTexture', stub, 'roughnessTexture');
-      this._addString(ui.common, 'normalTexture', stub, 'normalTexture');
-      this._addString(ui.common, 'aoTexture', stub, 'aoTexture');
-      this._addString(ui.common, 'emissiveTexture', stub, 'emissiveTexture');
-      this._addString(ui.common, 'alphaTexture', stub, 'alphaTexture');
-      return;
-    }
-    if (tag === 'Skybox') {
-      this._addCssColor(ui.common, 'color', stub, 'color');
-      this._addString(ui.common, 'source', stub, 'source');
-      this._addToggle(ui.common, 'equirectangular', stub, 'equirectangular');
-      this._addString(ui.common, 'right', stub, 'right');
-      this._addString(ui.common, 'left', stub, 'left');
-      this._addString(ui.common, 'top', stub, 'top');
-      this._addString(ui.common, 'bottom', stub, 'bottom');
-      this._addString(ui.common, 'front', stub, 'front');
-      this._addString(ui.common, 'back', stub, 'back');
-      return;
-    }
+    rebuildInspectorXmlStubPanel(this, /** @type {any} */ (ui), stub);
   },
 
   /**
@@ -3893,23 +3548,7 @@ const game = {
    * @param {'x'|'y'} key
    */
   _addNumber2DPos(container, label, obj, key) {
-    if (!obj) return;
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = '0.01';
-    input.value = String(Number(obj[key]) || 0);
-    const apply = () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v)) return;
-      if (obj.followCamera) {
-        if (key === 'x') obj.baseX = v;
-        if (key === 'y') obj.baseY = v;
-      }
-      obj[key] = v;
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addNumber2DPos(container, label, obj, key);
   },
 
   /**
@@ -3920,37 +3559,7 @@ const game = {
    * @param {any} obj
    */
   _add2DLayerField(container, obj) {
-    if (!container || !obj) return;
-
-    // Only show for objects that look like 2D drawables.
-    if (!this._matchesMode(obj)) return;
-    if (typeof obj.draw !== 'function') return;
-
-    if (obj.layer === undefined || obj.layer === null || obj.layer === '') {
-      obj.layer = 0;
-    }
-    if (!Number.isFinite(Number(obj.layer))) {
-      obj.layer = 0;
-    }
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = '1';
-    input.value = String(Number(obj.layer) || 0);
-    const apply = () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v)) return;
-      obj.layer = v;
-      // Scene caches sorted 2D objects; mark dirty so the new layer takes effect.
-      if (this.currentScene) {
-        // @ts-ignore - internal optimization flag
-        this.currentScene._objectsDirty = true;
-      }
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-
-    this._addField(container, 'layer', input);
+    InspectorFields.add2DLayerField(this, container, obj);
   },
 
   /**
@@ -3959,23 +3568,7 @@ const game = {
    * @param {HTMLElement} node
    */
   _addField(container, labelText, node) {
-    if (!container) return;
-    const field = document.createElement("div");
-    field.className = "field";
-
-    const label = document.createElement("div");
-    label.className = "label";
-    label.textContent = labelText;
-
-    const value = document.createElement("div");
-    value.className = "value";
-
-    field.appendChild(label);
-    field.appendChild(value);
-    container.appendChild(field);
-    value.appendChild(node);
-
-    return field;
+    return InspectorFields.addField(container, labelText, node);
   },
 
   _loadEditorSettingsFromStorage() {
@@ -4005,13 +3598,7 @@ const game = {
    * @param {string | number} text
    */
   _addReadonly(container, label, text) {
-    const span = document.createElement("div");
-    span.textContent = String(text);
-    span.style.padding = "8px 10px";
-    span.style.border = "1px solid var(--border)";
-    span.style.borderRadius = "6px";
-    span.style.background = "#1a1a1a";
-    this._addField(container, label, span);
+    InspectorFields.addReadonly(container, label, text);
   },
 
   /**
@@ -4021,23 +3608,7 @@ const game = {
    * @param {string} key
    */
   _addToggle(container, label, obj, key) {
-    if (!obj || !(key in obj)) return;
-    const input = document.createElement('input');
-    input.type = "checkbox";
-    input.checked = !!obj[key];
-    input.addEventListener("change", () => {
-      obj[key] = !!input.checked;
-    });
-
-    const wrap = document.createElement('label');
-    wrap.className = "checkRow";
-    wrap.style.margin = "0";
-    wrap.appendChild(input);
-    const t = document.createElement('span');
-    t.textContent = "";
-    wrap.appendChild(t);
-
-    this._addField(container, label, wrap);
+    InspectorFields.addToggle(container, label, obj, key);
   },
 
   /**
@@ -4049,24 +3620,7 @@ const game = {
    * @param {() => void} onChanged
    */
   _addToggleWith(container, label, obj, key, onChanged) {
-    if (!obj || !(key in obj)) return;
-    const input = document.createElement('input');
-    input.type = "checkbox";
-    input.checked = !!obj[key];
-    input.addEventListener("change", () => {
-      obj[key] = !!input.checked;
-      try { onChanged(); } catch {}
-    });
-
-    const wrap = document.createElement('label');
-    wrap.className = "checkRow";
-    wrap.style.margin = "0";
-    wrap.appendChild(input);
-    const t = document.createElement('span');
-    t.textContent = "";
-    wrap.appendChild(t);
-
-    this._addField(container, label, wrap);
+    InspectorFields.addToggleWith(container, label, obj, key, onChanged);
   },
 
   /**
@@ -4076,29 +3630,7 @@ const game = {
    * @param {string} key
    */
   _addNumber(container, label, obj, key) {
-    if (!obj) return;
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "0.01";
-    input.value = String(Number(obj[key]) || 0);
-    const apply = () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v)) return;
-      obj[key] = v;
-      // Some engine objects cache matrices (e.g. Camera3D).
-      if (obj && typeof obj === 'object' && ('_dirty' in obj)) {
-        // @ts-ignore
-        obj._dirty = true;
-      }
-      const sel = /** @type {any} */ (this.selected);
-      if (sel && sel !== obj && typeof sel === 'object' && ('_dirty' in sel)) {
-        // @ts-ignore
-        sel._dirty = true;
-      }
-    };
-    input.addEventListener("input", apply);
-    input.addEventListener("change", apply);
-    this._addField(container, label, input);
+    InspectorFields.addNumber(this, container, label, obj, key);
   },
 
   /**
@@ -4111,25 +3643,7 @@ const game = {
    * @param {() => void} onChanged
    */
   _addNumberWith(container, label, obj, key, onChanged, opts = {}) {
-    if (!obj) return;
-    if (!(key in obj)) return;
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = String(Number.isFinite(Number(opts.step)) ? Number(opts.step) : 0.01);
-    if (Number.isFinite(Number(opts.min))) input.min = String(Number(opts.min));
-    if (Number.isFinite(Number(opts.max))) input.max = String(Number(opts.max));
-    input.value = String(Number(obj[key]) || 0);
-
-    const apply = () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v)) return;
-      obj[key] = v;
-      try { onChanged(); } catch {}
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addNumberWith(container, label, obj, key, onChanged, opts);
   },
 
   /**
@@ -4139,17 +3653,7 @@ const game = {
    * @param {string} key
    */
   _addString(container, label, obj, key) {
-    if (!obj) return;
-    if (!(key in obj)) return;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = String(obj[key] ?? '');
-    const apply = () => {
-      obj[key] = String(input.value ?? '');
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addString(container, label, obj, key);
   },
 
   /**
@@ -4161,18 +3665,7 @@ const game = {
    * @param {() => void} onChanged
    */
   _addStringWith(container, label, obj, key, onChanged) {
-    if (!obj) return;
-    if (!(key in obj)) return;
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = String(obj[key] ?? '');
-    const apply = () => {
-      obj[key] = String(input.value ?? '');
-      try { onChanged(); } catch {}
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addStringWith(container, label, obj, key, onChanged);
   },
 
   /**
@@ -4185,38 +3678,7 @@ const game = {
    * @param {string} key
    */
   _addNullableNumber(container, label, obj, key) {
-    if (!obj) return;
-
-    const isClickableArea = !!(obj?.constructor?.name === 'ClickableArea');
-    const emptyMode = isClickableArea ? 'null' : 'delete';
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = '0.01';
-    input.placeholder = emptyMode === 'null' ? '(inherit)' : '(unset)';
-
-    const cur = obj[key];
-    if (cur === null || cur === undefined || cur === '') input.value = '';
-    else input.value = String(Number(cur));
-
-    const apply = () => {
-      const raw = String(input.value ?? '').trim();
-      if (!raw) {
-        if (emptyMode === 'null') {
-          obj[key] = null;
-        } else {
-          try { delete obj[key]; } catch { obj[key] = undefined; }
-        }
-        return;
-      }
-      const v = Number(raw);
-      if (!Number.isFinite(v)) return;
-      obj[key] = v;
-    };
-
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addNullableNumber(container, label, obj, key);
   },
 
   /**
@@ -4227,47 +3689,7 @@ const game = {
    * @param {{ normalize?: boolean }=} opts
    */
   _addVec3Array(container, label, arr, opts = {}) {
-    if (!container || !Array.isArray(arr) || arr.length < 3) return;
-    const normalize = !!opts.normalize;
-
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex';
-    wrap.style.gap = '6px';
-
-    /** @param {number} i */
-    const make = (i) => {
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.step = '0.01';
-      input.value = String(Number(arr[i]) || 0);
-      input.style.width = '80px';
-      const apply = () => {
-        const v = Number(input.value);
-        if (!Number.isFinite(v)) return;
-        arr[i] = v;
-        if (normalize) {
-          const x = Number(arr[0]) || 0;
-          const y = Number(arr[1]) || 0;
-          const z = Number(arr[2]) || 0;
-          const len = Math.hypot(x, y, z) || 1;
-          arr[0] = x / len;
-          arr[1] = y / len;
-          arr[2] = z / len;
-          // keep inputs in sync
-          inputs[0].value = String(arr[0]);
-          inputs[1].value = String(arr[1]);
-          inputs[2].value = String(arr[2]);
-        }
-      };
-      input.addEventListener('input', apply);
-      input.addEventListener('change', apply);
-      return input;
-    };
-
-    /** @type {HTMLInputElement[]} */
-    const inputs = [make(0), make(1), make(2)];
-    for (const i of inputs) wrap.appendChild(i);
-    this._addField(container, label, wrap);
+    InspectorFields.addVec3Array(container, label, arr, opts);
   },
 
   /**
@@ -4277,59 +3699,17 @@ const game = {
    * @param {number[]} arr
    */
   _addColorVec3(container, label, arr) {
-    if (!container || !Array.isArray(arr) || arr.length < 3) return;
-
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex';
-    wrap.style.gap = '8px';
-    wrap.style.alignItems = 'center';
-
-    const picker = document.createElement('input');
-    picker.type = 'color';
-    picker.style.width = '44px';
-    picker.style.height = '34px';
-    picker.style.padding = '0';
-    picker.style.border = '1px solid var(--border)';
-    picker.style.borderRadius = '6px';
-    picker.style.background = 'transparent';
-
-    const r = Math.max(0, Math.min(1, Number(arr[0]) || 0));
-    const g = Math.max(0, Math.min(1, Number(arr[1]) || 0));
-    const b = Math.max(0, Math.min(1, Number(arr[2]) || 0));
-    picker.value = this._rgb01ToHex(r, g, b);
-
-    picker.addEventListener('input', () => {
-      const rgb = this._hexToRgb01(String(picker.value || ''));
-      if (!rgb) return;
-      arr[0] = rgb[0];
-      arr[1] = rgb[1];
-      arr[2] = rgb[2];
-    });
-
-    wrap.appendChild(picker);
-    this._addField(container, label, wrap);
+    InspectorFields.addColorVec3(container, label, arr);
   },
 
   /** @param {number} r @param {number} g @param {number} b */
   _rgb01ToHex(r, g, b) {
-    const R = Math.max(0, Math.min(255, Math.round((Number(r) || 0) * 255)));
-    const G = Math.max(0, Math.min(255, Math.round((Number(g) || 0) * 255)));
-    const B = Math.max(0, Math.min(255, Math.round((Number(b) || 0) * 255)));
-    /** @param {number} n */
-    const toHex2 = (n) => n.toString(16).padStart(2, '0');
-    return `#${toHex2(R)}${toHex2(G)}${toHex2(B)}`;
+    return InspectorFields.rgb01ToHex(r, g, b);
   },
 
   /** @param {string} hex @returns {[number,number,number] | null} */
   _hexToRgb01(hex) {
-    const s = String(hex || '').trim();
-    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
-    if (!m6) return null;
-    const h = m6[1];
-    const r = parseInt(h.slice(0, 2), 16) / 255;
-    const g = parseInt(h.slice(2, 4), 16) / 255;
-    const b = parseInt(h.slice(4, 6), 16) / 255;
-    return [r, g, b];
+    return InspectorFields.hexToRgb01(hex);
   },
 
   /**
@@ -4339,22 +3719,7 @@ const game = {
    * @param {any} textObj
    */
   _addTextFontFamily(container, label, textObj) {
-    if (!textObj || typeof textObj !== 'object') return;
-    if (!('_fontFamily' in textObj)) return;
-    const input = document.createElement('input');
-    input.type = 'text';
-    // @ts-ignore
-    input.value = String(textObj._fontFamily ?? '');
-    const apply = () => {
-      // @ts-ignore
-      textObj._fontFamily = String(input.value ?? '');
-      if (typeof textObj.updateTexture === 'function') {
-        try { textObj.updateTexture(); } catch {}
-      }
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addTextFontFamily(container, label, textObj);
   },
 
   /**
@@ -4367,63 +3732,7 @@ const game = {
    * @param {string} key
    */
   _addCssColor(container, label, obj, key) {
-    if (!obj) return;
-    if (!(key in obj)) return;
-
-    const wrap = document.createElement('div');
-    wrap.style.display = 'flex';
-    wrap.style.gap = '8px';
-    wrap.style.alignItems = 'center';
-
-    const picker = document.createElement('input');
-    picker.type = 'color';
-    picker.style.width = '44px';
-    picker.style.height = '34px';
-    picker.style.padding = '0';
-    picker.style.border = '1px solid var(--border)';
-    picker.style.borderRadius = '6px';
-    picker.style.background = 'transparent';
-
-    const text = document.createElement('input');
-    text.type = 'text';
-    text.placeholder = 'e.g. #ff00aa, white, rgba(255,0,0,0.5)';
-    text.value = String(obj[key] ?? '');
-
-    const syncPickerFromText = () => {
-      const v = String(text.value ?? '').trim();
-      const hex = this._cssColorToHex(v);
-      if (hex) {
-        picker.disabled = false;
-        picker.value = hex;
-      } else {
-        // Keep picker usable but reflect "unknown" by disabling it.
-        picker.disabled = true;
-      }
-    };
-
-    const applyText = () => {
-      obj[key] = String(text.value ?? '');
-      syncPickerFromText();
-    };
-
-    picker.addEventListener('input', () => {
-      // When the user picks a color, prefer storing as hex.
-      const hex = String(picker.value || '').trim();
-      if (hex) {
-        text.value = hex;
-        obj[key] = hex;
-      }
-    });
-
-    text.addEventListener('input', applyText);
-    text.addEventListener('change', applyText);
-
-    // Initial sync
-    syncPickerFromText();
-
-    wrap.appendChild(picker);
-    wrap.appendChild(text);
-    this._addField(container, label, wrap);
+    InspectorFields.addCssColor(container, label, obj, key);
   },
 
   /**
@@ -4433,50 +3742,7 @@ const game = {
    * @returns {string|null}
    */
   _cssColorToHex(css) {
-    const s = String(css || '').trim();
-    if (!s) return null;
-
-    // Fast path for #rgb/#rrggbb
-    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
-    if (m3) {
-      const r = m3[1][0];
-      const g = m3[1][1];
-      const b = m3[1][2];
-      return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
-    }
-    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
-    if (m6) return `#${m6[1]}`.toLowerCase();
-    // Ignore alpha in picker; keep RGB.
-    const m8 = /^#([0-9a-fA-F]{8})$/.exec(s);
-    if (m8) return `#${m8[1].slice(0, 6)}`.toLowerCase();
-
-    // Use the browser parser for named colors / rgb() / hsl(), etc.
-    // This works in Electron/DOM.
-    try {
-      const el = document.createElement('div');
-      el.style.color = '';
-      el.style.color = s;
-      // If invalid, most browsers keep it empty.
-      if (!el.style.color) return null;
-
-      // Attach briefly to ensure computedStyle is available in all engines.
-      el.style.display = 'none';
-      document.body.appendChild(el);
-      const computed = getComputedStyle(el).color || '';
-      el.remove();
-
-      // computed is typically "rgb(r,g,b)" or "rgba(r,g,b,a)"
-      const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([0-9.]+))?\)$/.exec(computed.trim());
-      if (!m) return null;
-      const r = Math.max(0, Math.min(255, parseInt(m[1], 10) || 0));
-      const g = Math.max(0, Math.min(255, parseInt(m[2], 10) || 0));
-      const b = Math.max(0, Math.min(255, parseInt(m[3], 10) || 0));
-      /** @param {number} n */
-      const toHex2 = (n) => n.toString(16).padStart(2, '0');
-      return `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`;
-    } catch {
-      return null;
-    }
+    return InspectorFields.cssColorToHex(css);
   },
 
   /**
@@ -4487,26 +3753,7 @@ const game = {
    * @param {any} obj
    */
   _addOpacity01(container, label, obj) {
-    if (!obj || typeof obj.setTransparency !== 'function') return;
-    const t = Number(obj.transparency);
-    const opacity = Number.isFinite(t) ? Math.max(0, Math.min(1, t / 255)) : 1;
-
-    const input = document.createElement('input');
-    input.type = 'number';
-    input.step = '0.01';
-    input.min = '0';
-    input.max = '1';
-    input.value = String(opacity);
-
-    const apply = () => {
-      const v = Number(input.value);
-      if (!Number.isFinite(v)) return;
-      const clamped = Math.max(0, Math.min(1, v));
-      obj.setTransparency(clamped * 255);
-    };
-    input.addEventListener('input', apply);
-    input.addEventListener('change', apply);
-    this._addField(container, label, input);
+    InspectorFields.addOpacity01(container, label, obj);
   },
 
   focusSelection() {
@@ -4561,6 +3808,14 @@ const game = {
   /** @param {any} obj */
   _getWorldPos(obj) {
     if (!obj) return null;
+    // Lights store position as a vec3 array.
+    if (obj.isLight && Array.isArray(obj.position) && obj.position.length >= 3) {
+      return {
+        x: Number(obj.position[0]) || 0,
+        y: Number(obj.position[1]) || 0,
+        z: Number(obj.position[2]) || 0,
+      };
+    }
     if (obj.position && typeof obj.position.x === "number") {
       return { x: Number(obj.position.x) || 0, y: Number(obj.position.y) || 0, z: Number(obj.position.z) || 0 };
     }
@@ -4580,6 +3835,13 @@ const game = {
   /** @param {any} obj @param {number} x @param {number} y @param {number} z */
   _setWorldPos(obj, x, y, z) {
     if (!obj) return;
+    // Lights store position as a vec3 array.
+    if (obj.isLight && Array.isArray(obj.position) && obj.position.length >= 3) {
+      obj.position[0] = x;
+      obj.position[1] = y;
+      obj.position[2] = z;
+      return;
+    }
     if (obj.position && typeof obj.position.x === 'number') {
       obj.position.x = x;
       obj.position.y = y;
@@ -4712,6 +3974,127 @@ const game = {
     return (b * e - d) / denom;
   },
 
+  /** @param {any} obj */
+  _get2DRot(obj) {
+    if (!obj) return null;
+    const v = Number(obj.rotation);
+    return Number.isFinite(v) ? v : null;
+  },
+
+  /** @param {any} obj @param {number} rot */
+  _set2DRot(obj, rot) {
+    if (!obj) return;
+    if (typeof obj.rotation === 'number' || obj.rotation === undefined) {
+      obj.rotation = Number(rot) || 0;
+    }
+  },
+
+  /** @param {{x:number,y:number,z:number}} v @param {{x:number,y:number,z:number}} axis @param {number} angle */
+  _rotateVecAxisAngle(v, axis, angle) {
+    const ax = axis.x, ay = axis.y, az = axis.z;
+    const al = Math.hypot(ax, ay, az) || 1;
+    const x = ax / al, y = ay / al, z = az / al;
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const t = 1 - c;
+    // Rodrigues rotation formula
+    return {
+      x: v.x * (t * x * x + c) + v.y * (t * x * y - s * z) + v.z * (t * x * z + s * y),
+      y: v.x * (t * x * y + s * z) + v.y * (t * y * y + c) + v.z * (t * y * z - s * x),
+      z: v.x * (t * x * z - s * y) + v.y * (t * y * z + s * x) + v.z * (t * z * z + c),
+    };
+  },
+
+  /** @param {any} obj */
+  _getGizmoPos3D(obj) {
+    const p = this._getWorldPos(obj);
+    if (p) return p;
+    // Direction-only objects (e.g. DirectionalLight) still need a gizmo anchor.
+    return { x: 0, y: 0, z: 0 };
+  },
+
+  /** @param {any} obj */
+  _canRotate3D(obj) {
+    if (!obj) return false;
+    if (typeof obj.rotX === 'number' || typeof obj.rotY === 'number' || typeof obj.rotZ === 'number') return true;
+    if (obj.isLight && Array.isArray(obj.direction) && obj.direction.length >= 3) return true;
+    if (obj.position && obj.target && typeof obj.position === 'object' && typeof obj.target === 'object') return true;
+    return false;
+  },
+
+  /** @param {any} obj @param {'x'|'y'|'z'} axis @param {number} angle */
+  _applyRotate3D(obj, axis, angle) {
+    if (!obj) return;
+    if (typeof obj.rotX === 'number' || typeof obj.rotY === 'number' || typeof obj.rotZ === 'number') {
+      if (axis === 'x' && typeof obj.rotX === 'number') obj.rotX = (Number(obj.rotX) || 0) + angle;
+      if (axis === 'y' && typeof obj.rotY === 'number') obj.rotY = (Number(obj.rotY) || 0) + angle;
+      if (axis === 'z' && typeof obj.rotZ === 'number') obj.rotZ = (Number(obj.rotZ) || 0) + angle;
+      return;
+    }
+
+    const axisVec = axis === 'x' ? { x: 1, y: 0, z: 0 } : axis === 'y' ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: -1 };
+
+    // Lights: rotate their direction vector.
+    if (obj.isLight && Array.isArray(obj.direction) && obj.direction.length >= 3) {
+      const d = { x: Number(obj.direction[0]) || 0, y: Number(obj.direction[1]) || 0, z: Number(obj.direction[2]) || 0 };
+      const rd = this._rotateVecAxisAngle(d, axisVec, angle);
+      const len = Math.hypot(rd.x, rd.y, rd.z) || 1;
+      obj.direction[0] = rd.x / len;
+      obj.direction[1] = rd.y / len;
+      obj.direction[2] = rd.z / len;
+      return;
+    }
+
+    // Camera3D-like: rotate (target - position) and update target.
+    if (obj.position && obj.target && typeof obj.position === 'object' && typeof obj.target === 'object') {
+      const px = Number(obj.position.x) || 0;
+      const py = Number(obj.position.y) || 0;
+      const pz = Number(obj.position.z) || 0;
+      const dx = (Number(obj.target.x) || 0) - px;
+      const dy = (Number(obj.target.y) || 0) - py;
+      const dz = (Number(obj.target.z) || 0) - pz;
+      const rd = this._rotateVecAxisAngle({ x: dx, y: dy, z: dz }, axisVec, angle);
+      obj.target.x = px + rd.x;
+      obj.target.y = py + rd.y;
+      obj.target.z = pz + rd.z;
+    }
+  },
+
+  /** @param {any} dbg @param {number} cx @param {number} cy @param {number} r @param {number[]} color @param {number} width */
+  _drawCircle2D(dbg, cx, cy, r, color, width) {
+    const segs = 48;
+    let px = cx + r;
+    let py = cy;
+    for (let i = 1; i <= segs; i++) {
+      const t = (i / segs) * Math.PI * 2;
+      const nx = cx + Math.cos(t) * r;
+      const ny = cy + Math.sin(t) * r;
+      dbg.drawLine(px, py, nx, ny, color, width);
+      px = nx;
+      py = ny;
+    }
+  },
+
+  /** @param {any} dbg @param {{x:number,y:number,z:number}} c @param {number} r @param {'x'|'y'|'z'} axis @param {number[]} color @param {number} width @param {any} depth */
+  _drawCircle3D(dbg, c, r, axis, color, width, depth) {
+    const segs = 64;
+    const b1 = axis === 'x' ? { x: 0, y: 1, z: 0 } : axis === 'y' ? { x: 1, y: 0, z: 0 } : { x: 1, y: 0, z: 0 };
+    const b2 = axis === 'x' ? { x: 0, y: 0, z: -1 } : axis === 'y' ? { x: 0, y: 0, z: -1 } : { x: 0, y: 1, z: 0 };
+    let px = c.x + b1.x * r;
+    let py = c.y + b1.y * r;
+    let pz = c.z + b1.z * r;
+    for (let i = 1; i <= segs; i++) {
+      const t = (i / segs) * Math.PI * 2;
+      const nx = c.x + (b1.x * Math.cos(t) + b2.x * Math.sin(t)) * r;
+      const ny = c.y + (b1.y * Math.cos(t) + b2.y * Math.sin(t)) * r;
+      const nz = c.z + (b1.z * Math.cos(t) + b2.z * Math.sin(t)) * r;
+      dbg.drawLine3D(px, py, pz, nx, ny, nz, color, width, depth);
+      px = nx;
+      py = ny;
+      pz = nz;
+    }
+  },
+
   _updateGizmo() {
     const scene = this.currentScene;
     const r = this._renderer;
@@ -4745,6 +4128,35 @@ const game = {
       const zoom = Number(cam2.zoom) || 1;
       const axisLen = 80 / zoom;
       const hitTh = 10 / zoom;
+
+      // Rotate gizmo (2D)
+      if (this._gizmo.mode === 'rotate') {
+        const curRot = this._get2DRot(obj);
+        if (curRot === null) return;
+
+        const ringR = 55 / zoom;
+        const ringTh = 8 / zoom;
+
+        if (!this._gizmo.active && mouseDown && overCanvas) {
+          const dist = Math.hypot(mouseWorld.x - p.x, mouseWorld.y - p.y);
+          if (Math.abs(dist - ringR) <= ringTh) {
+            this._gizmo.active = true;
+            this._gizmo.axis = 'rot';
+            this._gizmo.startPos2D = { x: p.x, y: p.y };
+            this._gizmo.startRot2D = curRot;
+            this._gizmo.startMouseAngle2D = Math.atan2(mouseWorld.y - p.y, mouseWorld.x - p.x);
+          }
+        }
+
+        if (this._gizmo.active && mouseHeld && this._gizmo.axis === 'rot' && this._gizmo.startPos2D) {
+          const a0 = Number(this._gizmo.startMouseAngle2D) || 0;
+          const a1 = Math.atan2(mouseWorld.y - this._gizmo.startPos2D.y, mouseWorld.x - this._gizmo.startPos2D.x);
+          const delta = a1 - a0;
+          this._set2DRot(obj, (Number(this._gizmo.startRot2D) || 0) + delta);
+        }
+
+        return;
+      }
 
       const ax = p.x, ay = p.y;
       const x1 = ax + axisLen, y1 = ay;
@@ -4786,11 +4198,113 @@ const game = {
 
     // 3D gizmo
     const cam3 = /** @type {any} */ (scene.camera3D || scene.getObjectByName?.('MainCamera3D'));
-    const p3 = this._getWorldPos(obj);
-    if (!cam3 || !p3) return;
+    if (!cam3) return;
+    const p3 = this._getGizmoPos3D(obj);
 
     const ray = this._getMouseRay3D(cam3, mouse.x, mouse.y);
     if (!ray) return;
+
+    // Rotate gizmo (3D)
+    if (this._gizmo.mode === 'rotate') {
+      if (!this._canRotate3D(obj)) return;
+
+      const center = { x: p3.x, y: p3.y, z: p3.z };
+      const ringR = 1.0;
+      const ringTh = 0.18;
+
+      const planes = /** @type {Array<{axis:'x'|'y'|'z', n:{x:number,y:number,z:number}, b1:{x:number,y:number,z:number}, b2:{x:number,y:number,z:number}}>} */ ([
+        { axis: 'x', n: { x: 1, y: 0, z: 0 }, b1: { x: 0, y: 1, z: 0 }, b2: { x: 0, y: 0, z: -1 } },
+        { axis: 'y', n: { x: 0, y: 1, z: 0 }, b1: { x: 1, y: 0, z: 0 }, b2: { x: 0, y: 0, z: -1 } },
+        { axis: 'z', n: { x: 0, y: 0, z: -1 }, b1: { x: 1, y: 0, z: 0 }, b2: { x: 0, y: 1, z: 0 } },
+      ]);
+
+      if (!this._gizmo.active && mouseDown && overCanvas) {
+        let picked = /** @type {'x'|'y'|'z'|null} */ (null);
+        let best = Infinity;
+        let bestAngle = 0;
+
+        for (const pl of planes) {
+          const hit = this._rayPlane(ray.origin, ray.dir, center, pl.n);
+          if (!hit) continue;
+          const vx = hit.x - center.x;
+          const vy = hit.y - center.y;
+          const vz = hit.z - center.z;
+          const dist = Math.hypot(vx, vy, vz);
+          const err = Math.abs(dist - ringR);
+          if (err <= ringTh && err < best) {
+            best = err;
+            picked = pl.axis;
+            const u = vx * pl.b1.x + vy * pl.b1.y + vz * pl.b1.z;
+            const v = vx * pl.b2.x + vy * pl.b2.y + vz * pl.b2.z;
+            bestAngle = Math.atan2(v, u);
+          }
+        }
+
+        if (picked) {
+          this._gizmo.active = true;
+          this._gizmo.axis = picked;
+          this._gizmo.startPos3D = { x: center.x, y: center.y, z: center.z };
+          this._gizmo.startAxisAngle3D = bestAngle;
+
+          // Snapshot values so rotation is stable during drag.
+          if (typeof obj.rotX === 'number' || typeof obj.rotY === 'number' || typeof obj.rotZ === 'number') {
+            this._gizmo.startEuler3D = {
+              x: Number(obj.rotX) || 0,
+              y: Number(obj.rotY) || 0,
+              z: Number(obj.rotZ) || 0,
+            };
+          } else if (obj.isLight && Array.isArray(obj.direction) && obj.direction.length >= 3) {
+            this._gizmo.startDir3D = [Number(obj.direction[0]) || 0, Number(obj.direction[1]) || 0, Number(obj.direction[2]) || 0];
+          } else if (obj.position && obj.target) {
+            const px = Number(obj.position.x) || 0;
+            const py = Number(obj.position.y) || 0;
+            const pz = Number(obj.position.z) || 0;
+            this._gizmo.startCamDir3D = {
+              x: (Number(obj.target.x) || 0) - px,
+              y: (Number(obj.target.y) || 0) - py,
+              z: (Number(obj.target.z) || 0) - pz,
+            };
+          }
+        }
+      }
+
+      if (this._gizmo.active && mouseHeld && this._gizmo.startPos3D && (this._gizmo.axis === 'x' || this._gizmo.axis === 'y' || this._gizmo.axis === 'z')) {
+        const axis = /** @type {'x'|'y'|'z'} */ (this._gizmo.axis);
+        const pl = planes.find(p => p.axis === axis);
+        if (!pl) return;
+        const hit = this._rayPlane(ray.origin, ray.dir, this._gizmo.startPos3D, pl.n);
+        if (!hit) return;
+        const vx = hit.x - this._gizmo.startPos3D.x;
+        const vy = hit.y - this._gizmo.startPos3D.y;
+        const vz = hit.z - this._gizmo.startPos3D.z;
+        const u = vx * pl.b1.x + vy * pl.b1.y + vz * pl.b1.z;
+        const v = vx * pl.b2.x + vy * pl.b2.y + vz * pl.b2.z;
+        const a1 = Math.atan2(v, u);
+        const delta = a1 - (Number(this._gizmo.startAxisAngle3D) || 0);
+
+        // Restore snapshot then apply delta.
+        if (this._gizmo.startEuler3D) {
+          obj.rotX = this._gizmo.startEuler3D.x;
+          obj.rotY = this._gizmo.startEuler3D.y;
+          obj.rotZ = this._gizmo.startEuler3D.z;
+        } else if (this._gizmo.startDir3D && obj.isLight && Array.isArray(obj.direction)) {
+          obj.direction[0] = this._gizmo.startDir3D[0];
+          obj.direction[1] = this._gizmo.startDir3D[1];
+          obj.direction[2] = this._gizmo.startDir3D[2];
+        } else if (this._gizmo.startCamDir3D && obj.position && obj.target) {
+          const px = Number(obj.position.x) || 0;
+          const py = Number(obj.position.y) || 0;
+          const pz = Number(obj.position.z) || 0;
+          obj.target.x = px + this._gizmo.startCamDir3D.x;
+          obj.target.y = py + this._gizmo.startCamDir3D.y;
+          obj.target.z = pz + this._gizmo.startCamDir3D.z;
+        }
+
+        this._applyRotate3D(obj, axis, delta);
+      }
+
+      return;
+    }
 
     const axisLen = 1.2;
     const hitTh = 0.25;
@@ -4891,6 +4405,12 @@ const game = {
   update(dt) {
     if (!this.currentScene) return;
 
+    // Gizmo mode toggles (avoid switching while typing in the inspector).
+    if (this._input && !this._isEditingInspector()) {
+      if (this._input.getKeyDown('r') || this._input.getKeyDown('R')) this._gizmo.mode = 'rotate';
+      if (this._input.getKeyDown('t') || this._input.getKeyDown('T')) this._gizmo.mode = 'translate';
+    }
+
     // Editor camera navigation (fallback cameras, plus 2D pan/zoom).
     this._updateEditorCamera(dt);
 
@@ -4980,17 +4500,24 @@ const game = {
       if (this.mode === '2d') {
         const p2 = this._get2DPos(obj);
         if (p2) {
-          // Translate gizmo (2D)
+          // Translate/Rotate gizmo (2D)
           const cam2 = /** @type {any} */ (this.currentScene?.camera || this.currentScene?.getObjectByName?.('MainCamera'));
           const zoom = cam2 ? (Number(cam2.zoom) || 1) : 1;
           const axisLen = 80 / zoom;
           const cX = (this._gizmo.active && this._gizmo.axis === 'x') ? [255, 180, 180, 255] : [255, 80, 80, 230];
           const cY = (this._gizmo.active && this._gizmo.axis === 'y') ? [180, 255, 180, 255] : [80, 255, 80, 230];
           const cC = (this._gizmo.active && this._gizmo.axis === 'center') ? [255, 255, 255, 255] : [255, 255, 255, 160];
-          dbg.drawLine(p2.x, p2.y, p2.x + axisLen, p2.y, cX, 3);
-          dbg.drawLine(p2.x, p2.y, p2.x, p2.y + axisLen, cY, 3);
-          const hs = 6 / zoom;
-          dbg.drawRect(p2.x - hs, p2.y - hs, hs * 2, hs * 2, cC, 2, false);
+
+          if (this._gizmo.mode === 'rotate' && this._get2DRot(obj) !== null) {
+            const ringR = 55 / zoom;
+            const ringC = (this._gizmo.active && this._gizmo.axis === 'rot') ? [255, 255, 180, 255] : [255, 255, 0, 200];
+            this._drawCircle2D(dbg, p2.x, p2.y, ringR, ringC, 2);
+          } else {
+            dbg.drawLine(p2.x, p2.y, p2.x + axisLen, p2.y, cX, 3);
+            dbg.drawLine(p2.x, p2.y, p2.x, p2.y + axisLen, cY, 3);
+            const hs = 6 / zoom;
+            dbg.drawRect(p2.x - hs, p2.y - hs, hs * 2, hs * 2, cC, 2, false);
+          }
 
           const size = 10;
           // Crosshair at position
@@ -5006,16 +4533,24 @@ const game = {
 
       // 3D debug (renders at end of 3D pass)
       if (this.mode === '3d' && typeof dbg.drawLine3D === 'function') {
-        const p = this._getWorldPos(obj);
+        const p = this._getGizmoPos3D(obj);
         if (p) {
-          // Translate gizmo (3D)
+          // Translate/Rotate gizmo (3D)
           const s = 1.2;
           const cX = (this._gizmo.active && this._gizmo.axis === 'x') ? [255, 180, 180, 255] : [255, 80, 80, 255];
           const cY = (this._gizmo.active && this._gizmo.axis === 'y') ? [180, 255, 180, 255] : [80, 255, 80, 255];
           const cZ = (this._gizmo.active && this._gizmo.axis === 'z') ? [180, 220, 255, 255] : [80, 160, 255, 255];
-          dbg.drawLine3D(p.x, p.y, p.z, p.x + s, p.y, p.z, cX, 2, depth);
-          dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y + s, p.z, cY, 2, depth);
-          dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y, p.z - s, cZ, 2, depth);
+
+          if (this._gizmo.mode === 'rotate' && this._canRotate3D(obj)) {
+            const ringR = 1.0;
+            this._drawCircle3D(dbg, p, ringR, 'x', cX, 2, depth);
+            this._drawCircle3D(dbg, p, ringR, 'y', cY, 2, depth);
+            this._drawCircle3D(dbg, p, ringR, 'z', cZ, 2, depth);
+          } else {
+            dbg.drawLine3D(p.x, p.y, p.z, p.x + s, p.y, p.z, cX, 2, depth);
+            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y + s, p.z, cY, 2, depth);
+            dbg.drawLine3D(p.x, p.y, p.z, p.x, p.y, p.z - s, cZ, 2, depth);
+          }
 
           if (ui.dbgShowAxes?.checked) {
             const s = 0.8;

@@ -25,6 +25,9 @@ export default class ClickableArea {
         this.y = 0;
         this.width = null;
         this.height = null;
+
+        // Radians. Currently not used for hit-testing.
+        this.rotation = 0;
         
         this.isHovered = false;
         this.isPressed = false;

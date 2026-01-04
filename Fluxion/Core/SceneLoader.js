@@ -397,6 +397,7 @@ export default class SceneLoader {
                     scene._skyboxXml = {
                         __xmlTag: 'Skybox',
                         color: child.getAttribute('color') || '',
+                        ambientColor: child.getAttribute('ambientColor') || '',
                         source: child.getAttribute('source') || child.getAttribute('src') || '',
                         equirectangular: (child.getAttribute('equirectangular') || '').toLowerCase() === 'true',
                         right: child.getAttribute('right') || '',
@@ -406,6 +407,14 @@ export default class SceneLoader {
                         front: child.getAttribute('front') || '',
                         back: child.getAttribute('back') || '',
                     };
+
+                    // Optional: allow Skybox to control PBR ambient color (u_ambientColor).
+                    // Stored as a color string; parsed into normalized 0..1 floats.
+                    const ambientAttr = child.getAttribute('ambientColor') || '';
+                    if (renderer && ambientAttr) {
+                        const c = this._parseColor(ambientAttr);
+                        renderer.pbrAmbientColor = [c[0], c[1], c[2]];
+                    }
                     const skybox = await this.parseSkybox(child, renderer, url);
                     if (skybox && renderer) {
                         renderer.setSkybox(skybox);
@@ -1117,6 +1126,7 @@ export default class SceneLoader {
      * Parses a Skybox element from XAML.
      * Supports:
      * - Solid color: <Skybox color="#RRGGBB" /> or <Skybox color="r,g,b" />
+    * - Ambient color (indirect/PBR): <Skybox ambientColor="#RRGGBB" /> (sets u_ambientColor)
      * - Cubemap: <Skybox right="..." left="..." top="..." bottom="..." front="..." back="..." />
      * - Equirectangular: <Skybox source="..." equirectangular="true" />
      * @param {Element} node - The XML element.

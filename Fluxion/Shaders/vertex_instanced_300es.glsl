@@ -10,6 +10,7 @@ in vec2 a_i_pos;
 in vec2 a_i_size;
 in vec4 a_i_uv;      // (u0, v0, u1, v1)
 in vec4 a_i_color;
+in float a_i_rot;
 
 uniform vec2 u_cameraPosition;
 uniform float u_cameraZoom;
@@ -23,7 +24,16 @@ void main() {
   v_color = a_i_color;
   v_texcoord = mix(a_i_uv.xy, a_i_uv.zw, a_texcoord);
 
-  vec2 spritePos = a_i_pos + (a_position * a_i_size);
+  // Object rotation around sprite center, then camera transform.
+  vec2 center = a_i_pos + (a_i_size * 0.5);
+  vec2 local = (a_position - vec2(0.5)) * a_i_size;
+  float cosO = cos(a_i_rot);
+  float sinO = sin(a_i_rot);
+  vec2 rotatedLocal = vec2(
+    local.x * cosO - local.y * sinO,
+    local.x * sinO + local.y * cosO
+  );
+  vec2 spritePos = center + rotatedLocal;
 
   float cosR = cos(u_cameraRotation);
   float sinR = sin(u_cameraRotation);

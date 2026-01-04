@@ -25,6 +25,8 @@ export default class Sprite {
         this.y = y;
         this.width = width;
         this.height = height;
+        // Radians, rotates around the sprite's center.
+        this.rotation = 0;
         this.frameWidth = frameWidth;
         this.frameHeight = frameHeight;
         this.useSpriteSheet = useSpriteSheet;
@@ -250,9 +252,9 @@ export default class Sprite {
                     this.currentFrame = (this.currentFrame + 1) % this.animation.frames.length;
                 }
                 const frame = this.animation.frames[this.currentFrame];
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height, this.color);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height, this.color, this.rotation);
             } else {
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color, this.rotation);
             }
         } else if (!this.useSpriteSheet) {
             // Handle multi-image animations (AnimatedSprite with image array)
@@ -273,12 +275,12 @@ export default class Sprite {
                         this.texture = frameTexture; // Cache for this frame
                     }
                     if (frameTexture) {
-                        this.renderer.drawQuad(frameTexture, this.x, this.y, this.width, this.height, this.color);
+                        this.renderer.drawQuad(frameTexture, this.x, this.y, this.width, this.height, this.color, this.rotation);
                     }
                 }
             } else if (this.texture) {
                 // Direct texture (used by Text class and other non-sprite-sheet sprites)
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color, this.rotation);
             }
         }
 

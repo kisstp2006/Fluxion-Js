@@ -8,7 +8,7 @@
  * - rendering + filtering + grouping
  * - UI event wiring (search, selection, group toggle, double click)
  *
- * Node instantiation stays in `game.js` (host provides `_add2DNodeByType`).
+ * Node instantiation stays in `game.js` (host provides `_addNodeByType`).
  */
 
 /**
@@ -34,11 +34,11 @@
  *  _addNodeRecent: string[],
  *  _closeTopbarMenus: () => void,
  *  _getProjectRenderEnableFlags: () => { allow2D: boolean, allow3D: boolean },
- *  _add2DNodeByType: (type: string) => void,
+ *  _addNodeByType: (type: string) => void,
  * }} AddNodeHost
  */
 
-/** @typedef {{id:string,label:string,group:string,description:string}} AddNodeEntry */
+/** @typedef {{id:string,label:string,group:string,kind:'2d'|'3d',description:string}} AddNodeEntry */
 
 /** @returns {AddNodeEntry[]} */
 export function getAddNodeRegistry() {
@@ -47,25 +47,59 @@ export function getAddNodeRegistry() {
       id: 'Sprite',
       label: 'Sprite',
       group: 'Node2D',
+      kind: '2d',
       description: 'Represents a 2D sprite object that can be rendered on the screen.',
     },
     {
       id: 'AnimatedSprite',
       label: 'AnimatedSprite',
       group: 'Node2D',
+      kind: '2d',
       description: 'A Sprite that supports animations (sprite sheets or multi-image animations).',
     },
     {
       id: 'ClickableArea',
       label: 'ClickableArea',
       group: 'Node2D',
+      kind: '2d',
       description: 'A clickable area that detects mouse interactions (typically attached to a parent Sprite).',
     },
     {
       id: 'Text',
       label: 'Text',
       group: 'Control',
+      kind: '2d',
       description: 'Text object rendered to a texture (editable text content, font size, and color).',
+    },
+
+    // 3D
+    {
+      id: 'MeshNode',
+      label: 'MeshNode',
+      group: 'Node3D',
+      kind: '3d',
+      description: 'A 3D scene node for rendering a primitive mesh (Cube/Sphere/etc).',
+    },
+    {
+      id: 'DirectionalLight',
+      label: 'DirectionalLight',
+      group: 'Light',
+      kind: '3d',
+      description: 'Directional (sun-like) light with direction, color, and intensity.',
+    },
+    {
+      id: 'PointLight',
+      label: 'PointLight',
+      group: 'Light',
+      kind: '3d',
+      description: 'Point light with position, color, intensity, and optional range cutoff.',
+    },
+    {
+      id: 'SpotLight',
+      label: 'SpotLight',
+      group: 'Light',
+      kind: '3d',
+      description: 'Spot light with position, direction, cone angles, intensity, and optional range cutoff.',
     },
   ];
 }
@@ -73,16 +107,17 @@ export function getAddNodeRegistry() {
 export function openAddNode(/** @type {AddNodeHost} */ host, /** @type {AddNodeUI} */ ui) {
   if (!ui.addNodeModal) return;
 
-  // Add Node currently creates only 2D nodes; disable when 2D is disabled for the project.
-  const { allow2D } = host._getProjectRenderEnableFlags();
-  if (!allow2D) return;
+  // Disable when neither 2D nor 3D are enabled.
+  const { allow2D, allow3D } = host._getProjectRenderEnableFlags();
+  if (!allow2D && !allow3D) return;
 
   host._addNodeOpen = true;
   ui.addNodeModal.hidden = false;
   host._closeTopbarMenus();
 
   // Reset selection and render the dialog.
-  host._addNodeSelectedId = host._addNodeSelectedId || 'Sprite';
+  const defaultId = allow2D ? 'Sprite' : 'MeshNode';
+  host._addNodeSelectedId = host._addNodeSelectedId || defaultId;
   renderAddNodeDialog(host, ui);
   ui.addNodeSearchInput?.focus();
 }
@@ -95,7 +130,14 @@ export function closeAddNode(/** @type {AddNodeHost} */ host, /** @type {AddNode
 
 export function renderAddNodeDialog(/** @type {AddNodeHost} */ host, /** @type {AddNodeUI} */ ui) {
   if (!host._addNodeOpen) return;
-  const reg = getAddNodeRegistry();
+  const { allow2D, allow3D } = host._getProjectRenderEnableFlags();
+  const regAll = getAddNodeRegistry();
+  const reg = regAll.filter((n) => (n.kind === '2d' ? allow2D : allow3D));
+
+  // Clamp selection to an allowed entry.
+  if (host._addNodeSelectedId && !reg.some((n) => n.id === host._addNodeSelectedId)) {
+    host._addNodeSelectedId = reg[0]?.id || null;
+  }
 
   const q = String(host._addNodeSearch || '').trim().toLowerCase();
   const filtered = q ? reg.filter(n => n.label.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)) : reg;
@@ -122,7 +164,7 @@ export function renderAddNodeDialog(/** @type {AddNodeHost} */ host, /** @type {
         host._addNodeSelectedId = id;
         renderAddNodeDialog(host, ui);
       });
-      row.addEventListener('dblclick', () => host._add2DNodeByType(id));
+      row.addEventListener('dblclick', () => host._addNodeByType(id));
       el.appendChild(row);
     }
   };
@@ -175,23 +217,48 @@ export function renderAddNodeDialog(/** @type {AddNodeHost} */ host, /** @type {
     };
 
     const expCanvas = !!host._addNodeExpanded.CanvasItem;
+    const expSpatial = !!host._addNodeExpanded.Spatial;
     const expNode2D = !!host._addNodeExpanded.Node2D;
     const expControl = !!host._addNodeExpanded.Control;
+    const expNode3D = !!host._addNodeExpanded.Node3D;
+    const expLight = !!host._addNodeExpanded.Light;
 
-    ui.addNodeMatches.appendChild(mkGroup('CanvasItem', 0, expCanvas));
+    if (allow2D) {
+      ui.addNodeMatches.appendChild(mkGroup('CanvasItem', 0, expCanvas));
 
-    if (expCanvas) {
-      ui.addNodeMatches.appendChild(mkGroup('Node2D', 1, expNode2D));
-      if (expNode2D) {
-        for (const n of filtered.filter(x => x.group === 'Node2D')) {
-          ui.addNodeMatches.appendChild(mkNode(n, 2));
+      if (expCanvas) {
+        ui.addNodeMatches.appendChild(mkGroup('Node2D', 1, expNode2D));
+        if (expNode2D) {
+          for (const n of filtered.filter(x => x.group === 'Node2D')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
+        }
+
+        ui.addNodeMatches.appendChild(mkGroup('Control', 1, expControl));
+        if (expControl) {
+          for (const n of filtered.filter(x => x.group === 'Control')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
         }
       }
+    }
 
-      ui.addNodeMatches.appendChild(mkGroup('Control', 1, expControl));
-      if (expControl) {
-        for (const n of filtered.filter(x => x.group === 'Control')) {
-          ui.addNodeMatches.appendChild(mkNode(n, 2));
+    if (allow3D) {
+      ui.addNodeMatches.appendChild(mkGroup('Spatial', 0, expSpatial));
+
+      if (expSpatial) {
+        ui.addNodeMatches.appendChild(mkGroup('Node3D', 1, expNode3D));
+        if (expNode3D) {
+          for (const n of filtered.filter(x => x.group === 'Node3D')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
+        }
+
+        ui.addNodeMatches.appendChild(mkGroup('Light', 1, expLight));
+        if (expLight) {
+          for (const n of filtered.filter(x => x.group === 'Light')) {
+            ui.addNodeMatches.appendChild(mkNode(n, 2));
+          }
         }
       }
     }
@@ -220,7 +287,7 @@ export function wireAddNodeUI(/** @type {AddNodeHost} */ host, /** @type {AddNod
   });
 
   ui.addNodeOkBtn?.addEventListener('click', () => {
-    if (host._addNodeSelectedId) host._add2DNodeByType(host._addNodeSelectedId);
+    if (host._addNodeSelectedId) host._addNodeByType(host._addNodeSelectedId);
   });
 
   // Search
@@ -231,7 +298,7 @@ export function wireAddNodeUI(/** @type {AddNodeHost} */ host, /** @type {AddNod
   ui.addNodeSearchInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (host._addNodeSelectedId) host._add2DNodeByType(host._addNodeSelectedId);
+      if (host._addNodeSelectedId) host._addNodeByType(host._addNodeSelectedId);
     }
   });
 
@@ -269,6 +336,6 @@ export function wireAddNodeUI(/** @type {AddNodeHost} */ host, /** @type {AddNod
     const row = t?.closest('[data-node-id]');
     const id = row?.getAttribute('data-node-id');
     if (!id || id.startsWith('group:')) return;
-    host._add2DNodeByType(id);
+    host._addNodeByType(id);
   });
 }
