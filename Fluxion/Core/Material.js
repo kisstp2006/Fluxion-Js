@@ -127,6 +127,9 @@ export default class Material {
       mat.alphaMode = Material._parseAlphaMode(data.alphaMode ?? data.alpha);
       mat.alphaCutoff = Material._parseNumber(data.alphaCutoff, mat.alphaCutoff);
 
+      // glTF-style packed metallic-roughness (roughness in G, metallic in B).
+      mat.metallicRoughnessPacked = !!(data.metallicRoughnessPacked);
+
       // Resolve relative paths against the material URL
       const base = new URL('.', url).toString();
       const resolvePath = (p) => {

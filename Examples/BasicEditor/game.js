@@ -303,6 +303,12 @@ const game = {
 
   _assetBrowserCtl: /** @type {ReturnType<typeof createAssetBrowser> | null} */ (null),
 
+  /**
+   * When set, the inspector shows a .mat asset editor instead of the scene selection.
+   * @type {{ pathRel: string, data: any|null, error: string|null, dirty: boolean, lastSaveOkT: number } | null}
+   */
+  _inspectorMatAsset: null,
+
   /** @type {string|null} */
   _scenePath: null,
 
@@ -1390,9 +1396,147 @@ const game = {
         ui,
         root: this._assetBrowser.root,
         onOpenFile: (pathRel) => this._tryOpenAssetFromBrowser(pathRel),
+        onSelectFile: (pathRel) => this._onAssetBrowserSelected(pathRel),
       });
     }
     this._assetBrowserCtl.init();
+  },
+
+  /** @param {string} pathRel */
+  async _onAssetBrowserSelected(pathRel) {
+    const p = String(pathRel || '').trim();
+    if (!p) {
+      if (this._inspectorMatAsset) {
+        this._inspectorMatAsset = null;
+        this.rebuildInspector();
+      }
+      return;
+    }
+
+    const lower = p.toLowerCase();
+    if (!lower.endsWith('.mat')) {
+      if (this._inspectorMatAsset) {
+        this._inspectorMatAsset = null;
+        this.rebuildInspector();
+      }
+      return;
+    }
+
+    // If we were editing a different .mat, flush pending edits first.
+    try {
+      const cur = this._inspectorMatAsset;
+      if (cur && cur.data && !cur.error && cur.dirty && String(cur.pathRel || '') !== p) {
+        // @ts-ignore
+        if (this._matAssetSaveTmr) clearTimeout(this._matAssetSaveTmr);
+        // @ts-ignore
+        this._matAssetSaveTmr = null;
+        await this._saveMatAssetNow();
+      }
+    } catch {}
+
+    await this._loadMatAssetForInspector(p);
+    this.rebuildInspector();
+  },
+
+  /** @param {string} pathRel */
+  async _loadMatAssetForInspector(pathRel) {
+    const p = String(pathRel || '').trim();
+    if (!p) return;
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canRead = !!(electronAPI && typeof electronAPI.readProjectTextFile === 'function');
+    if (!canRead) {
+      this._inspectorMatAsset = {
+        pathRel: p,
+        data: null,
+        error: 'Material asset editing requires the Electron editor (readProjectTextFile).',
+        dirty: false,
+        lastSaveOkT: 0,
+      };
+      return;
+    }
+
+    try {
+      const res = await electronAPI.readProjectTextFile(p);
+      if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'Failed to read file');
+
+      const raw = String(res.content || '');
+      const parsed = JSON.parse(raw);
+
+      /** @type {any} */
+      const data = (parsed && typeof parsed === 'object') ? parsed : {};
+
+      // Ensure common keys exist so the inspector always shows a useful form.
+      if (!('baseColorFactor' in data)) data.baseColorFactor = '#ffffffff';
+      if (!('metallicFactor' in data)) data.metallicFactor = 0.0;
+      if (!('roughnessFactor' in data)) data.roughnessFactor = 0.65;
+      if (!('normalScale' in data)) data.normalScale = 1.0;
+      if (!('aoStrength' in data)) data.aoStrength = 1.0;
+      if (!('emissiveFactor' in data)) data.emissiveFactor = [0, 0, 0];
+      if (!('alphaMode' in data)) data.alphaMode = 'OPAQUE';
+      if (!('alphaCutoff' in data)) data.alphaCutoff = 0.5;
+      if (!('metallicRoughnessPacked' in data)) data.metallicRoughnessPacked = false;
+      for (const k of ['baseColorTexture', 'metallicTexture', 'roughnessTexture', 'normalTexture', 'aoTexture', 'emissiveTexture', 'alphaTexture']) {
+        if (!(k in data)) data[k] = '';
+      }
+
+      this._inspectorMatAsset = { pathRel: p, data, error: null, dirty: false, lastSaveOkT: 0 };
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      this._inspectorMatAsset = {
+        pathRel: p,
+        data: null,
+        error: (err && err.message) ? String(err.message) : String(err),
+        dirty: false,
+        lastSaveOkT: 0,
+      };
+    }
+  },
+
+  _requestSaveMatAsset() {
+    const cur = this._inspectorMatAsset;
+    if (!cur || !cur.data || cur.error) return;
+    cur.dirty = true;
+
+    // Debounce saves while typing.
+    // @ts-ignore
+    if (this._matAssetSaveTmr) clearTimeout(this._matAssetSaveTmr);
+    // @ts-ignore
+    this._matAssetSaveTmr = setTimeout(() => {
+      this._saveMatAssetNow().catch(console.error);
+    }, 300);
+  },
+
+  async _saveMatAssetNow() {
+    const cur = this._inspectorMatAsset;
+    if (!cur || !cur.data || cur.error) return;
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canSave = !!(electronAPI && typeof electronAPI.getWorkspaceRoot === 'function' && typeof electronAPI.saveProjectFile === 'function');
+    if (!canSave) {
+      cur.error = 'Material asset saving requires the Electron editor (getWorkspaceRoot/saveProjectFile).';
+      return;
+    }
+
+    const rootRes = await electronAPI.getWorkspaceRoot();
+    if (!rootRes || !rootRes.ok || !rootRes.path) {
+      cur.error = `Failed to resolve workspace root: ${rootRes && rootRes.error ? rootRes.error : 'Unknown error'}`;
+      return;
+    }
+    const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
+    const cleanRel = String(cur.pathRel || '').replace(/^[.](?:\\|\/)?/, '').replace(/^\/+/,'').replace(/\\/g,'/');
+    const absPath = `${rootAbs}/${cleanRel}`;
+    const content = JSON.stringify(cur.data, null, 2) + '\n';
+
+    const res = await electronAPI.saveProjectFile(absPath, content);
+    if (!res || !res.ok) {
+      cur.error = res && res.error ? String(res.error) : 'Failed to save material.';
+      return;
+    }
+
+    cur.dirty = false;
+    cur.lastSaveOkT = 0.75;
+    this.rebuildInspector();
   },
 
   /** @param {string} pathRel */

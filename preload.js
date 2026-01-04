@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Simple script editor helpers
   readProjectTextFile: (relativePath) => ipcRenderer.invoke('read-project-text-file', relativePath),
+  readProjectBinaryFile: (relativePath) => ipcRenderer.invoke('read-project-binary-file', relativePath),
   writeProjectTextFile: (relativePath, content) => ipcRenderer.invoke('write-project-text-file', { relativePath, content }),
 
   // Import external OS files into the project workspace (editor workflow)

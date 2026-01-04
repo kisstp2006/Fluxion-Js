@@ -618,13 +618,37 @@ if (!gotTheLock) {
 
       const abs = resolveWorkspaceRelPath(rel);
       if (!abs) return { ok: false, error: 'Refusing to read outside workspace root.' };
-      if (!rel.toLowerCase().endsWith('.js')) return { ok: false, error: 'Only .js files are supported.' };
+      const lower = rel.toLowerCase();
+      const okText = lower.endsWith('.js') || lower.endsWith('.json') || lower.endsWith('.gltf') || lower.endsWith('.mat') || lower.endsWith('.xml') || lower.endsWith('.xaml') || lower.endsWith('.txt') || lower.endsWith('.md');
+      if (!okText) return { ok: false, error: 'Unsupported text file type.' };
 
       const st = await fs.promises.stat(abs);
       if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
 
       const content = await fs.promises.readFile(abs, 'utf8');
       return { ok: true, content: String(content ?? '') };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Read a binary file under the workspace root (base64 encoded payload).
+  // Intended for .glb inspection from the editor UI.
+  // relativePath: string
+  ipcMain.handle('read-project-binary-file', async (_event, relativePath) => {
+    try {
+      const rel = String(relativePath ?? '').replace(/^\/+/, '');
+      if (!rel) return { ok: false, error: 'No file path provided.' };
+
+      const abs = resolveWorkspaceRelPath(rel);
+      if (!abs) return { ok: false, error: 'Refusing to read outside workspace root.' };
+      if (!rel.toLowerCase().endsWith('.glb')) return { ok: false, error: 'Only .glb files are supported.' };
+
+      const st = await fs.promises.stat(abs);
+      if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
+
+      const buf = await fs.promises.readFile(abs);
+      return { ok: true, base64: buf.toString('base64') };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }

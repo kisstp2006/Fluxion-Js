@@ -16,11 +16,17 @@
  */
 
 /**
- * @param {{ ui: AssetBrowserUI, root?: string, onOpenFile?: ((pathRel: string) => (void | Promise<void>)) | null }} opts
+ * @param {{
+ *  ui: AssetBrowserUI,
+ *  root?: string,
+ *  onOpenFile?: ((pathRel: string) => (void | Promise<void>)) | null,
+ *  onSelectFile?: ((pathRel: string) => (void | Promise<void>)) | null,
+ * }} opts
  */
 export function createAssetBrowser(opts) {
   const ui = opts.ui;
   const onOpenFile = opts.onOpenFile || null;
+  const onSelectFile = opts.onSelectFile || null;
   const state = {
     root: String(opts.root || 'Model'),
     cwd: String(opts.root || 'Model'),
@@ -217,6 +223,200 @@ export function createAssetBrowser(opts) {
     // If we deleted the currently selected item, clear selection.
     if (state.selected === p) state.selected = null;
     render().catch(console.error);
+  }
+
+  /**
+   * Generate .mat files for a GLTF/GLB model based on its embedded material names and texture URIs.
+   * Writes files next to the model in the workspace.
+   * @param {string} modelRel
+   */
+  async function doGenerateMaterialsForModel(modelRel) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const canUse = !!(electronAPI && typeof electronAPI.getWorkspaceRoot === 'function' && typeof electronAPI.saveProjectFile === 'function');
+    if (!canUse) {
+      alert('Generate Materials is only available in the Electron editor.');
+      return;
+    }
+
+    const rel = _cleanRel(String(modelRel || ''));
+    if (!rel) return;
+    const lower = rel.toLowerCase();
+    const isGltf = lower.endsWith('.gltf');
+    const isGlb = lower.endsWith('.glb');
+    if (!isGltf && !isGlb) return;
+
+    const rootRes = await electronAPI.getWorkspaceRoot();
+    if (!rootRes || !rootRes.ok || !rootRes.path) {
+      alert(`Failed to resolve workspace root: ${rootRes && rootRes.error ? rootRes.error : 'Unknown error'}`);
+      return;
+    }
+    const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
+
+    /** @param {string} b64 */
+    const base64ToU8 = (b64) => {
+      const bin = atob(String(b64 || ''));
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff;
+      return out;
+    };
+
+    /** @param {Uint8Array} u8 */
+    const parseGlbJson = (u8) => {
+      // GLB v2: 12-byte header + chunk(s). We only need the JSON chunk.
+      if (!u8 || u8.length < 20) throw new Error('Invalid GLB (too small)');
+      const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+      const magic = dv.getUint32(0, true);
+      if (magic !== 0x46546c67) throw new Error('Invalid GLB magic');
+      const version = dv.getUint32(4, true);
+      if (version !== 2) throw new Error(`Unsupported GLB version: ${version}`);
+      // First chunk header
+      const chunkLen = dv.getUint32(12, true);
+      const chunkType = dv.getUint32(16, true);
+      // 'JSON'
+      if (chunkType !== 0x4e4f534a) throw new Error('Missing JSON chunk');
+      const start = 20;
+      const end = start + chunkLen;
+      if (end > u8.length) throw new Error('Invalid GLB chunk length');
+      const jsonBytes = u8.slice(start, end);
+      const text = new TextDecoder('utf-8').decode(jsonBytes);
+      return text;
+    };
+
+    /** @param {string} name */
+    const safeFileStem = (name) => {
+      const s = String(name || '').trim() || 'Material';
+      return s.replace(/[^a-zA-Z0-9_\-]+/g, '_').replace(/^_+/, '').replace(/_+$/, '') || 'Material';
+    };
+
+    /** @param {any} gltf @param {number} texIndex */
+    const getImageUriForTexture = (gltf, texIndex) => {
+      if (!gltf || !Array.isArray(gltf.textures) || !Array.isArray(gltf.images)) return null;
+      const tex = gltf.textures[texIndex | 0];
+      if (!tex) return null;
+      const src = (tex.source ?? tex.image ?? null);
+      const img = (typeof src === 'number') ? gltf.images[src] : null;
+      if (!img) return null;
+      const uri = String(img.uri || '').trim();
+      if (!uri) return null;
+      if (/^data:/i.test(uri)) return null;
+      if (/^[a-zA-Z]+:/.test(uri)) return uri;
+      // normalize absolute-ish paths to project-relative
+      if (uri.startsWith('/')) return uri.replace(/^\/+/, '');
+      return uri;
+    };
+
+    let gltf;
+    try {
+      if (isGltf) {
+        if (!electronAPI || typeof electronAPI.readProjectTextFile !== 'function') {
+          alert('readProjectTextFile is not available.');
+          return;
+        }
+        const res = await electronAPI.readProjectTextFile(rel);
+        if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'Failed to read glTF');
+        gltf = JSON.parse(String(res.content || ''));
+      } else {
+        if (!electronAPI || typeof electronAPI.readProjectBinaryFile !== 'function') {
+          alert('readProjectBinaryFile is not available.');
+          return;
+        }
+        const res = await electronAPI.readProjectBinaryFile(rel);
+        if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'Failed to read GLB');
+        const u8 = base64ToU8(String(res.base64 || ''));
+        const jsonText = parseGlbJson(u8);
+        gltf = JSON.parse(String(jsonText || ''));
+      }
+    } catch (e) {
+      const err = /** @type {any} */ (e);
+      alert(`Failed to parse model: ${err && err.message ? err.message : err}`);
+      return;
+    }
+
+    const materials = Array.isArray(gltf?.materials) ? gltf.materials : [];
+    if (materials.length === 0) {
+      alert('No materials found in this model.');
+      return;
+    }
+
+    const modelBase = safeFileStem(_basename(rel).replace(/\.[^.]+$/, ''));
+    const outDirRel = _dirname(rel);
+
+    /** @type {string[]} */
+    const created = [];
+
+    for (let i = 0; i < materials.length; i++) {
+      const m = materials[i] || {};
+      const matName = String(m.name || `Material_${i}`);
+      const stem = safeFileStem(`${modelBase}__${matName}`);
+
+      const pbr = (m.pbrMetallicRoughness && typeof m.pbrMetallicRoughness === 'object') ? m.pbrMetallicRoughness : {};
+
+      /** @type {any} */
+      const out = {
+        baseColorFactor: Array.isArray(pbr.baseColorFactor) ? pbr.baseColorFactor : [1, 1, 1, 1],
+        metallicFactor: (typeof pbr.metallicFactor === 'number') ? pbr.metallicFactor : 1.0,
+        roughnessFactor: (typeof pbr.roughnessFactor === 'number') ? pbr.roughnessFactor : 1.0,
+      };
+
+      if (Array.isArray(m.emissiveFactor)) out.emissiveFactor = m.emissiveFactor;
+      if (typeof m.alphaMode === 'string' && m.alphaMode) out.alphaMode = String(m.alphaMode).toUpperCase();
+      if (typeof m.alphaCutoff === 'number') out.alphaCutoff = m.alphaCutoff;
+
+      // Textures
+      const baseColorTex = pbr?.baseColorTexture?.index;
+      if (typeof baseColorTex === 'number') {
+        const uri = getImageUriForTexture(gltf, baseColorTex);
+        if (uri) out.baseColorTexture = uri;
+      }
+
+      const mrTex = pbr?.metallicRoughnessTexture?.index;
+      if (typeof mrTex === 'number') {
+        const uri = getImageUriForTexture(gltf, mrTex);
+        if (uri) {
+          out.metallicTexture = uri;
+          out.roughnessTexture = uri;
+          out.metallicRoughnessPacked = true;
+        }
+      }
+
+      const normalTex = m?.normalTexture?.index;
+      if (typeof normalTex === 'number') {
+        const uri = getImageUriForTexture(gltf, normalTex);
+        if (uri) out.normalTexture = uri;
+        if (typeof m?.normalTexture?.scale === 'number') out.normalScale = m.normalTexture.scale;
+      }
+
+      const aoTex = m?.occlusionTexture?.index;
+      if (typeof aoTex === 'number') {
+        const uri = getImageUriForTexture(gltf, aoTex);
+        if (uri) out.aoTexture = uri;
+        if (typeof m?.occlusionTexture?.strength === 'number') out.aoStrength = m.occlusionTexture.strength;
+      }
+
+      const emTex = m?.emissiveTexture?.index;
+      if (typeof emTex === 'number') {
+        const uri = getImageUriForTexture(gltf, emTex);
+        if (uri) out.emissiveTexture = uri;
+      }
+
+      const filename = await _pickUniqueName(outDirRel || '.', stem, '.mat');
+      const relPath = outDirRel ? `${outDirRel}/${filename}` : filename;
+      const absPath = `${rootAbs}/${_cleanRel(relPath)}`;
+
+      const content = JSON.stringify(out, null, 2) + '\n';
+      const saveRes = await electronAPI.saveProjectFile(absPath, content);
+      if (!saveRes || !saveRes.ok) {
+        alert(saveRes && saveRes.error ? saveRes.error : `Failed to save: ${relPath}`);
+        continue;
+      }
+      created.push(relPath);
+    }
+
+    if (created.length === 0) return;
+    state.selected = created[0];
+    state.selectedIsDir = false;
+    await render();
+    alert(`Generated ${created.length} material(s) next to the model.`);
   }
 
   /** @param {string} dirRel */
@@ -574,9 +774,20 @@ export function createAssetBrowser(opts) {
     ctx.menu.innerHTML = '';
 
     const hasTarget = !!targetPath;
+
+    const targetLower = String(targetPath || '').toLowerCase();
+    const isModel = hasTarget && !targetIsDir && (targetLower.endsWith('.gltf') || targetLower.endsWith('.glb'));
     addMenuItem({ label: 'Open', enabled: hasTarget, onClick: hasTarget ? doOpenItem : null });
     addMenuItem({ label: 'Open in External Editor', enabled: hasTarget, onClick: hasTarget ? doOpenExternal : null });
     addMenuItem({ label: 'Open in File Explorer', enabled: hasTarget, onClick: hasTarget ? doRevealInExplorer : null });
+    if (isModel) {
+      addMenuSep();
+      addMenuItem({
+        label: 'Generate Materials (.mat)',
+        enabled: true,
+        onClick: () => doGenerateMaterialsForModel(String(targetPath || '')),
+      });
+    }
     addMenuSep();
     addMenuItem({ label: 'Copy', enabled: hasTarget, onClick: hasTarget ? doCopy : null });
     addMenuItem({ label: 'Paste', enabled: !!state.clipboard, onClick: state.clipboard ? doPaste : null });
@@ -656,6 +867,15 @@ export function createAssetBrowser(opts) {
     // Single-click selects only. Double-click opens.
     state.selected = p;
     state.selectedIsDir = !!isDir;
+
+    // Allow host/editor to react to asset selection (e.g. show .mat properties).
+    if (!isDir && onSelectFile) {
+      try {
+        await onSelectFile(p);
+      } catch (err) {
+        console.error(err);
+      }
+    }
     render().catch(console.error);
   }
 

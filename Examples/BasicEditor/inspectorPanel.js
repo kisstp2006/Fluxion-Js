@@ -314,6 +314,109 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
 /** @param {any} host @param {InspectorUI} ui */
 export function rebuildInspector(host, ui) {
+  const matAsset = /** @type {any} */ (host?._inspectorMatAsset || null);
+  if (matAsset && typeof matAsset === 'object' && typeof matAsset.pathRel === 'string' && matAsset.pathRel) {
+    const pathRel = String(matAsset.pathRel || '');
+    const base = (() => {
+      const s = String(pathRel || '').replace(/\\/g, '/');
+      const i = s.lastIndexOf('/');
+      return i >= 0 ? s.slice(i + 1) : s;
+    })();
+
+    if (ui.inspectorSubtitle) ui.inspectorSubtitle.textContent = base || 'Material';
+    if (ui.common) ui.common.innerHTML = '';
+    if (ui.transform) ui.transform.innerHTML = '';
+
+    InspectorFields.addReadonly(ui.common, 'type', 'Material Asset (.mat)');
+    InspectorFields.addReadonly(ui.common, 'path', pathRel);
+
+    const err = (matAsset.error != null) ? String(matAsset.error || '') : '';
+    if (err) {
+      InspectorFields.addReadonly(ui.common, 'error', err);
+      return;
+    }
+
+    const isDirty = !!matAsset.dirty;
+    const status = isDirty ? 'Unsaved…' : (matAsset.lastSaveOkT > 0 ? 'Saved' : '');
+    if (status) InspectorFields.addReadonly(ui.common, 'status', status);
+
+    const data = (matAsset.data && typeof matAsset.data === 'object') ? matAsset.data : null;
+    if (!data) {
+      InspectorFields.addReadonly(ui.common, 'error', 'No material data loaded.');
+      return;
+    }
+
+    const requestSave = () => {
+      try {
+        if (typeof host._requestSaveMatAsset === 'function') host._requestSaveMatAsset();
+      } catch {}
+    };
+
+    /**
+     * @param {HTMLElement | null} container
+     * @param {string} label
+     * @param {any} obj
+     * @param {string} key
+     */
+    const addVec3ArrayWith = (container, label, obj, key) => {
+      if (!container || !obj || !(key in obj)) return;
+      const arr = obj[key];
+      if (!Array.isArray(arr) || arr.length < 3) return;
+
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.gap = '6px';
+
+      /** @param {number} i */
+      const make = (i) => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.01';
+        input.value = String(Number(arr[i]) || 0);
+        input.style.width = '80px';
+        const apply = () => {
+          const v = Number(input.value);
+          if (!Number.isFinite(v)) return;
+          arr[i] = v;
+          requestSave();
+        };
+        input.addEventListener('input', apply);
+        input.addEventListener('change', apply);
+        return input;
+      };
+
+      wrap.appendChild(make(0));
+      wrap.appendChild(make(1));
+      wrap.appendChild(make(2));
+      InspectorFields.addField(container, label, wrap);
+    };
+
+    // Scalars / enums / booleans
+    InspectorFields.addAutoWith(ui.common, 'baseColorFactor', data, 'baseColorFactor', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'metallicFactor', data, 'metallicFactor', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'roughnessFactor', data, 'roughnessFactor', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'normalScale', data, 'normalScale', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'aoStrength', data, 'aoStrength', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'alphaMode', data, 'alphaMode', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'alphaCutoff', data, 'alphaCutoff', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'metallicRoughnessPacked', data, 'metallicRoughnessPacked', requestSave);
+
+    // Vec3
+    addVec3ArrayWith(ui.common, 'emissiveFactor', data, 'emissiveFactor');
+
+    // Textures
+    const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
+    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', data, 'baseColorTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', data, 'metallicTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', data, 'roughnessTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', data, 'normalTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', data, 'aoTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', data, 'emissiveTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', data, 'alphaTexture', requestSave, texOpts);
+
+    return;
+  }
+
   const obj = host.selected;
 
   if (ui.inspectorSubtitle) {
