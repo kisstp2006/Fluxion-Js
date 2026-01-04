@@ -66,6 +66,17 @@ function writeFile(filePath, content) {
   fs.writeFileSync(filePath, String(content ?? ''), 'utf8');
 }
 
+function safeProjectFilenameFromName(name) {
+  const base = String(name || '').trim() || 'MyGame';
+  // Windows-safe filename characters; keep it simple.
+  const cleaned = base
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/\.+$/g, '');
+  const out = cleaned || 'MyGame';
+  return out.length > 64 ? out.slice(0, 64) : out;
+}
+
 let mainWindow;
 const iconPath = "./Fluxion/Icon/Fluxion_icon.ico";
 
@@ -537,8 +548,23 @@ if (!gotTheLock) {
 
       writeFile(path.join(targetDir, 'preload.js'), `const { contextBridge } = require('electron');\n\ncontextBridge.exposeInMainWorld('fluxionProject', {\n  name: ${JSON.stringify(name)},\n});\n`);
 
+      const engine = readFluxionEngineVersion();
+
       writeFile(path.join(targetDir, 'fluxion.project.json'), JSON.stringify({
         name,
+        creator: '',
+        resolution: { width: 1280, height: 720 },
+        engineVersion: String(engine && engine.version ? engine.version : ''),
+        mainScene: './scene.xml'
+      }, null, 2) + '\n');
+
+      // New project descriptor format (JSON content, .flux extension)
+      const fluxName = safeProjectFilenameFromName(name) + '.flux';
+      writeFile(path.join(targetDir, fluxName), JSON.stringify({
+        name,
+        creator: '',
+        resolution: { width: 1280, height: 720 },
+        engineVersion: String(engine && engine.version ? engine.version : ''),
         mainScene: './scene.xml'
       }, null, 2) + '\n');
 

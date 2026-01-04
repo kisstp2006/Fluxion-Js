@@ -22,6 +22,7 @@
           <button class="menuItem" type="button" role="menuitem" data-action="file.createProject">Create Project...</button>
           <button class="menuItem" type="button" role="menuitem" data-action="file.openProject">Open Project...</button>
           <button class="menuItem" type="button" role="menuitem" data-action="file.openFolder">Open Folder...</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.settings">Editor Settings...</button>
           <div class="menuSep" role="separator" aria-hidden="true"></div>
           <button class="menuItem" type="button" role="menuitem" data-action="file.saveScene">Save Scene (Ctrl+S)</button>
           <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
@@ -132,15 +133,30 @@
       </aside>
     </div>
 
-    <footer class="assetBrowser" aria-label="Asset Browser">
+    <footer class="assetBrowser" aria-label="Bottom Panel">
       <div class="assetHeader">
-        <div class="assetTitle">Assets</div>
-        <button id="assetUpBtn" class="assetToolBtn" type="button">Up</button>
-        <div id="assetPath" class="assetPath">.</div>
+        <div class="assetTabs" role="tablist" aria-label="Bottom Panel Tabs">
+          <button id="assetTabAssetsBtn" class="assetTabBtn active" type="button" role="tab" aria-selected="true">Assets</button>
+          <button id="assetTabConsoleBtn" class="assetTabBtn" type="button" role="tab" aria-selected="false">Console</button>
+        </div>
+
+        <div class="assetHeaderSpacer" aria-hidden="true"></div>
+
+        <div id="assetHeaderAssetsTools" class="assetHeaderTools">
+          <button id="assetUpBtn" class="assetToolBtn" type="button">Up</button>
+          <div id="assetPath" class="assetPath">.</div>
+        </div>
+
+        <div id="assetHeaderConsoleTools" class="assetHeaderTools" hidden></div>
       </div>
-      <div class="assetBody">
+
+      <div id="assetPanelAssets" class="assetBody" aria-label="Asset Browser">
         <div id="assetFolders" class="assetFolders" aria-label="Asset Folders"></div>
         <div id="assetGrid" class="assetGrid" aria-label="Asset Items"></div>
+      </div>
+
+      <div id="assetPanelConsole" class="consoleBody" aria-label="Console" hidden>
+        <div id="consoleOutput" class="consoleOutput" aria-label="Console Output"></div>
       </div>
     </footer>
   </div>
@@ -153,6 +169,9 @@
       <div class="modalBody">
         <div class="aboutName">Fluxion</div>
         <div class="aboutMeta">Select or create a project to continue.</div>
+
+        <div class="sectionTitle" style="margin-top: 14px;">Recent Projects</div>
+        <div id="projectSelectRecentList" class="recentProjects" aria-label="Recent Projects"></div>
 
         <div class="row" style="margin-top: 14px;">
           <button id="projectSelectCreateBtn" class="btn" type="button">Create Project...</button>
@@ -177,6 +196,36 @@
         <textarea id="aboutVersionsText" class="input" rows="7" readonly spellcheck="false" style="resize: vertical;"></textarea>
         <div class="row" style="margin-top: 8px;">
           <button id="aboutCopyBtn" class="btn" type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="editorSettingsModal" class="modalBackdrop" hidden>
+    <div class="modal modalSettings" role="dialog" aria-modal="true" aria-labelledby="editorSettingsTitle">
+      <div class="modalHeader">
+        <div id="editorSettingsTitle" class="modalTitle">Editor Settings</div>
+        <button id="editorSettingsCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody modalBodySettings">
+        <div class="settingsTop">
+          <div class="settingsFilterRow" aria-label="Filter Settings">
+            <div class="settingsFilterLabel">Filter Settings</div>
+            <input id="editorSettingsFilterInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <div class="settingsMain">
+          <div id="editorSettingsNav" class="settingsNav" role="listbox" aria-label="Settings Categories">
+            <button id="editorSettingsCatGeneral" class="settingsNavItem active" type="button" data-cat="general" aria-selected="true">General</button>
+            <button id="editorSettingsCatGrid2D" class="settingsNavItem" type="button" data-cat="grid2d" aria-selected="false">2D Grid</button>
+            <button id="editorSettingsCatGrid3D" class="settingsNavItem" type="button" data-cat="grid3d" aria-selected="false">3D Grid</button>
+          </div>
+
+          <div class="settingsPanel" aria-label="Settings Panel">
+            <div id="editorSettingsSectionTitle" class="sectionTitle">General</div>
+            <div id="editorSettingsForm" class="form"></div>
+          </div>
         </div>
       </div>
     </div>

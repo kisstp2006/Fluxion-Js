@@ -24,6 +24,27 @@ function writeFile(filePath, content) {
   fs.writeFileSync(filePath, content, 'utf8');
 }
 
+function safeProjectFilenameFromName(name) {
+  const base = String(name || '').trim() || 'MyGame';
+  const cleaned = base
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/\.+$/g, '');
+  const out = cleaned || 'MyGame';
+  return out.length > 64 ? out.slice(0, 64) : out;
+}
+
+function readEngineVersion(engineRoot) {
+  try {
+    const p = path.join(String(engineRoot || ''), 'Fluxion', 'version.py');
+    const txt = fs.readFileSync(p, 'utf8');
+    const m = /^\s*VERSION\s*=\s*"([^"]*)"/m.exec(txt);
+    return m ? String(m[1] || '') : '';
+  } catch {
+    return '';
+  }
+}
+
 /** @param {string} dir */
 function isEmptyDir(dir) {
   if (!fs.existsSync(dir)) return true;
@@ -74,6 +95,8 @@ function main() {
   const relEngine = path.relative(targetDir, engineRoot) || '.';
   const engineDep = `file:${normSlashes(relEngine)}`;
 
+  const engineVersion = readEngineVersion(engineRoot);
+
   ensureDir(targetDir);
 
   // Files
@@ -103,6 +126,18 @@ function main() {
 
   writeFile(path.join(targetDir, 'fluxion.project.json'), JSON.stringify({
     name: projectName,
+    creator: '',
+    resolution: { width: 1280, height: 720 },
+    engineVersion,
+    mainScene: './scene.xml',
+  }, null, 2) + '\n');
+
+  const fluxName = safeProjectFilenameFromName(projectName) + '.flux';
+  writeFile(path.join(targetDir, fluxName), JSON.stringify({
+    name: projectName,
+    creator: '',
+    resolution: { width: 1280, height: 720 },
+    engineVersion,
     mainScene: './scene.xml',
   }, null, 2) + '\n');
 

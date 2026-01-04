@@ -18,6 +18,15 @@ const ui = {
   aboutCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   aboutVersionsText: /** @type {HTMLTextAreaElement|null} */ (null),
   aboutCopyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  editorSettingsModal: /** @type {HTMLDivElement|null} */ (null),
+  editorSettingsCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
+  editorSettingsFilterInput: /** @type {HTMLInputElement|null} */ (null),
+  editorSettingsNav: /** @type {HTMLDivElement|null} */ (null),
+  editorSettingsSectionTitle: /** @type {HTMLDivElement|null} */ (null),
+  editorSettingsForm: /** @type {HTMLDivElement|null} */ (null),
+  editorSettingsCatGeneral: /** @type {HTMLButtonElement|null} */ (null),
+  editorSettingsCatGrid2D: /** @type {HTMLButtonElement|null} */ (null),
+  editorSettingsCatGrid3D: /** @type {HTMLButtonElement|null} */ (null),
   animSpriteModal: /** @type {HTMLDivElement|null} */ (null),
   animSpriteCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   animSpriteSubtitle: /** @type {HTMLDivElement|null} */ (null),
@@ -40,6 +49,7 @@ const ui = {
   projectSelectCreateBtn: /** @type {HTMLButtonElement|null} */ (null),
   projectSelectOpenBtn: /** @type {HTMLButtonElement|null} */ (null),
   projectSelectOpenLegacyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  projectSelectRecentList: /** @type {HTMLDivElement|null} */ (null),
   addNodeModal: /** @type {HTMLDivElement|null} */ (null),
   addNodeCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   addNodeSearchInput: /** @type {HTMLInputElement|null} */ (null),
@@ -51,6 +61,13 @@ const ui = {
   assetPath: /** @type {HTMLDivElement|null} */ (null),
   assetFolders: /** @type {HTMLDivElement|null} */ (null),
   assetGrid: /** @type {HTMLDivElement|null} */ (null),
+  assetTabAssetsBtn: /** @type {HTMLButtonElement|null} */ (null),
+  assetTabConsoleBtn: /** @type {HTMLButtonElement|null} */ (null),
+  assetHeaderAssetsTools: /** @type {HTMLDivElement|null} */ (null),
+  assetHeaderConsoleTools: /** @type {HTMLDivElement|null} */ (null),
+  assetPanelAssets: /** @type {HTMLDivElement|null} */ (null),
+  assetPanelConsole: /** @type {HTMLDivElement|null} */ (null),
+  consoleOutput: /** @type {HTMLDivElement|null} */ (null),
   mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
   mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
   tree: /** @type {HTMLDivElement|null} */ (null),
@@ -131,7 +148,38 @@ const game = {
 
   _aboutOpen: false,
 
+  _editorSettingsOpen: false,
+
+  _editorSettingsCategory: /** @type {'general'|'grid2d'|'grid3d'} */ ('general'),
+  _editorSettingsFilter: '',
+
+  _editorSettings: /** @type {{
+    general: { showHelpOverlay: boolean },
+    grid2d: { enabled: boolean, baseMinor: number, majorMultiplier: number, minGridPx: number, maxGridLines: number, showAxes: boolean },
+    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean }
+  }} */ ({
+    general: { showHelpOverlay: true },
+    grid2d: { enabled: true, baseMinor: 32, majorMultiplier: 2, minGridPx: 10, maxGridLines: 240, showAxes: true },
+    grid3d: { enabled: true, autoScale: true, minor: 1, majorMultiplier: 5, halfSpan: 50, showAxes: true },
+  }),
+
   _projectSelectOpen: false,
+
+  /** @type {{ path: string, legacy: boolean, t: number }[]} */
+  _recentProjects: [],
+  _recentProjectsMax: 10,
+
+  /** @type {{ name: string, creator: string, resolution: { width: number, height: number }, engineVersion: string, enable2D?: boolean, enable3D?: boolean } | null} */
+  _projectMeta: null,
+  /** @type {string[]} */
+  _projectMetaFiles: [],
+  _projectMetaSaveT: 0,
+
+  /** @type {'assets'|'console'} */
+  _bottomTab: 'assets',
+
+  _consoleCaptureInstalled: false,
+  _consoleMaxLines: 500,
 
   _addNodeOpen: false,
   _addNodeSearch: '',
@@ -215,6 +263,16 @@ const game = {
     ui.aboutVersionsText = /** @type {HTMLTextAreaElement} */ (document.getElementById('aboutVersionsText'));
     ui.aboutCopyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('aboutCopyBtn'));
 
+    ui.editorSettingsModal = /** @type {HTMLDivElement} */ (document.getElementById('editorSettingsModal'));
+    ui.editorSettingsCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCloseBtn'));
+    ui.editorSettingsFilterInput = /** @type {HTMLInputElement} */ (document.getElementById('editorSettingsFilterInput'));
+    ui.editorSettingsNav = /** @type {HTMLDivElement} */ (document.getElementById('editorSettingsNav'));
+    ui.editorSettingsSectionTitle = /** @type {HTMLDivElement} */ (document.getElementById('editorSettingsSectionTitle'));
+    ui.editorSettingsForm = /** @type {HTMLDivElement} */ (document.getElementById('editorSettingsForm'));
+    ui.editorSettingsCatGeneral = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGeneral'));
+    ui.editorSettingsCatGrid2D = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGrid2D'));
+    ui.editorSettingsCatGrid3D = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGrid3D'));
+
     ui.animSpriteModal = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteModal'));
     ui.animSpriteCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteCloseBtn'));
     ui.animSpriteSubtitle = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteSubtitle'));
@@ -238,6 +296,7 @@ const game = {
     ui.projectSelectCreateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectCreateBtn'));
     ui.projectSelectOpenBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectOpenBtn'));
     ui.projectSelectOpenLegacyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectOpenLegacyBtn'));
+    ui.projectSelectRecentList = /** @type {HTMLDivElement} */ (document.getElementById('projectSelectRecentList'));
 
     ui.addNodeModal = /** @type {HTMLDivElement} */ (document.getElementById('addNodeModal'));
     ui.addNodeCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('addNodeCloseBtn'));
@@ -250,9 +309,17 @@ const game = {
     ui.assetPath = /** @type {HTMLDivElement} */ (document.getElementById("assetPath"));
     ui.assetFolders = /** @type {HTMLDivElement} */ (document.getElementById("assetFolders"));
     ui.assetGrid = /** @type {HTMLDivElement} */ (document.getElementById("assetGrid"));
+    ui.assetTabAssetsBtn = /** @type {HTMLButtonElement} */ (document.getElementById('assetTabAssetsBtn'));
+    ui.assetTabConsoleBtn = /** @type {HTMLButtonElement} */ (document.getElementById('assetTabConsoleBtn'));
+    ui.assetHeaderAssetsTools = /** @type {HTMLDivElement} */ (document.getElementById('assetHeaderAssetsTools'));
+    ui.assetHeaderConsoleTools = /** @type {HTMLDivElement} */ (document.getElementById('assetHeaderConsoleTools'));
+    ui.assetPanelAssets = /** @type {HTMLDivElement} */ (document.getElementById('assetPanelAssets'));
+    ui.assetPanelConsole = /** @type {HTMLDivElement} */ (document.getElementById('assetPanelConsole'));
+    ui.consoleOutput = /** @type {HTMLDivElement} */ (document.getElementById('consoleOutput'));
 
     // Ensure About starts closed.
     if (ui.aboutModal) ui.aboutModal.hidden = true;
+    if (ui.editorSettingsModal) ui.editorSettingsModal.hidden = true;
     if (ui.animSpriteModal) ui.animSpriteModal.hidden = true;
     // Ensure Create Project starts closed.
     if (ui.createProjectModal) ui.createProjectModal.hidden = true;
@@ -273,8 +340,21 @@ const game = {
     ui.dbgShowAabb = /** @type {HTMLInputElement} */ (document.getElementById("dbgShowAabb"));
     ui.dbgDepthTest = /** @type {HTMLInputElement} */ (document.getElementById("dbgDepthTest"));
 
+    // Load editor settings (best-effort) and apply immediately.
+    this._loadEditorSettingsFromStorage();
+    this._helpVisible = !!this._editorSettings.general.showHelpOverlay;
+    if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
+
     // Avoid inspector auto-refresh fighting clicks.
     this._setupInspectorInteractionGuards();
+
+    // Bottom panel tabs
+    ui.assetTabAssetsBtn?.addEventListener('click', () => this._setBottomTab('assets'));
+    ui.assetTabConsoleBtn?.addEventListener('click', () => this._setBottomTab('console'));
+    this._setBottomTab('assets');
+
+    // Capture logs into the Console tab
+    this._installEditorConsoleCapture();
 
     ui.topReloadBtn?.addEventListener("click", () => {
       window.location.reload();
@@ -287,6 +367,24 @@ const game = {
     ui.aboutModal?.addEventListener('mousedown', (e) => {
       // Click outside the dialog closes.
       if (e.target === ui.aboutModal) this._closeAbout();
+    });
+
+    // Editor Settings modal close behavior
+    ui.editorSettingsCloseBtn?.addEventListener('click', () => this._closeEditorSettings());
+    ui.editorSettingsModal?.addEventListener('mousedown', (e) => {
+      if (e.target === ui.editorSettingsModal) this._closeEditorSettings();
+    });
+    ui.editorSettingsNav?.addEventListener('click', (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const btn = /** @type {HTMLButtonElement|null} */ (t?.closest('button[data-cat]') || null);
+      const cat = /** @type {any} */ (btn?.getAttribute('data-cat'));
+      if (cat !== 'general' && cat !== 'grid2d' && cat !== 'grid3d') return;
+      this._editorSettingsCategory = cat;
+      this._rebuildEditorSettingsUI();
+    });
+    ui.editorSettingsFilterInput?.addEventListener('input', () => {
+      this._editorSettingsFilter = String(ui.editorSettingsFilterInput?.value || '');
+      this._applyEditorSettingsFilter();
     });
 
     // Add Node modal close behavior
@@ -306,7 +404,12 @@ const game = {
     });
 
     ui.addNodeMatches?.addEventListener('click', (e) => {
-      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const rawT = /** @type {any} */ (e.target);
+      const t = /** @type {HTMLElement|null} */ (
+        rawT instanceof HTMLElement
+          ? rawT
+          : (rawT && rawT.parentElement instanceof HTMLElement ? rawT.parentElement : null)
+      );
       const row = t?.closest('[data-node-id]');
       const id = row?.getAttribute('data-node-id');
       if (!id) return;
@@ -325,7 +428,12 @@ const game = {
     });
 
     ui.addNodeMatches?.addEventListener('dblclick', (e) => {
-      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      const rawT = /** @type {any} */ (e.target);
+      const t = /** @type {HTMLElement|null} */ (
+        rawT instanceof HTMLElement
+          ? rawT
+          : (rawT && rawT.parentElement instanceof HTMLElement ? rawT.parentElement : null)
+      );
       const row = t?.closest('[data-node-id]');
       const id = row?.getAttribute('data-node-id');
       if (!id || id.startsWith('group:')) return;
@@ -403,6 +511,7 @@ const game = {
         if (this._createProjectDialog?.isOpen()) this._createProjectDialog.cancel();
         else if (this._animSpriteOpen) this._closeAnimSpriteEditor();
         else if (this._addNodeOpen) this._closeAddNode();
+        else if (this._editorSettingsOpen) this._closeEditorSettings();
         else if (this._aboutOpen) this._closeAbout();
         else this._closeTopbarMenus();
       }
@@ -419,16 +528,135 @@ const game = {
     // Ensure renderer layer visibility matches the default mode.
     this._applyRenderLayers();
 
+    // Apply project mode availability (mode buttons + mode clamping).
+    this._applyModeAvailability();
+
     await this.loadSelectedScene(renderer);
 
     // Show the startup project selection screen when the editor launches.
     this._openProjectSelect();
   },
 
+  /** @param {'assets'|'console'} tab */
+  _setBottomTab(tab) {
+    this._bottomTab = tab;
+    const isAssets = tab === 'assets';
+
+    if (ui.assetTabAssetsBtn) {
+      ui.assetTabAssetsBtn.classList.toggle('active', isAssets);
+      ui.assetTabAssetsBtn.setAttribute('aria-selected', isAssets ? 'true' : 'false');
+    }
+    if (ui.assetTabConsoleBtn) {
+      ui.assetTabConsoleBtn.classList.toggle('active', !isAssets);
+      ui.assetTabConsoleBtn.setAttribute('aria-selected', !isAssets ? 'true' : 'false');
+    }
+
+    if (ui.assetPanelAssets) {
+      ui.assetPanelAssets.hidden = !isAssets;
+      ui.assetPanelAssets.style.display = isAssets ? '' : 'none';
+      ui.assetPanelAssets.setAttribute('aria-hidden', isAssets ? 'false' : 'true');
+    }
+    if (ui.assetPanelConsole) {
+      ui.assetPanelConsole.hidden = isAssets;
+      ui.assetPanelConsole.style.display = isAssets ? 'none' : '';
+      ui.assetPanelConsole.setAttribute('aria-hidden', isAssets ? 'true' : 'false');
+    }
+
+    if (ui.assetHeaderAssetsTools) {
+      ui.assetHeaderAssetsTools.hidden = !isAssets;
+      ui.assetHeaderAssetsTools.style.display = isAssets ? '' : 'none';
+    }
+    if (ui.assetHeaderConsoleTools) {
+      ui.assetHeaderConsoleTools.hidden = isAssets;
+      ui.assetHeaderConsoleTools.style.display = isAssets ? 'none' : '';
+    }
+  },
+
+  _installEditorConsoleCapture() {
+    if (this._consoleCaptureInstalled) return;
+    this._consoleCaptureInstalled = true;
+
+    /** @type {(level: 'log'|'info'|'warn'|'error'|string, args: any[]) => void} */
+    const append = (level, args) => {
+      try {
+        this._appendConsoleLine(String(level || 'log'), args);
+      } catch {}
+    };
+
+    const original = {
+      log: console.log,
+      info: console.info,
+      warn: console.warn,
+      error: console.error,
+    };
+
+    console.log = (...args) => { original.log.apply(console, args); append('log', args); };
+    console.info = (...args) => { original.info.apply(console, args); append('info', args); };
+    console.warn = (...args) => { original.warn.apply(console, args); append('warn', args); };
+    console.error = (...args) => { original.error.apply(console, args); append('error', args); };
+
+    window.addEventListener('error', (ev) => {
+      try {
+        append('error', [ev.message || 'Error', ev.filename ? `(${ev.filename}:${ev.lineno || 0})` : '']);
+      } catch {}
+    });
+
+    window.addEventListener('unhandledrejection', (ev) => {
+      try {
+        append('error', ['Unhandled Promise Rejection', ev.reason]);
+      } catch {}
+    });
+  },
+
+  /** @param {string} level @param {any[]} args */
+  _appendConsoleLine(level, args) {
+    const out = ui.consoleOutput;
+    if (!out) return;
+
+    const line = document.createElement('div');
+    line.className = 'consoleLine';
+
+    const text = this._formatConsoleArgs(args);
+    const prefix = level && level !== 'log' ? `[${level}] ` : '';
+    line.textContent = prefix + text;
+    out.appendChild(line);
+
+    // Trim
+    const max = Math.max(50, Number(this._consoleMaxLines) || 500);
+    while (out.childElementCount > max) {
+      const first = out.firstElementChild;
+      if (!first) break;
+      first.remove();
+    }
+
+    // Auto-scroll if user is near the bottom.
+    const dist = out.scrollHeight - out.scrollTop - out.clientHeight;
+    if (dist < 40) out.scrollTop = out.scrollHeight;
+  },
+
+  /** @param {any[]} args */
+  _formatConsoleArgs(args) {
+    const parts = [];
+    for (const a of (Array.isArray(args) ? args : [])) {
+      if (typeof a === 'string') parts.push(a);
+      else if (a instanceof Error) parts.push(a.stack || a.message || String(a));
+      else {
+        try {
+          parts.push(JSON.stringify(a));
+        } catch {
+          parts.push(String(a));
+        }
+      }
+    }
+    return parts.join(' ');
+  },
+
   _openProjectSelect() {
     if (!ui.projectSelectModal) return;
     this._projectSelectOpen = true;
     ui.projectSelectModal.hidden = false;
+    this._loadRecentProjectsFromStorage();
+    this._renderProjectSelectRecents();
     ui.projectSelectOpenBtn?.focus();
   },
 
@@ -462,6 +690,8 @@ const game = {
 
     await this._setAssetBrowserRoot('.');
     await this._tryLoadProjectMainScene();
+    await this._loadProjectMetaFromWorkspace();
+    this._rememberRecentProject(String(res.path), false);
     this._closeProjectSelect();
   },
 
@@ -490,16 +720,25 @@ const game = {
     const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
       ? /** @type {{ name?: string }[]} */ (rootList.entries)
       : /** @type {{ name?: string }[]} */ ([]);
-    const hasProjectFile = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
-    if (!hasProjectFile) {
+
+    const hasJsonProject = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
+    const fluxProjects = entries
+      .map((ent) => String(ent?.name || ''))
+      .filter((name) => name.toLowerCase().endsWith('.flux'))
+      .sort();
+    const hasFluxProject = fluxProjects.length > 0;
+
+    if (!hasJsonProject && !hasFluxProject) {
       // Revert
       if (prevPath) await electronAPI.setWorkspaceRoot(prevPath);
-      alert('That folder does not look like a Fluxion project (missing fluxion.project.json).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
+      alert('That folder does not look like a Fluxion project (missing fluxion.project.json or *.flux).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
       return;
     }
 
     await this._setAssetBrowserRoot('.');
-    await this._tryLoadProjectMainScene();
+    await this._tryLoadProjectMainScene(hasJsonProject ? null : (fluxProjects[0] || null));
+    await this._loadProjectMetaFromWorkspace();
+    this._rememberRecentProject(abs, false);
     this._closeProjectSelect();
   },
 
@@ -509,18 +748,436 @@ const game = {
       return false;
     });
     if (!ok) return;
+
+    try {
+      const electronAPI = /** @type {any} */ (window).electronAPI;
+      if (electronAPI && typeof electronAPI.getWorkspaceRoot === 'function') {
+        const root = await electronAPI.getWorkspaceRoot();
+        const abs = root && root.ok && root.path ? String(root.path) : '';
+        if (abs) this._rememberRecentProject(abs, true);
+      }
+    } catch {}
+
     // Legacy projects may not have fluxion.project.json; keep the scene as-is.
+    await this._loadProjectMetaFromWorkspace();
     this._closeProjectSelect();
   },
 
-  async _tryLoadProjectMainScene() {
+  _loadRecentProjectsFromStorage() {
+    try {
+      const raw = localStorage.getItem('fluxion.editor.recentProjects');
+      const parsed = raw ? JSON.parse(raw) : null;
+      const arr = Array.isArray(parsed) ? parsed : [];
+      /** @type {{ path: string, legacy: boolean, t: number }[]} */
+      const cleaned = [];
+      for (const it of arr) {
+        const path = String(it && it.path ? it.path : '').trim();
+        if (!path) continue;
+        const legacy = Boolean(it && it.legacy);
+        const t = Math.max(0, Number(it && it.t ? it.t : 0) || 0);
+        cleaned.push({ path, legacy, t });
+      }
+      cleaned.sort((a, b) => (b.t - a.t));
+      this._recentProjects = cleaned.slice(0, Math.max(1, this._recentProjectsMax | 0));
+    } catch {
+      this._recentProjects = [];
+    }
+  },
+
+  _saveRecentProjectsToStorage() {
+    try {
+      localStorage.setItem('fluxion.editor.recentProjects', JSON.stringify(this._recentProjects));
+    } catch {}
+  },
+
+  /** @param {string} absPath @param {boolean} legacy */
+  _rememberRecentProject(absPath, legacy) {
+    const path = String(absPath || '').trim();
+    if (!path) return;
+
+    const key = path.toLowerCase();
+    this._recentProjects = (Array.isArray(this._recentProjects) ? this._recentProjects : [])
+      .filter((p) => String(p?.path || '').toLowerCase() !== key);
+
+    this._recentProjects.unshift({ path, legacy: Boolean(legacy), t: Date.now() });
+    this._recentProjects = this._recentProjects.slice(0, Math.max(1, this._recentProjectsMax | 0));
+    this._saveRecentProjectsToStorage();
+    this._renderProjectSelectRecents();
+  },
+
+  /** @param {string} absPath */
+  _removeRecentProject(absPath) {
+    const path = String(absPath || '').trim();
+    if (!path) return;
+    const key = path.toLowerCase();
+    this._recentProjects = (Array.isArray(this._recentProjects) ? this._recentProjects : [])
+      .filter((p) => String(p?.path || '').toLowerCase() !== key);
+    this._saveRecentProjectsToStorage();
+    this._renderProjectSelectRecents();
+  },
+
+  _renderProjectSelectRecents() {
+    const wrap = ui.projectSelectRecentList;
+    if (!wrap) return;
+
+    wrap.replaceChildren();
+
+    const items = Array.isArray(this._recentProjects) ? this._recentProjects : [];
+    if (items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'recentProjectEmpty';
+      empty.textContent = 'No recent projects yet.';
+      wrap.appendChild(empty);
+      return;
+    }
+
+    for (const ent of items) {
+      const path = String(ent?.path || '').trim();
+      if (!path) continue;
+      const legacy = Boolean(ent?.legacy);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'recentProjectBtn';
+      btn.addEventListener('click', () => {
+        this._openRecentProject({ path, legacy }).catch(console.error);
+      });
+
+      const top = document.createElement('div');
+      top.className = 'recentProjectTopRow';
+
+      const name = document.createElement('div');
+      name.className = 'recentProjectName';
+      name.textContent = this._pathBaseName(path);
+
+      top.appendChild(name);
+
+      if (legacy) {
+        const badge = document.createElement('div');
+        badge.className = 'recentProjectBadge recentProjectBadgeLegacy';
+        badge.textContent = 'LEGACY';
+        top.appendChild(badge);
+      }
+
+      const p = document.createElement('div');
+      p.className = 'recentProjectPath';
+      p.textContent = path;
+
+      btn.appendChild(top);
+      btn.appendChild(p);
+
+      wrap.appendChild(btn);
+    }
+  },
+
+  /** @param {string} p */
+  _pathBaseName(p) {
+    const s = String(p || '').replace(/[\\/]+$/, '');
+    const parts = s.split(/[\\/]/g).filter(Boolean);
+    return parts.length ? parts[parts.length - 1] : s;
+  },
+
+  /** @param {{ path: string, legacy: boolean }} ent */
+  async _openRecentProject(ent) {
+    const path = String(ent?.path || '').trim();
+    if (!path) return;
+
+    if (ent.legacy) {
+      const ok = await this._openWorkspaceAtPath(path);
+      if (!ok) return;
+      // Legacy projects may not have fluxion.project.json; keep the scene as-is.
+      await this._loadProjectMetaFromWorkspace();
+      this._rememberRecentProject(path, true);
+      this._closeProjectSelect();
+      return;
+    }
+
+    const ok = await this._openProjectAtPathStrict(path);
+    if (!ok) return;
+    this._rememberRecentProject(path, false);
+    this._closeProjectSelect();
+  },
+
+  /** @param {string} abs @returns {Promise<boolean>} */
+  async _openWorkspaceAtPath(abs) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.setWorkspaceRoot !== 'function') {
+      alert('Open Folder is only available in the Electron editor.');
+      return false;
+    }
+
+    const res = await electronAPI.setWorkspaceRoot(String(abs));
+    if (!res || !res.ok) {
+      this._removeRecentProject(abs);
+      alert(`Failed to open folder: ${res && res.error ? res.error : 'Unknown error'}`);
+      return false;
+    }
+
+    await this._setAssetBrowserRoot('.');
+    return true;
+  },
+
+  /** @param {string} abs @returns {Promise<boolean>} */
+  async _openProjectAtPathStrict(abs) {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.setWorkspaceRoot !== 'function' || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.listProjectDir !== 'function') {
+      alert('Open Project is only available in the Electron editor.');
+      return false;
+    }
+
+    const prev = await electronAPI.getWorkspaceRoot();
+    const prevPath = prev && prev.ok && prev.path ? String(prev.path) : null;
+
+    const setRes = await electronAPI.setWorkspaceRoot(String(abs));
+    if (!setRes || !setRes.ok) {
+      this._removeRecentProject(abs);
+      alert(`Failed to set workspace root: ${setRes && setRes.error ? setRes.error : 'Unknown error'}`);
+      return false;
+    }
+
+    const rootList = await electronAPI.listProjectDir('.');
+    const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
+      ? /** @type {{ name?: string }[]} */ (rootList.entries)
+      : /** @type {{ name?: string }[]} */ ([]);
+
+    const hasJsonProject = entries.some((ent) => String(ent?.name || '') === 'fluxion.project.json');
+    const fluxProjects = entries
+      .map((ent) => String(ent?.name || ''))
+      .filter((name) => name.toLowerCase().endsWith('.flux'))
+      .sort();
+    const hasFluxProject = fluxProjects.length > 0;
+
+    if (!hasJsonProject && !hasFluxProject) {
+      if (prevPath) await electronAPI.setWorkspaceRoot(prevPath);
+      alert('That folder does not look like a Fluxion project (missing fluxion.project.json or *.flux).\n\nUse "Open Legacy Project..." to open arbitrary folders.');
+      return false;
+    }
+
+    await this._setAssetBrowserRoot('.');
+    await this._tryLoadProjectMainScene(hasJsonProject ? null : (fluxProjects[0] || null));
+    await this._loadProjectMetaFromWorkspace();
+    return true;
+  },
+
+  async _loadProjectMetaFromWorkspace() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.listProjectDir !== 'function') {
+      this._projectMeta = null;
+      this._projectMetaFiles = [];
+      this.rebuildInspector();
+      return;
+    }
+
+    try {
+      const rootList = await electronAPI.listProjectDir('.');
+      const entries = (rootList && rootList.ok && Array.isArray(rootList.entries))
+        ? /** @type {{ name?: string, isDir?: boolean }[]} */ (rootList.entries)
+        : /** @type {{ name?: string, isDir?: boolean }[]} */ ([]);
+
+      const files = entries.filter((e) => !e.isDir).map((e) => String(e.name || '')).filter(Boolean);
+      const hasJson = files.includes('fluxion.project.json');
+      const fluxFiles = files.filter((n) => n.toLowerCase().endsWith('.flux')).sort();
+
+      /** @type {string[]} */
+      const metaFiles = [];
+      if (hasJson) metaFiles.push('fluxion.project.json');
+      if (fluxFiles.length > 0) metaFiles.push(fluxFiles[0]);
+
+      // Prefer JSON project file for reading; fall back to .flux.
+      const primary = hasJson ? 'fluxion.project.json' : (fluxFiles[0] || null);
+      if (!primary) {
+        this._projectMeta = null;
+        this._projectMetaFiles = [];
+        this.rebuildInspector();
+        return;
+      }
+
+      const res = await fetch(`fluxion://workspace/${encodeURIComponent(primary)}`);
+      if (!res.ok) throw new Error('Failed to load project descriptor');
+      const data = await res.json();
+
+      const name = String(data && data.name ? data.name : '').trim() || 'My Game';
+      const creator = String(data && data.creator ? data.creator : '');
+      const engineVersion = String(data && data.engineVersion ? data.engineVersion : '');
+      const r = /** @type {any} */ (data && data.resolution ? data.resolution : null);
+      let w = 1280;
+      let h = 720;
+      if (Array.isArray(r) && r.length >= 2) {
+        w = Math.max(1, Number(r[0]) || 1280);
+        h = Math.max(1, Number(r[1]) || 720);
+      } else if (r && typeof r === 'object') {
+        w = Math.max(1, Number(r.width) || 1280);
+        h = Math.max(1, Number(r.height) || 720);
+      }
+
+      const enable2D = (data && typeof data.enable2D === 'boolean') ? data.enable2D : true;
+      const enable3D = (data && typeof data.enable3D === 'boolean') ? data.enable3D : true;
+
+      this._projectMeta = { name, creator, resolution: { width: w | 0, height: h | 0 }, engineVersion, enable2D, enable3D };
+      this._projectMetaFiles = metaFiles;
+      this._applyRenderLayers();
+      this._applyModeAvailability();
+      this.rebuildInspector();
+    } catch (e) {
+      console.warn(e);
+      this._projectMeta = null;
+      this._projectMetaFiles = [];
+      this.rebuildInspector();
+    }
+  },
+
+  _scheduleSaveProjectMeta() {
+    // Debounce saves while typing.
+    const now = performance.now();
+    this._projectMetaSaveT = now + 350;
+  },
+
+  async _flushSaveProjectMetaIfDue() {
+    if (!this._projectMeta) return;
+    if (!this._projectMetaFiles || this._projectMetaFiles.length === 0) return;
+    if (this._projectMetaSaveT <= 0) return;
+    const now = performance.now();
+    if (now < this._projectMetaSaveT) return;
+    this._projectMetaSaveT = 0;
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.getWorkspaceRoot !== 'function' || typeof electronAPI.saveProjectFile !== 'function') return;
+
+    const root = await electronAPI.getWorkspaceRoot();
+    const rootAbs = root && root.ok && root.path ? String(root.path) : '';
+    if (!rootAbs) return;
+
+    const meta = this._projectMeta;
+    const payload = {
+      name: String(meta.name || ''),
+      creator: String(meta.creator || ''),
+      resolution: { width: Number(meta.resolution?.width) || 1280, height: Number(meta.resolution?.height) || 720 },
+      engineVersion: String(meta.engineVersion || ''),
+      enable2D: typeof meta.enable2D === 'boolean' ? meta.enable2D : true,
+      enable3D: typeof meta.enable3D === 'boolean' ? meta.enable3D : true,
+      // Preserve mainScene if it exists in the file by writing only known fields? For now,
+      // keep it stable by also attempting to read+merge at save time.
+    };
+
+    for (const rel of this._projectMetaFiles) {
+      try {
+        // Merge with existing so we don't accidentally drop fields like mainScene.
+        let existing = {};
+        try {
+          const fr = await fetch(`fluxion://workspace/${encodeURIComponent(rel)}`);
+          if (fr.ok) existing = await fr.json();
+        } catch {}
+        const merged = { ...(existing && typeof existing === 'object' ? existing : {}), ...payload };
+
+        const sep = rootAbs.includes('\\') ? '\\' : '/';
+        const absPath = rootAbs.replace(/[\\/]+$/, '') + sep + rel;
+        await electronAPI.saveProjectFile(absPath, JSON.stringify(merged, null, 2) + '\n');
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+  },
+
+  /** @param {HTMLElement | null} container */
+  _rebuildProjectInspector(container) {
+    if (!container) return;
+
+    const title = document.createElement('div');
+    title.className = 'sectionTitle';
+    title.textContent = 'Project';
+    title.style.marginTop = '0px';
+    container.appendChild(title);
+
+    if (!this._projectMeta) {
+      this._addReadonly(container, 'status', 'No project file loaded');
+      return;
+    }
+
+    const meta = this._projectMeta;
+
+    // Editable fields
+    const nameObj = /** @type {any} */ ({ name: meta.name });
+    this._addStringWith(container, 'name', nameObj, 'name', () => {
+      meta.name = String(nameObj.name || '');
+      this._scheduleSaveProjectMeta();
+    });
+
+    const creatorObj = /** @type {any} */ ({ creator: meta.creator });
+    this._addStringWith(container, 'creator', creatorObj, 'creator', () => {
+      meta.creator = String(creatorObj.creator || '');
+      this._scheduleSaveProjectMeta();
+    });
+
+    const resObj = /** @type {{ width: number, height: number }} */ ({ width: meta.resolution.width, height: meta.resolution.height });
+    /** @param {string} label @param {'width'|'height'} key */
+    const addResNumber = (label, key) => {
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.step = '1';
+      input.min = '1';
+      input.value = String(Number(resObj[key]) || 0);
+      const apply = () => {
+        const v = Math.max(1, Number(input.value) || 1) | 0;
+        resObj[key] = v;
+        if (key === 'width') meta.resolution.width = v;
+        else meta.resolution.height = v;
+        this._scheduleSaveProjectMeta();
+      };
+      input.addEventListener('input', apply);
+      input.addEventListener('change', apply);
+      this._addField(container, label, input);
+    };
+    addResNumber('resolution.width', 'width');
+    addResNumber('resolution.height', 'height');
+
+    // Renderer enable/disable
+    const enable2DObj = /** @type {any} */ ({ enable2D: typeof meta.enable2D === 'boolean' ? meta.enable2D : true });
+    this._addToggleWith(container, 'enable2D', enable2DObj, 'enable2D', () => {
+      meta.enable2D = !!enable2DObj.enable2D;
+      let changedOther = false;
+      if (meta.enable2D === false && meta.enable3D === false) {
+        meta.enable3D = true;
+        changedOther = true;
+      }
+      this._applyRenderLayers();
+      this._applyModeAvailability();
+      this._scheduleSaveProjectMeta();
+      if (changedOther) this.rebuildInspector();
+    });
+
+    const enable3DObj = /** @type {any} */ ({ enable3D: typeof meta.enable3D === 'boolean' ? meta.enable3D : true });
+    this._addToggleWith(container, 'enable3D', enable3DObj, 'enable3D', () => {
+      meta.enable3D = !!enable3DObj.enable3D;
+      let changedOther = false;
+      if (meta.enable3D === false && meta.enable2D === false) {
+        meta.enable2D = true;
+        changedOther = true;
+      }
+      this._applyRenderLayers();
+      this._applyModeAvailability();
+      this._scheduleSaveProjectMeta();
+      if (changedOther) this.rebuildInspector();
+    });
+
+    // Engine version is typically informational; keep read-only.
+    this._addReadonly(container, 'engineVersion', meta.engineVersion || '(unknown)');
+  },
+
+  /** @param {string|null} fluxProjectFileName */
+  async _tryLoadProjectMainScene(fluxProjectFileName = null) {
     const r = this._renderer;
     if (!r) return;
 
-    // Best-effort: read fluxion.project.json and load its mainScene.
+    // Best-effort: read fluxion.project.json (preferred) or a *.flux file and load its mainScene.
     try {
-      const res = await fetch('fluxion://workspace/fluxion.project.json');
-      if (!res.ok) return;
+      let res = await fetch('fluxion://workspace/fluxion.project.json');
+      if (!res.ok) {
+        const n = String(fluxProjectFileName || '').trim();
+        if (!n || !n.toLowerCase().endsWith('.flux')) return;
+        res = await fetch(`fluxion://workspace/${encodeURIComponent(n)}`);
+        if (!res.ok) return;
+      }
+
       const txt = await res.text();
       const data = JSON.parse(txt);
       const mainScene = String(data && data.mainScene ? data.mainScene : '').trim();
@@ -703,17 +1360,27 @@ const game = {
   /** @param {any} dbg @param {boolean} depth */
   _draw3DViewportGrid(dbg, depth) {
     if (!dbg || typeof dbg.drawLine3D !== 'function') return;
+
+    const s = this._editorSettings?.grid3d;
+    if (!s || !s.enabled) return;
     const cam3 = /** @type {any} */ (this.currentScene?.camera3D);
     if (!cam3) return;
 
-    const posY = Math.abs(Number(cam3.position?.y) || 0);
     let minor = 1;
-    if (posY > 40) minor = 10;
-    else if (posY > 18) minor = 5;
-    else if (posY > 8) minor = 2;
-    const major = minor * 5;
+    if (s.autoScale) {
+      const posY = Math.abs(Number(cam3.position?.y) || 0);
+      minor = 1;
+      if (posY > 40) minor = 10;
+      else if (posY > 18) minor = 5;
+      else if (posY > 8) minor = 2;
+    } else {
+      minor = Math.max(0.0001, Number(s.minor) || 1);
+    }
 
-    const halfSpan = minor * 50;
+    const majorMul = Math.max(1, Math.floor(Number(s.majorMultiplier) || 5));
+    const major = minor * majorMul;
+
+    const halfSpan = Math.max(minor, Number(s.halfSpan) || 50);
     const y = 0;
 
     const cMinor = [120, 120, 120, 70];
@@ -723,21 +1390,23 @@ const game = {
 
     // X-parallel lines (varying Z)
     for (let z = -halfSpan; z <= halfSpan; z += minor) {
-      const isMajor = (Math.round(z / minor) % 5) === 0;
+      const isMajor = (Math.round(z / minor) % majorMul) === 0;
       const c = isMajor ? cMajor : cMinor;
       dbg.drawLine3D(-halfSpan, y, z, halfSpan, y, z, c, 1, depth);
     }
 
     // Z-parallel lines (varying X)
     for (let x = -halfSpan; x <= halfSpan; x += minor) {
-      const isMajor = (Math.round(x / minor) % 5) === 0;
+      const isMajor = (Math.round(x / minor) % majorMul) === 0;
       const c = isMajor ? cMajor : cMinor;
       dbg.drawLine3D(x, y, -halfSpan, x, y, halfSpan, c, 1, depth);
     }
 
     // World axes on the plane
-    dbg.drawLine3D(-halfSpan, y, 0, halfSpan, y, 0, cAxisX, 2, depth);
-    dbg.drawLine3D(0, y, -halfSpan, 0, y, halfSpan, cAxisZ, 2, depth);
+    if (s.showAxes) {
+      dbg.drawLine3D(-halfSpan, y, 0, halfSpan, y, 0, cAxisX, 2, depth);
+      dbg.drawLine3D(0, y, -halfSpan, 0, y, halfSpan, cAxisZ, 2, depth);
+    }
   },
 
   /** @param {Renderer} renderer */
@@ -812,6 +1481,9 @@ const game = {
           break;
         case 'app.reload':
           window.location.reload();
+          break;
+        case 'app.settings':
+          this._openEditorSettings();
           break;
         case 'view.toggleHelp':
           this._helpVisible = !this._helpVisible;
@@ -1414,8 +2086,29 @@ const game = {
     ui.aboutCloseBtn?.focus();
   },
 
+  _openEditorSettings() {
+    if (!ui.editorSettingsModal) return;
+    this._editorSettingsOpen = true;
+    ui.editorSettingsModal.hidden = false;
+
+    this._rebuildEditorSettingsUI();
+    this._closeTopbarMenus();
+    ui.editorSettingsCloseBtn?.focus();
+  },
+
+  _closeEditorSettings() {
+    if (!ui.editorSettingsModal) return;
+    this._editorSettingsOpen = false;
+    ui.editorSettingsModal.hidden = true;
+  },
+
   _openAddNode() {
     if (!ui.addNodeModal) return;
+
+    // Add Node currently creates only 2D nodes; disable when 2D is disabled for the project.
+    const { allow2D } = this._getProjectRenderEnableFlags();
+    if (!allow2D) return;
+
     this._addNodeOpen = true;
     ui.addNodeModal.hidden = false;
     this._closeTopbarMenus();
@@ -1572,6 +2265,10 @@ const game = {
     const scene = this.currentScene;
     if (!r || !scene) return;
 
+    // Project may disable 2D rendering.
+    const { allow2D } = this._getProjectRenderEnableFlags();
+    if (!allow2D) return;
+
     // Adding 2D nodes is only really useful in 2D mode (tree filters by mode).
     if (this.mode !== '2d') this.setMode('2d');
 
@@ -1666,6 +2363,7 @@ const game = {
       this.selected = created;
       this.rebuildTree();
       this.rebuildInspector();
+      if (this._renderer) this._requestViewportSync(this._renderer);
     }
 
     this._closeAddNode();
@@ -2248,6 +2946,7 @@ const game = {
       this.selected = picked;
       this.rebuildTree();
       this.rebuildInspector();
+      if (this._renderer) this._requestViewportSync(this._renderer);
     });
   },
 
@@ -2330,9 +3029,38 @@ const game = {
   _applyRenderLayers() {
     const r = this._renderer;
     if (!r || typeof r.setRenderLayerEnabled !== 'function') return;
-    // Exclusive: 2D mode shows only 2D pass, 3D mode shows only 3D pass.
-    r.setRenderLayerEnabled(0, this.mode === '3d');
-    r.setRenderLayerEnabled(1, this.mode === '2d');
+
+    // Respect project settings (if available) AND editor mode.
+    const meta = this._projectMeta;
+    const allow2D = (meta && typeof meta.enable2D === 'boolean') ? meta.enable2D : true;
+    const allow3D = (meta && typeof meta.enable3D === 'boolean') ? meta.enable3D : true;
+
+    // Exclusive: 2D mode shows only 2D pass, 3D mode shows only 3D pass, but also respect project disable flags.
+    r.setRenderLayerEnabled(0, this.mode === '3d' && allow3D);
+    r.setRenderLayerEnabled(1, this.mode === '2d' && allow2D);
+  },
+
+  _getProjectRenderEnableFlags() {
+    const meta = this._projectMeta;
+    const allow2D = (meta && typeof meta.enable2D === 'boolean') ? meta.enable2D : true;
+    const allow3D = (meta && typeof meta.enable3D === 'boolean') ? meta.enable3D : true;
+    return { allow2D, allow3D };
+  },
+
+  _applyModeAvailability() {
+    const { allow2D, allow3D } = this._getProjectRenderEnableFlags();
+
+    // If only one mode is available, hide the mode switch buttons.
+    const canSwitch = !!(allow2D && allow3D);
+    if (ui.mode2dBtn) ui.mode2dBtn.style.display = canSwitch ? '' : 'none';
+    if (ui.mode3dBtn) ui.mode3dBtn.style.display = canSwitch ? '' : 'none';
+
+    // Clamp current mode to an allowed one.
+    if (this.mode === '2d' && !allow2D && allow3D) this.setMode('3d');
+    else if (this.mode === '3d' && !allow3D && allow2D) this.setMode('2d');
+
+    // Add Node currently creates only 2D nodes.
+    if (!allow2D && this._addNodeOpen) this._closeAddNode();
   },
 
   /** @param {Renderer} renderer */
@@ -2485,11 +3213,15 @@ const game = {
     const right = left + w;
     const bottom = top + h;
 
+    const g2 = this._editorSettings?.grid2d;
+    const drawGrid = !!(g2 && g2.enabled);
+
     // Grid settings (approximate Godot 2D editor feel)
     // IMPORTANT: adapt spacing to zoom to avoid drawing thousands of lines when zoomed out.
-    const baseMinor = 32;
-    const minGridPx = 10; // minimum pixel spacing between minor lines
-    const maxGridLines = 240; // safety cap per axis
+    const baseMinor = Math.max(0.0001, Number(g2?.baseMinor) || 32);
+    const minGridPx = Math.max(1, Number(g2?.minGridPx) || 10);
+    const maxGridLines = Math.max(10, Math.floor(Number(g2?.maxGridLines) || 240));
+    const majorMul = Math.max(1, Math.floor(Number(g2?.majorMultiplier) || 2));
 
     let minor = baseMinor;
     // Keep minor spacing readable (>= minGridPx) when zoomed out.
@@ -2497,7 +3229,7 @@ const game = {
     // Safety cap: if viewport covers a huge world span, increase minor further.
     while ((w / minor) > maxGridLines || (h / minor) > maxGridLines) minor *= 2;
 
-    const major = minor * 2;
+    const major = minor * majorMul;
     const startX = Math.floor(left / minor) * minor;
     const endX = Math.ceil(right / minor) * minor;
     const startY = Math.floor(top / minor) * minor;
@@ -2513,15 +3245,18 @@ const game = {
     const cText = [220, 220, 220, 200];
 
     // Grid lines
-    for (let x = startX; x <= endX; x += minor) {
-      const isAxis = x === 0;
-      const isMajor = (x % major) === 0;
-      dbg.drawLine(x, startY, x, endY, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
-    }
-    for (let y = startY; y <= endY; y += minor) {
-      const isAxis = y === 0;
-      const isMajor = (y % major) === 0;
-      dbg.drawLine(startX, y, endX, y, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
+    if (drawGrid) {
+      const showAxes = !!(g2 && g2.showAxes);
+      for (let x = startX; x <= endX; x += minor) {
+        const isAxis = showAxes && x === 0;
+        const isMajor = (x % major) === 0;
+        dbg.drawLine(x, startY, x, endY, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
+      }
+      for (let y = startY; y <= endY; y += minor) {
+        const isAxis = showAxes && y === 0;
+        const isMajor = (y % major) === 0;
+        dbg.drawLine(startX, y, endX, y, isAxis ? cAxis : (isMajor ? cMajor : cMinor), 1);
+      }
     }
 
     // Camera frame (current viewport in world space)
@@ -2602,6 +3337,11 @@ const game = {
 
   /** @param {'2d' | '3d'} mode */
   setMode(mode) {
+    const { allow2D, allow3D } = this._getProjectRenderEnableFlags();
+    if (mode === '2d' && !allow2D && allow3D) mode = '3d';
+    else if (mode === '3d' && !allow3D && allow2D) mode = '2d';
+    else if ((mode === '2d' && !allow2D) || (mode === '3d' && !allow3D)) return;
+
     if (this.mode === mode) return;
     this.mode = mode;
 
@@ -3041,6 +3781,7 @@ const game = {
         this.selected = e.obj;
         this.rebuildTree();
         this.rebuildInspector();
+        if (this._renderer) this._requestViewportSync(this._renderer);
       });
       tree.appendChild(div);
     }
@@ -3085,7 +3826,15 @@ const game = {
     if (ui.common) ui.common.innerHTML = "";
     if (ui.transform) ui.transform.innerHTML = "";
 
-    if (!obj) return;
+    // Always show project info (when available) in the inspector.
+    this._rebuildProjectInspector(ui.common);
+
+    if (!obj) {
+      if (ui.inspectorSubtitle) {
+        ui.inspectorSubtitle.textContent = this._projectMeta ? 'Project' : 'No selection';
+      }
+      return;
+    }
 
     // Editor XML stubs (scene-level declarations)
     if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') {
@@ -3094,6 +3843,13 @@ const game = {
     }
 
     // Common fields
+    if (ui.common) {
+      const title = document.createElement('div');
+      title.className = 'sectionTitle';
+      title.textContent = 'Selection';
+      title.style.marginTop = '12px';
+      ui.common.appendChild(title);
+    }
     this._addReadonly(ui.common, "type", obj.constructor?.name || "unknown");
     this._addStringWith(ui.common, 'name', obj, 'name', () => this.rebuildTree());
     this._addToggle(ui.common, "active", obj, "active");
@@ -3406,6 +4162,122 @@ const game = {
     field.appendChild(value);
     container.appendChild(field);
     value.appendChild(node);
+
+    return field;
+  },
+
+  _loadEditorSettingsFromStorage() {
+    try {
+      const raw = localStorage.getItem('fluxion.editor.settings.v1');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+
+      const cur = this._editorSettings;
+      if (!cur) return;
+
+      const p = /** @type {any} */ (parsed);
+      if (p.general && typeof p.general === 'object') {
+        if (typeof p.general.showHelpOverlay === 'boolean') cur.general.showHelpOverlay = p.general.showHelpOverlay;
+      }
+      if (p.grid2d && typeof p.grid2d === 'object') {
+        if (typeof p.grid2d.enabled === 'boolean') cur.grid2d.enabled = p.grid2d.enabled;
+        if (Number.isFinite(Number(p.grid2d.baseMinor))) cur.grid2d.baseMinor = Number(p.grid2d.baseMinor);
+        if (Number.isFinite(Number(p.grid2d.majorMultiplier))) cur.grid2d.majorMultiplier = Number(p.grid2d.majorMultiplier);
+        if (Number.isFinite(Number(p.grid2d.minGridPx))) cur.grid2d.minGridPx = Number(p.grid2d.minGridPx);
+        if (Number.isFinite(Number(p.grid2d.maxGridLines))) cur.grid2d.maxGridLines = Number(p.grid2d.maxGridLines);
+        if (typeof p.grid2d.showAxes === 'boolean') cur.grid2d.showAxes = p.grid2d.showAxes;
+      }
+      if (p.grid3d && typeof p.grid3d === 'object') {
+        if (typeof p.grid3d.enabled === 'boolean') cur.grid3d.enabled = p.grid3d.enabled;
+        if (typeof p.grid3d.autoScale === 'boolean') cur.grid3d.autoScale = p.grid3d.autoScale;
+        if (Number.isFinite(Number(p.grid3d.minor))) cur.grid3d.minor = Number(p.grid3d.minor);
+        if (Number.isFinite(Number(p.grid3d.majorMultiplier))) cur.grid3d.majorMultiplier = Number(p.grid3d.majorMultiplier);
+        if (Number.isFinite(Number(p.grid3d.halfSpan))) cur.grid3d.halfSpan = Number(p.grid3d.halfSpan);
+        if (typeof p.grid3d.showAxes === 'boolean') cur.grid3d.showAxes = p.grid3d.showAxes;
+      }
+    } catch {
+      // ignore
+    }
+  },
+
+  _saveEditorSettingsToStorage() {
+    try {
+      localStorage.setItem('fluxion.editor.settings.v1', JSON.stringify(this._editorSettings));
+    } catch {
+      // ignore
+    }
+  },
+
+  _applyEditorSettingsFilter() {
+    const form = ui.editorSettingsForm;
+    if (!form) return;
+    const q = String(this._editorSettingsFilter || '').trim().toLowerCase();
+    const fields = Array.from(form.querySelectorAll('.field'));
+    if (!q) {
+      for (const f of fields) /** @type {HTMLElement} */ (f).style.display = '';
+      return;
+    }
+
+    for (const f of fields) {
+      const label = /** @type {HTMLElement|null} */ (f.querySelector('.label'));
+      const text = String(label?.textContent || '').toLowerCase();
+      /** @type {HTMLElement} */ (f).style.display = text.includes(q) ? '' : 'none';
+    }
+  },
+
+  /** @param {'general'|'grid2d'|'grid3d'} cat */
+  _setEditorSettingsCategory(cat) {
+    this._editorSettingsCategory = cat;
+
+    const items = [ui.editorSettingsCatGeneral, ui.editorSettingsCatGrid2D, ui.editorSettingsCatGrid3D];
+    for (const b of items) {
+      if (!b) continue;
+      const bCat = b.getAttribute('data-cat');
+      const active = bCat === cat;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+  },
+
+  _rebuildEditorSettingsUI() {
+    if (!ui.editorSettingsForm || !ui.editorSettingsSectionTitle) return;
+
+    this._setEditorSettingsCategory(this._editorSettingsCategory);
+
+    const cat = this._editorSettingsCategory;
+    ui.editorSettingsSectionTitle.textContent = (cat === 'general') ? 'General' : (cat === 'grid2d' ? '2D Grid' : '3D Grid');
+    ui.editorSettingsForm.innerHTML = '';
+
+    if (cat === 'general') {
+      const obj = this._editorSettings.general;
+      this._addToggleWith(ui.editorSettingsForm, 'Show help overlay', obj, 'showHelpOverlay', () => {
+        this._helpVisible = !!obj.showHelpOverlay;
+        if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
+        this._saveEditorSettingsToStorage();
+      });
+    } else if (cat === 'grid2d') {
+      const obj = this._editorSettings.grid2d;
+      this._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => this._saveEditorSettingsToStorage());
+      this._addToggleWith(ui.editorSettingsForm, 'Show axes', obj, 'showAxes', () => this._saveEditorSettingsToStorage());
+      this._addNumberWith(ui.editorSettingsForm, 'Minor spacing', obj, 'baseMinor', () => this._saveEditorSettingsToStorage(), { step: 1, min: 0.0001 });
+      this._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
+      this._addNumberWith(ui.editorSettingsForm, 'Min grid pixels', obj, 'minGridPx', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
+      this._addNumberWith(ui.editorSettingsForm, 'Max grid lines', obj, 'maxGridLines', () => this._saveEditorSettingsToStorage(), { step: 1, min: 10 });
+    } else {
+      const obj = this._editorSettings.grid3d;
+      this._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => this._saveEditorSettingsToStorage());
+      this._addToggleWith(ui.editorSettingsForm, 'Auto scale', obj, 'autoScale', () => this._saveEditorSettingsToStorage());
+      this._addToggleWith(ui.editorSettingsForm, 'Show axes', obj, 'showAxes', () => this._saveEditorSettingsToStorage());
+      this._addNumberWith(ui.editorSettingsForm, 'Minor spacing', obj, 'minor', () => this._saveEditorSettingsToStorage(), { step: 0.1, min: 0.0001 });
+      this._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
+      this._addNumberWith(ui.editorSettingsForm, 'Half span', obj, 'halfSpan', () => this._saveEditorSettingsToStorage(), { step: 1, min: 1 });
+    }
+
+    if (ui.editorSettingsFilterInput) {
+      ui.editorSettingsFilterInput.value = String(this._editorSettingsFilter || '');
+    }
+    this._applyEditorSettingsFilter();
   },
 
   /**
@@ -3431,18 +4303,47 @@ const game = {
    */
   _addToggle(container, label, obj, key) {
     if (!obj || !(key in obj)) return;
-    const input = document.createElement("input");
+    const input = document.createElement('input');
     input.type = "checkbox";
     input.checked = !!obj[key];
     input.addEventListener("change", () => {
       obj[key] = !!input.checked;
     });
 
-    const wrap = document.createElement("label");
+    const wrap = document.createElement('label');
     wrap.className = "checkRow";
     wrap.style.margin = "0";
     wrap.appendChild(input);
-    const t = document.createElement("span");
+    const t = document.createElement('span');
+    t.textContent = "";
+    wrap.appendChild(t);
+
+    this._addField(container, label, wrap);
+  },
+
+  /**
+   * Like _addToggle but runs a callback after change.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   * @param {() => void} onChanged
+   */
+  _addToggleWith(container, label, obj, key, onChanged) {
+    if (!obj || !(key in obj)) return;
+    const input = document.createElement('input');
+    input.type = "checkbox";
+    input.checked = !!obj[key];
+    input.addEventListener("change", () => {
+      obj[key] = !!input.checked;
+      try { onChanged(); } catch {}
+    });
+
+    const wrap = document.createElement('label');
+    wrap.className = "checkRow";
+    wrap.style.margin = "0";
+    wrap.appendChild(input);
+    const t = document.createElement('span');
     t.textContent = "";
     wrap.appendChild(t);
 
@@ -3478,6 +4379,37 @@ const game = {
     };
     input.addEventListener("input", apply);
     input.addEventListener("change", apply);
+    this._addField(container, label, input);
+  },
+
+  /**
+   * Like _addNumber but runs a callback after change.
+   * @param {HTMLElement | null} container
+   * @param {string} label
+   * @param {any} obj
+   * @param {string} key
+   * @param {{ step?: number, min?: number, max?: number }=} opts
+   * @param {() => void} onChanged
+   */
+  _addNumberWith(container, label, obj, key, onChanged, opts = {}) {
+    if (!obj) return;
+    if (!(key in obj)) return;
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.step = String(Number.isFinite(Number(opts.step)) ? Number(opts.step) : 0.01);
+    if (Number.isFinite(Number(opts.min))) input.min = String(Number(opts.min));
+    if (Number.isFinite(Number(opts.max))) input.max = String(Number(opts.max));
+    input.value = String(Number(obj[key]) || 0);
+
+    const apply = () => {
+      const v = Number(input.value);
+      if (!Number.isFinite(v)) return;
+      obj[key] = v;
+      try { onChanged(); } catch {}
+    };
+    input.addEventListener('input', apply);
+    input.addEventListener('change', apply);
     this._addField(container, label, input);
   },
 
@@ -4266,6 +5198,9 @@ const game = {
     if (this._inspectorRefreshBlockT > 0) {
       this._inspectorRefreshBlockT = Math.max(0, this._inspectorRefreshBlockT - dt);
     }
+
+    // Save project meta edits (debounced)
+    this._flushSaveProjectMetaIfDue().catch(console.warn);
 
     if (this._lastSceneSaveOkT > 0) {
       this._lastSceneSaveOkT = Math.max(0, this._lastSceneSaveOkT - dt);
