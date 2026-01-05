@@ -1151,6 +1151,20 @@ export default class SceneLoader {
 
         // Common properties
         if (obj) {
+            // --- Shadows (lights) ---
+            // The renderer's spot/point shadow maps are opt-in per light.
+            // Accept multiple attribute spellings for authoring convenience.
+            if (obj.isLight || obj.category === 'light') {
+                const sh = node.getAttribute('castsShadow')
+                    ?? node.getAttribute('castShadow')
+                    ?? node.getAttribute('shadow')
+                    ?? node.getAttribute('shadows');
+                if (sh !== null) {
+                    const v = String(sh).trim().toLowerCase();
+                    obj.castsShadow = !(v === 'false' || v === '0' || v === 'no' || v === 'off');
+                }
+            }
+
             if (node.hasAttribute("opacity")) {
                 const raw = parseFloat(node.getAttribute("opacity"));
                 // Author-facing: allow opacity 0..1, but keep backward-compat with 0..255.

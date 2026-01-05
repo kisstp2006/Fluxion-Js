@@ -787,6 +787,15 @@ const game = {
     // Preserve authoring for round-tripping.
     sceneAny._meshXml.push({ __xmlTag: 'Mesh', name: meshName, source: sourceForXml, type: '', color: '', params: {} });
 
+    // Track this resource as editor-imported so we can clean up scene references
+    // if the last MeshNode using it is removed.
+    if (!(sceneAny.__importedMeshResources instanceof Map)) {
+      sceneAny.__importedMeshResources = new Map();
+    }
+    /** @type {{ source: string, meshKeys: string[], materialKeys: string[] }} */
+    const importMeta = { source: sourceForXml, meshKeys: [meshName], materialKeys: [] };
+    sceneAny.__importedMeshResources.set(meshName, importMeta);
+
     // Start async load+registration, mirroring SceneLoader's GLTF registration behavior.
     const gltfUrl = `fluxion://workspace/${encodeURIComponent(destRel.replace(/^\/+/, ''))}`;
 
@@ -805,6 +814,7 @@ const game = {
           const matKey = result.meshMaterials?.get(meshN);
           const hint = nsMat(matKey || '__gltf_default__');
           scene.registerMesh(nsMesh(meshN), { type: 'gltf', mesh, material: hint });
+          try { importMeta.meshKeys.push(nsMesh(meshN)); } catch {}
           if (!scene.getMeshDefinition(meshN)) {
             scene.registerMesh(meshN, { type: 'gltf', mesh, material: hint });
           }
@@ -842,6 +852,7 @@ const game = {
 
         for (const [matName, mat] of result.materials.entries()) {
           scene.registerMaterial(nsMat(matName), mat);
+            try { importMeta.materialKeys.push(nsMat(matName)); } catch {}
           if (!scene.getMaterialDefinition(matName)) {
             scene.registerMaterial(matName, mat);
           }
@@ -4691,6 +4702,25 @@ const game = {
     const obj = this.selected;
     if (!scene || !obj) return false;
 
+    // If we're deleting a subtree that contains MeshNodes, remember their sources
+    // so we can potentially clean up imported mesh resources after the delete.
+    /** @type {Set<string>} */
+    const removedMeshSources = new Set();
+    /** @param {any} n */
+    const collectMeshSources = (n) => {
+      if (!n) return;
+      try {
+        const isMeshNode = (n?.constructor?.name === 'MeshNode') || (n?.category === 'mesh');
+        if (isMeshNode) {
+          const s = String(n?.source || '').trim();
+          if (s) removedMeshSources.add(s);
+        }
+      } catch {}
+      const kids = Array.isArray(n?.children) ? n.children : [];
+      for (const ch of kids) collectMeshSources(ch);
+    };
+    collectMeshSources(obj);
+
     // Only delete real scene objects (scene.objects + their children).
     // Disallow deleting XML stubs/resources, cameras, lights, audio, etc.
     if (obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string') return false;
@@ -4717,6 +4747,85 @@ const game = {
         scene._objectsDirty = true;
       }
     }
+
+    // Cleanup editor-imported mesh resources if they are now unused.
+    // (Only removes scene references, not files on disk.)
+    try {
+      const sceneAny = /** @type {any} */ (scene);
+      const imported = (sceneAny && sceneAny.__importedMeshResources instanceof Map)
+        ? /** @type {Map<string, { source: string, meshKeys: string[], materialKeys: string[] }>} */ (sceneAny.__importedMeshResources)
+        : null;
+
+      if (imported && removedMeshSources.size > 0) {
+        /** @type {Set<string>} */
+        const stillUsed = new Set();
+        /** @param {any} n */
+        const collectUsedSources = (n) => {
+          if (!n) return;
+          try {
+            const isMeshNode = (n?.constructor?.name === 'MeshNode') || (n?.category === 'mesh');
+            if (isMeshNode) {
+              const s = String(n?.source || '').trim();
+              if (s) stillUsed.add(s);
+            }
+          } catch {}
+          const kids = Array.isArray(n?.children) ? n.children : [];
+          for (const ch of kids) collectUsedSources(ch);
+        };
+        if (Array.isArray(scene.objects)) {
+          for (const root of scene.objects) collectUsedSources(root);
+        }
+
+        for (const srcName of removedMeshSources) {
+          if (!srcName) continue;
+          if (stillUsed.has(srcName)) continue;
+          const meta = imported.get(srcName);
+          if (!meta) continue;
+
+          // Remove the authored <Mesh name="..."/> stub for round-tripping.
+          if (Array.isArray(sceneAny._meshXml)) {
+            const arr = /** @type {any[]} */ (sceneAny._meshXml);
+            for (let i = arr.length - 1; i >= 0; i--) {
+              const m = arr[i];
+              if (m && String(m.__xmlTag) === 'Mesh' && String(m.name || '') === srcName) {
+                arr.splice(i, 1);
+              }
+            }
+          }
+
+          // Remove registered mesh/material definitions that belong to this imported model.
+          try {
+            if (sceneAny.meshDefinitions instanceof Map) {
+              for (const k of (Array.isArray(meta.meshKeys) ? meta.meshKeys : [])) {
+                if (k) sceneAny.meshDefinitions.delete(String(k));
+              }
+              const prefix = `${srcName}::`;
+              for (const k of Array.from(sceneAny.meshDefinitions.keys())) {
+                if (String(k).startsWith(prefix)) sceneAny.meshDefinitions.delete(k);
+              }
+            }
+          } catch {}
+          try {
+            if (sceneAny.materialDefinitions instanceof Map) {
+              for (const k of (Array.isArray(meta.materialKeys) ? meta.materialKeys : [])) {
+                if (k) sceneAny.materialDefinitions.delete(String(k));
+              }
+              const prefix = `${srcName}::`;
+              for (const k of Array.from(sceneAny.materialDefinitions.keys())) {
+                if (String(k).startsWith(prefix)) sceneAny.materialDefinitions.delete(k);
+              }
+            }
+          } catch {}
+
+          // Drop editor helper mappings.
+          try {
+            if (sceneAny.__gltfMaterialKeysByMeshResource instanceof Map) sceneAny.__gltfMaterialKeysByMeshResource.delete(srcName);
+          } catch {}
+
+          imported.delete(srcName);
+        }
+      }
+    } catch {}
 
     // Pick a reasonable follow-up selection.
     this.selected = loc.parent ? loc.parent : this._pickDefaultSelectionForMode();

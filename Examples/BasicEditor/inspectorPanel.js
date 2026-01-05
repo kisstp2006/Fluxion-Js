@@ -89,38 +89,106 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
   if (tag === 'Material') {
     InspectorFields.addStringWith(ui.common, 'name', stub, 'name', () => host.rebuildTree());
 
-    /** @type {Array<[string, string]>} */
-    const fields = [
-      ['source', 'source'],
-      ['baseColorFactor', 'baseColorFactor'],
-      ['metallicFactor', 'metallicFactor'],
-      ['roughnessFactor', 'roughnessFactor'],
-      ['normalScale', 'normalScale'],
-      ['aoStrength', 'aoStrength'],
-      ['emissiveFactor', 'emissiveFactor'],
-      ['alphaMode', 'alphaMode'],
-      ['alphaCutoff', 'alphaCutoff'],
-      ['baseColorTexture', 'baseColorTexture'],
-      ['metallicTexture', 'metallicTexture'],
-      ['roughnessTexture', 'roughnessTexture'],
-      ['normalTexture', 'normalTexture'],
-      ['aoTexture', 'aoTexture'],
-      ['emissiveTexture', 'emissiveTexture'],
-      ['alphaTexture', 'alphaTexture'],
-    ];
+    const onTextureAuthored = () => {
+      // If author sets a texture but leaves factors unset/zero, default them to 1 so the map actually contributes.
+      try {
+        const mf = Number(stub.metallicFactor);
+        const rf = Number(stub.roughnessFactor);
+        const ao = Number(stub.aoStrength);
 
-    for (const [label, key] of fields) {
-      const k = String(key || '');
-      const isTexture = k.toLowerCase().endsWith('texture');
-      if (isTexture) {
-        InspectorFields.addStringWithDrop(ui.common, label, stub, key, () => {}, {
-          acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'],
-          importToWorkspaceUrl: true,
-        });
-        continue;
-      }
-      InspectorFields.addAutoWith(ui.common, label, stub, key, () => {});
-    }
+        if (String(stub.metallicTexture || '').trim() && (!Number.isFinite(mf) || mf === 0)) stub.metallicFactor = '1';
+        if (String(stub.roughnessTexture || '').trim() && (!Number.isFinite(rf) || rf === 0)) stub.roughnessFactor = '1';
+        if (String(stub.aoTexture || '').trim() && (!Number.isFinite(ao) || ao === 0)) stub.aoStrength = '1';
+
+        // Packed MR convenience: if enabled and either field is set, keep them the same.
+        const packed = !!stub.metallicRoughnessPacked;
+        if (packed) {
+          const mtx = String(stub.metallicTexture || '').trim();
+          const rtx = String(stub.roughnessTexture || '').trim();
+          const use = mtx || rtx;
+          if (use) {
+            stub.metallicTexture = use;
+            stub.roughnessTexture = use;
+          }
+        }
+      } catch {}
+    };
+
+    /** @param {HTMLElement|null} container */
+    const getLastField = (container) => {
+      if (!container) return null;
+      const fields = container.querySelectorAll('.field');
+      return fields.length > 0 ? /** @type {HTMLDivElement} */ (fields[fields.length - 1]) : null;
+    };
+
+    /** @type {HTMLDivElement|null} */
+    let metallicFactorField = null;
+    /** @type {HTMLDivElement|null} */
+    let roughnessFactorField = null;
+    /** @type {HTMLDivElement|null} */
+    let aoStrengthField = null;
+
+    const updateMaterialStubVisibility = () => {
+      const hasMetalTex = !!String(stub.metallicTexture || '').trim();
+      const hasRoughTex = !!String(stub.roughnessTexture || '').trim();
+      const hasAoTex = !!String(stub.aoTexture || '').trim();
+
+      if (metallicFactorField) metallicFactorField.style.display = hasMetalTex ? 'none' : '';
+      if (roughnessFactorField) roughnessFactorField.style.display = hasRoughTex ? 'none' : '';
+      if (aoStrengthField) aoStrengthField.style.display = hasAoTex ? 'none' : '';
+    };
+
+    // Build fields explicitly so we can toggle visibility of factor rows.
+    InspectorFields.addAutoWith(ui.common, 'source', stub, 'source', () => {});
+    InspectorFields.addAutoWith(ui.common, 'baseColorFactor', stub, 'baseColorFactor', () => {});
+
+    InspectorFields.addAutoWith(ui.common, 'metallicFactor', stub, 'metallicFactor', () => {});
+    metallicFactorField = getLastField(ui.common);
+
+    InspectorFields.addAutoWith(ui.common, 'roughnessFactor', stub, 'roughnessFactor', () => {});
+    roughnessFactorField = getLastField(ui.common);
+
+    InspectorFields.addAutoWith(ui.common, 'normalScale', stub, 'normalScale', () => {});
+
+    InspectorFields.addAutoWith(ui.common, 'aoStrength', stub, 'aoStrength', () => {});
+    aoStrengthField = getLastField(ui.common);
+
+    InspectorFields.addAutoWith(ui.common, 'emissiveFactor', stub, 'emissiveFactor', () => {});
+    InspectorFields.addAutoWith(ui.common, 'alphaMode', stub, 'alphaMode', () => {});
+    InspectorFields.addAutoWith(ui.common, 'alphaCutoff', stub, 'alphaCutoff', () => {});
+
+    const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
+    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', stub, 'baseColorTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', stub, 'metallicTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', stub, 'roughnessTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', stub, 'normalTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', stub, 'aoTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', stub, 'emissiveTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', stub, 'alphaTexture', () => {
+      onTextureAuthored();
+      updateMaterialStubVisibility();
+    }, texOpts);
+
+    // Initial visibility (hide factors when a texture is present).
+    updateMaterialStubVisibility();
     return;
   }
   if (tag === 'Skybox') {
@@ -352,6 +420,30 @@ export function rebuildInspector(host, ui) {
       } catch {}
     };
 
+    const ensureTextureDrivenDefaults = () => {
+      try {
+        // If user sets maps, ensure the scalar multipliers are non-zero.
+        const mf = Number(data.metallicFactor);
+        const rf = Number(data.roughnessFactor);
+        const ao = Number(data.aoStrength);
+
+        if (String(data.metallicTexture || '').trim() && (!Number.isFinite(mf) || mf === 0)) data.metallicFactor = 1.0;
+        if (String(data.roughnessTexture || '').trim() && (!Number.isFinite(rf) || rf === 0)) data.roughnessFactor = 1.0;
+        if (String(data.aoTexture || '').trim() && (!Number.isFinite(ao) || ao === 0)) data.aoStrength = 1.0;
+
+        // Packed MR: keep metallic/roughness texture fields consistent.
+        if (data.metallicRoughnessPacked) {
+          const mtx = String(data.metallicTexture || '').trim();
+          const rtx = String(data.roughnessTexture || '').trim();
+          const use = mtx || rtx;
+          if (use) {
+            data.metallicTexture = use;
+            data.roughnessTexture = use;
+          }
+        }
+      } catch {}
+    };
+
     /**
      * @param {HTMLElement | null} container
      * @param {string} label
@@ -391,28 +483,94 @@ export function rebuildInspector(host, ui) {
       InspectorFields.addField(container, label, wrap);
     };
 
+    /** @param {HTMLElement|null} container */
+    const getLastField = (container) => {
+      if (!container) return null;
+      const fields = container.querySelectorAll('.field');
+      return fields.length > 0 ? /** @type {HTMLDivElement} */ (fields[fields.length - 1]) : null;
+    };
+
+    /** @type {HTMLDivElement|null} */
+    let metallicFactorField = null;
+    /** @type {HTMLDivElement|null} */
+    let roughnessFactorField = null;
+    /** @type {HTMLDivElement|null} */
+    let aoStrengthField = null;
+
+    const updateMatAssetVisibility = () => {
+      const hasMetalTex = !!String(data.metallicTexture || '').trim();
+      const hasRoughTex = !!String(data.roughnessTexture || '').trim();
+      const hasAoTex = !!String(data.aoTexture || '').trim();
+
+      if (metallicFactorField) metallicFactorField.style.display = hasMetalTex ? 'none' : '';
+      if (roughnessFactorField) roughnessFactorField.style.display = hasRoughTex ? 'none' : '';
+      if (aoStrengthField) aoStrengthField.style.display = hasAoTex ? 'none' : '';
+    };
+
     // Scalars / enums / booleans
     InspectorFields.addAutoWith(ui.common, 'baseColorFactor', data, 'baseColorFactor', requestSave);
+
     InspectorFields.addAutoWith(ui.common, 'metallicFactor', data, 'metallicFactor', requestSave);
+    metallicFactorField = getLastField(ui.common);
+
     InspectorFields.addAutoWith(ui.common, 'roughnessFactor', data, 'roughnessFactor', requestSave);
+    roughnessFactorField = getLastField(ui.common);
+
     InspectorFields.addAutoWith(ui.common, 'normalScale', data, 'normalScale', requestSave);
+
     InspectorFields.addAutoWith(ui.common, 'aoStrength', data, 'aoStrength', requestSave);
+    aoStrengthField = getLastField(ui.common);
+
     InspectorFields.addAutoWith(ui.common, 'alphaMode', data, 'alphaMode', requestSave);
     InspectorFields.addAutoWith(ui.common, 'alphaCutoff', data, 'alphaCutoff', requestSave);
-    InspectorFields.addAutoWith(ui.common, 'metallicRoughnessPacked', data, 'metallicRoughnessPacked', requestSave);
+    InspectorFields.addAutoWith(ui.common, 'metallicRoughnessPacked', data, 'metallicRoughnessPacked', () => {
+      ensureTextureDrivenDefaults();
+      requestSave();
+    });
 
     // Vec3
     addVec3ArrayWith(ui.common, 'emissiveFactor', data, 'emissiveFactor');
 
     // Textures
     const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
-    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', data, 'baseColorTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', data, 'metallicTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', data, 'roughnessTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', data, 'normalTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', data, 'aoTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', data, 'emissiveTexture', requestSave, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', data, 'alphaTexture', requestSave, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', data, 'baseColorTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', data, 'metallicTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', data, 'roughnessTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', data, 'normalTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', data, 'aoTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', data, 'emissiveTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', data, 'alphaTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+
+    // Initial visibility.
+    updateMatAssetVisibility();
 
     return;
   }
@@ -670,6 +828,14 @@ export function rebuildInspector(host, ui) {
         params: {},
       });
 
+      // Track editor-imported resources for cleanup if the last referencing MeshNode is deleted.
+      if (!(sceneAny.__importedMeshResources instanceof Map)) {
+        sceneAny.__importedMeshResources = new Map();
+      }
+      /** @type {{ source: string, meshKeys: string[], materialKeys: string[] }} */
+      const importMeta = { source: src, meshKeys: [meshName], materialKeys: [] };
+      try { sceneAny.__importedMeshResources.set(meshName, importMeta); } catch {}
+
       // Resolve URL like SceneLoader does.
       let gltfUrl = '';
       try {
@@ -696,6 +862,7 @@ export function rebuildInspector(host, ui) {
 			const matKey = resultAny.meshMaterials?.get(meshKey || '');
             const hint = nsMat(matKey || '__gltf_default__');
             sceneAny.registerMesh?.(nsMesh(meshKey), { type: 'gltf', mesh, material: hint });
+            try { importMeta.meshKeys.push(nsMesh(meshKey)); } catch {}
             if (!sceneAny.getMeshDefinition?.(meshKey)) sceneAny.registerMesh?.(meshKey, { type: 'gltf', mesh, material: hint });
           }
 
@@ -718,6 +885,7 @@ export function rebuildInspector(host, ui) {
             const key = nsMat(matName);
             materialKeys.push(key);
             sceneAny.registerMaterial?.(key, mat);
+            try { importMeta.materialKeys.push(key); } catch {}
             if (!sceneAny.getMaterialDefinition?.(matName)) sceneAny.registerMaterial?.(matName, mat);
           }
 
