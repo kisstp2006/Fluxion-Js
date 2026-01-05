@@ -79,6 +79,85 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
     InspectorFields.addString(ui.common, 'type', stub, 'type');
     InspectorFields.addCssColor(ui.common, 'color', stub, 'color');
 
+    // GLTF material summary (count + names).
+    try {
+      const sceneAny = /** @type {any} */ (host?.currentScene || null);
+      const meshName = String(stub?.name || '').trim();
+      if (sceneAny && meshName) {
+        if (!(sceneAny.__gltfMaterialKeysByMeshResource instanceof Map)) {
+          sceneAny.__gltfMaterialKeysByMeshResource = new Map();
+        }
+        /** @type {Map<string, string[]>} */
+        const keyMap = sceneAny.__gltfMaterialKeysByMeshResource;
+
+        /** @param {string[]} keys */
+        const showMaterials = (keys) => {
+          const uniq = Array.from(new Set((keys || []).map((k) => String(k || '').trim()).filter(Boolean)));
+          if (uniq.length === 0) return;
+          InspectorFields.addReadonly(ui.common, 'materials', uniq.length);
+
+          const list = document.createElement('div');
+          list.className = 'readonlyBox';
+          list.style.whiteSpace = 'pre-wrap';
+          list.textContent = uniq
+            .map((k) => (k.includes('::') ? k.split('::').slice(-1)[0] : k))
+            .join('\n');
+          InspectorFields.addField(ui.common, 'materialNames', list);
+        };
+
+        // Prefer editor-tracked list.
+        let materialKeys = keyMap.get(meshName) || null;
+
+        // Fallback: if SceneLoader registered a gltf-group, read unique materials from parts.
+        if ((!materialKeys || materialKeys.length === 0) && typeof sceneAny.getMeshDefinition === 'function') {
+          const def = sceneAny.getMeshDefinition(meshName);
+          if (def && def.type === 'gltf-group' && Array.isArray(def.parts)) {
+            const derived = def.parts.map((/** @type {any} */ p) => String(p?.material || '')).filter(Boolean);
+            materialKeys = derived;
+            if (derived.length > 0) {
+              try { keyMap.set(meshName, derived); } catch {}
+            }
+          } else if (def && def.type === 'gltf' && typeof def.material === 'string') {
+            // Best-effort scan for namespaced materials.
+            const prefix = `${meshName}::`;
+            const found = [];
+            try {
+              if (sceneAny.materialDefinitions instanceof Map) {
+                for (const k of sceneAny.materialDefinitions.keys()) {
+                  const ks = String(k || '');
+                  if (ks.startsWith(prefix)) found.push(ks);
+                }
+              }
+            } catch {}
+            if (found.length > 0) {
+              materialKeys = found;
+              try { keyMap.set(meshName, found); } catch {}
+            }
+          }
+
+          // If we still don't have a list but a GLTF promise is present, compute it when loaded.
+          if ((!materialKeys || materialKeys.length === 0) && def && typeof def.promise?.then === 'function') {
+            Promise.resolve(def.promise)
+              .then((result) => {
+                const resAny = /** @type {any} */ (result);
+                const names = resAny?.materials && typeof resAny.materials?.keys === 'function'
+                  ? Array.from(resAny.materials.keys()).map((k) => `${meshName}::${k}`)
+                  : [];
+                if (names.length > 0) {
+                  try { keyMap.set(meshName, names); } catch {}
+                  try { host.rebuildInspector?.(); } catch {}
+                }
+              })
+              .catch(() => {});
+          }
+        }
+
+        if (materialKeys && Array.isArray(materialKeys) && materialKeys.length > 0) {
+          showMaterials(materialKeys);
+        }
+      }
+    } catch {}
+
     if (!stub.params || typeof stub.params !== 'object') stub.params = {};
     const p = stub.params;
     for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
@@ -1119,8 +1198,69 @@ export function rebuildInspector(host, ui) {
     // (This is independent from the node's single "material" override below.)
     try {
       const keyMap = getGltfMaterialKeysByMeshResource();
-      const matKeys = keyMap.get(String(obj.source || '').trim()) || null;
+      const meshResKey = String(obj.source || '').trim();
+      let matKeys = keyMap.get(meshResKey) || null;
+
+      // Fallbacks for meshes created by SceneLoader (no editor tracking):
+      // - gltf-group: collect unique material hints from parts
+      // - gltf: scan materialDefinitions for namespaced keys, or wait on promise
+      if ((!matKeys || matKeys.length === 0) && sceneAny && meshResKey) {
+        try {
+          const def = sceneAny.getMeshDefinition?.(meshResKey) || null;
+          if (def && def.type === 'gltf-group' && Array.isArray(def.parts)) {
+            const derived = def.parts.map((/** @type {any} */ p) => String(p?.material || '')).filter(Boolean);
+            matKeys = derived;
+            if (derived.length > 0) keyMap.set(meshResKey, derived);
+          } else {
+            const prefix = `${meshResKey}::`;
+            const found = [];
+            try {
+              if (sceneAny.materialDefinitions instanceof Map) {
+                for (const k of sceneAny.materialDefinitions.keys()) {
+                  const ks = String(k || '');
+                  if (ks.startsWith(prefix)) found.push(ks);
+                }
+              }
+            } catch {}
+            if (found.length > 0) {
+              matKeys = found;
+              keyMap.set(meshResKey, matKeys);
+            }
+
+            if ((!matKeys || matKeys.length === 0) && def && typeof def.promise?.then === 'function') {
+              Promise.resolve(def.promise)
+                .then((result) => {
+                  const resAny = /** @type {any} */ (result);
+                  const names = resAny?.materials && typeof resAny.materials?.keys === 'function'
+                    ? Array.from(resAny.materials.keys()).map((k) => `${meshResKey}::${k}`)
+                    : [];
+                  if (names.length > 0) {
+                    try { keyMap.set(meshResKey, names); } catch {}
+                    try { host.rebuildInspector?.(); } catch {}
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+        } catch {}
+      }
+
       if (matKeys && Array.isArray(matKeys) && matKeys.length > 0) {
+        // Show summary (count + names) above the per-material override inputs.
+        try {
+          const uniq = Array.from(new Set(matKeys.map((k) => String(k || '').trim()).filter(Boolean)));
+          if (uniq.length > 0) {
+            InspectorFields.addReadonly(ui.common, 'materials', uniq.length);
+            const list = document.createElement('div');
+            list.className = 'readonlyBox';
+            list.style.whiteSpace = 'pre-wrap';
+            list.textContent = uniq
+              .map((k) => (k.includes('::') ? k.split('::').slice(-1)[0] : k))
+              .join('\n');
+            InspectorFields.addField(ui.common, 'materialNames', list);
+          }
+        } catch {}
+
         const overrideMap = getMaterialOverrideSourceByKey();
         const r = getRenderer();
         const baseUrl = getSceneBaseUrl();

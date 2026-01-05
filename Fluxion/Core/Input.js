@@ -15,7 +15,14 @@ export default class Input {
         }
         Input.instance = this;
 
+        // Keys are stored as stable identifiers (derived from event.code) plus
+        // legacy-friendly identifiers so existing games can keep using getKey('w').
+        // We also track pressed physical keys by event.code to avoid "stuck" keys
+        // when modifiers change event.key (e.g. Digit1 => '1' vs '!').
         this.keys = new Set();
+        this.keyCodes = new Set();
+        /** @type {Map<string, Set<string>>} */
+        this._codeToKeys = new Map();
         this.previousKeys = new Set();
         this.keyDownListeners = [];
         this.keyUpListeners = [];
@@ -34,6 +41,75 @@ export default class Input {
         window.addEventListener('mousedown', this.handleMouseDown.bind(this));
         window.addEventListener('mouseup', this.handleMouseUp.bind(this));
         window.addEventListener('mousemove', this.handleMouseMove.bind(this));
+
+        // When the tab/app loses focus, browsers may not deliver keyup/mouseup.
+        // Clearing state prevents "stuck" keys/buttons.
+        window.addEventListener('blur', () => this._resetAllInputState());
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) this._resetAllInputState();
+        });
+        document.addEventListener('pointerlockchange', () => {
+            // Pointer lock transitions change how mouse delta is reported.
+            // Don't clear pressed buttons here (it breaks RMB camera controls);
+            // just clear per-frame motion.
+            this.mouseDelta = { x: 0, y: 0 };
+        });
+    }
+
+    /**
+     * Convert a KeyboardEvent into a stable, game-friendly key id.
+     * Prefer event.code since it is not affected by Shift/Alt/caps.
+     * @param {KeyboardEvent} e
+     * @returns {string}
+     */
+    _normalizeKey(e) {
+        const code = String(e.code || '');
+        if (code.startsWith('Key') && code.length === 4) {
+            return code.slice(3).toLowerCase();
+        }
+        if (code.startsWith('Key') && code.length > 3) {
+            // e.g. KeyA -> 'a'
+            return code.slice(3).toLowerCase();
+        }
+        if (code.startsWith('Digit') && code.length > 5) {
+            // Digit1 -> '1' (stable across !)
+            return code.slice(5);
+        }
+        if (code === 'Space') return ' ';
+        // Fallback to event.key (ArrowUp, Enter, etc.)
+        return String(e.key || '');
+    }
+
+    /** @param {string} code @param {string[]} keys */
+    _rememberCodeKeys(code, keys) {
+        if (!code) return;
+        let set = this._codeToKeys.get(code);
+        if (!set) {
+            set = new Set();
+            this._codeToKeys.set(code, set);
+        }
+        for (const k of keys) {
+            const s = String(k || '');
+            if (s) set.add(s);
+        }
+    }
+
+    _resetKeyboardState() {
+        this.keys.clear();
+        this.keyCodes.clear();
+        this._codeToKeys.clear();
+        this.previousKeys = new Set();
+    }
+
+    _resetMouseState() {
+        this.mouseButtons.clear();
+        this.previousMouseButtons = new Set();
+        this.mouseDelta = { x: 0, y: 0 };
+    }
+
+    _resetAllInputState() {
+        this._resetKeyboardState();
+        this._resetMouseState();
     }
 
     /**
@@ -80,19 +156,59 @@ export default class Input {
     }
 
     handleKeyDown(e) {
-        const key = e.key; // Store the exact key string
-        if (!this.keys.has(key)) {
-            this.keys.add(key);
-            this.keyDownListeners.forEach(listener => listener(key));
+        // Ignore auto-repeat for "pressed this frame" semantics.
+        if (e && e.repeat) return;
+
+        const code = String(e.code || '');
+        const normalized = this._normalizeKey(e);
+        const exact = String(e.key || '');
+
+        if (code && this.keyCodes.has(code)) return;
+
+        if (code) this.keyCodes.add(code);
+
+        // Store multiple identifiers for backward compatibility.
+        const keysToAdd = [];
+        if (normalized) keysToAdd.push(normalized);
+        if (exact && exact !== normalized) keysToAdd.push(exact);
+
+        if (code) this._rememberCodeKeys(code, keysToAdd);
+
+        let didAdd = false;
+        for (const k of keysToAdd) {
+            if (!this.keys.has(k)) {
+                this.keys.add(k);
+                didAdd = true;
+            }
+        }
+
+        if (didAdd) {
+            // Prefer normalized identifier for listeners.
+            this.keyDownListeners.forEach(listener => listener(normalized || exact));
         }
     }
 
     handleKeyUp(e) {
-        const key = e.key; // Store the exact key string
-        if (this.keys.has(key)) {
-            this.keys.delete(key);
-            this.keyUpListeners.forEach(listener => listener(key));
+        const code = String(e.code || '');
+        const normalized = this._normalizeKey(e);
+        const exact = String(e.key || '');
+
+        if (code) this.keyCodes.delete(code);
+
+        // Remove whatever we previously associated with this physical key.
+        if (code && this._codeToKeys.has(code)) {
+            const set = this._codeToKeys.get(code);
+            if (set) {
+                for (const k of set) this.keys.delete(k);
+            }
+            this._codeToKeys.delete(code);
+        } else {
+            // Best-effort fallback.
+            if (normalized) this.keys.delete(normalized);
+            if (exact) this.keys.delete(exact);
         }
+
+        this.keyUpListeners.forEach(listener => listener(normalized || exact));
     }
 
     /**
