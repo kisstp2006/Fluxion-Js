@@ -88,6 +88,9 @@ export default class Renderer {
     // --- Directional shadow mapping (WebGL2) ---
     this.shadowsEnabled = true;
     this.shadowMapSize = 1024;
+    // Local light shadows (spot/point) use smaller tiles by default for performance.
+    // This also allows more local-light shadow tiles to fit into the atlas.
+    this.localShadowMapSize = 512;
     // Bias is expressed in linear 0..1 depth units for our packed-linear atlas.
     // We apply slope-scaled bias in shader: bias = min + slope * (1 - NdotL)^2
     this.shadowBias = 0.0025; // legacy alias (maps to min bias unless overridden)
@@ -158,9 +161,24 @@ export default class Renderer {
     this._shadowAttribs = null;
     this._shadowUniforms = null;
     this.shadowFramebuffer = null;
-    // Shadow atlas depth texture (single texture for many lights/cascades)
+    // Shadow depth texture (directional)
     this.shadowDepthTexture = null;
-    this.shadowDepthRbo = null;
+    this.shadowDepthRbo = null; // dummy color attachment
+    this._shadowMapSize = 0;
+
+    // Phase 2: one spot shadow map (2D depth texture)
+    this.spotShadowFramebuffer = null;
+    this.spotShadowDepthTexture = null;
+    this.spotShadowColorRbo = null; // dummy color attachment
+    this._spotShadowSize = 0;
+
+    // Phase 2: one point shadow map (depth cubemap)
+    this.pointShadowFramebuffer = null;
+    this.pointShadowDepthCube = null;
+    this.pointShadowColorRbo = null; // dummy color attachment
+    this._pointShadowSize = 0;
+
+    // Legacy atlas fields (kept for now; no longer used by rebooted shader)
     this.shadowAtlasSize = 2048; // power-of-two recommended (2048/4096)
     this._shadowAtlasRows = [];
     this._shadowAtlasAlloc = []; // [{id,type,x,y,size}]
@@ -186,6 +204,15 @@ export default class Renderer {
     this._inShadowPass = false;
     this._shadowPrevFb = null;
     this._shadowPrevVp = null;
+    this._shadowPrevProg = null;
+    this._shadowPrevPolyOffset = false;
+
+    // Phase 2: selected local-shadow lights and matrices (uploaded in begin3D)
+    this._spotShadowLightIndex = -1;
+    this._spotShadowTexMatrix = new Float32Array(16);
+    this._pointShadowLightIndex = -1;
+    this._pointShadowLightPos = new Float32Array(3);
+    this._pointShadowTexMatrices = new Float32Array(16 * 6);
 
     // Scratch vectors/matrices for shadow computations
     this._shadowLightPos = new Vector3();
@@ -1120,7 +1147,7 @@ export default class Renderer {
     const skyboxVertexShaderPath = '../../Fluxion/Shaders/skybox_vertex_300es.glsl';
     const skyboxFragmentShaderPath = '../../Fluxion/Shaders/skybox_fragment_300es.glsl';
     const shadowVertexShaderPath = '../../Fluxion/Shaders/shadow_depth_vertex_300es.glsl';
-    const shadowFragmentShaderPath = '../../Fluxion/Shaders/shadow_depth_fragment_300es.glsl';
+    const shadowFragmentShaderPath = '../../Fluxion/Shaders/shadow_depthonly_fragment_300es.glsl';
     const depthPrepassVertexShaderPath = '../../Fluxion/Shaders/depth_prepass_vertex_300es.glsl';
     const depthPrepassFragmentShaderPath = '../../Fluxion/Shaders/depth_prepass_fragment_300es.glsl';
     const normalPrepassVertexShaderPath = '../../Fluxion/Shaders/normal_prepass_vertex_300es.glsl';
@@ -1242,6 +1269,15 @@ export default class Renderer {
               shadowBiasMax: this.gl.getUniformLocation(this.program3D, 'u_shadowBiasMax'),
               shadowNormalOffset: this.gl.getUniformLocation(this.program3D, 'u_shadowNormalOffset'),
               hasShadowMap: this.gl.getUniformLocation(this.program3D, 'u_hasShadowMap'),
+              shadowMap: this.gl.getUniformLocation(this.program3D, 'u_shadowMap'),
+              shadowTexMatrix: this.gl.getUniformLocation(this.program3D, 'u_shadowTexMatrix'),
+              spotShadowMap: this.gl.getUniformLocation(this.program3D, 'u_spotShadowMap'),
+              spotShadowTexMatrix: this.gl.getUniformLocation(this.program3D, 'u_spotShadowTexMatrix'),
+              spotShadowLightIndex: this.gl.getUniformLocation(this.program3D, 'u_spotShadowLightIndex'),
+              pointShadowMap: this.gl.getUniformLocation(this.program3D, 'u_pointShadowMap'),
+              pointShadowTexMatrix: this.gl.getUniformLocation(this.program3D, 'u_pointShadowTexMatrix[0]'),
+              pointShadowLightPos: this.gl.getUniformLocation(this.program3D, 'u_pointShadowLightPos'),
+              pointShadowLightIndex: this.gl.getUniformLocation(this.program3D, 'u_pointShadowLightIndex'),
               shadowPcfKernel: this.gl.getUniformLocation(this.program3D, 'u_shadowPcfKernel'),
               shadowPcfRadius: this.gl.getUniformLocation(this.program3D, 'u_shadowPcfRadius'),
               shadowFadeStart: this.gl.getUniformLocation(this.program3D, 'u_shadowFadeStart'),
@@ -1300,10 +1336,13 @@ export default class Renderer {
             // Raw environment cubemap (skybox) for fallback sampling
             if (this._program3DUniforms.envMap) this.gl.uniform1i(this._program3DUniforms.envMap, 10);
 
-            // Shadow atlas sampler
-            if (this._program3DUniforms.shadowAtlas) this.gl.uniform1i(this._program3DUniforms.shadowAtlas, 11);
+            // Shadow samplers
+            if (this._program3DUniforms.shadowMap) this.gl.uniform1i(this._program3DUniforms.shadowMap, 11);
             // Scene depth sampler for contact shadows
             if (this._program3DUniforms.sceneDepthTex) this.gl.uniform1i(this._program3DUniforms.sceneDepthTex, 12);
+
+            if (this._program3DUniforms.spotShadowMap) this.gl.uniform1i(this._program3DUniforms.spotShadowMap, 13);
+            if (this._program3DUniforms.pointShadowMap) this.gl.uniform1i(this._program3DUniforms.pointShadowMap, 14);
 
             // Material debug visualization (default OFF)
             if (this._program3DUniforms.materialDebugView) this.gl.uniform1i(this._program3DUniforms.materialDebugView, 0);
@@ -2068,6 +2107,49 @@ export default class Renderer {
       gl.uniform1f(u.lightingWrap, Math.max(0.0, Math.min(1.0, Number(this.lightingWrap) || 0.0)));
     }
 
+    // Classic projected shadow map (single directional)
+    if (u?.shadowTexMatrix) {
+      if (!this._shadowBiasMat) {
+        this._shadowBiasMat = new Float32Array([
+          0.5, 0.0, 0.0, 0.0,
+          0.0, 0.5, 0.0, 0.0,
+          0.0, 0.0, 0.5, 0.0,
+          0.5, 0.5, 0.5, 1.0,
+        ]);
+      }
+      if (!this._shadowTexMatrix) this._shadowTexMatrix = new Float32Array(16);
+      if (this._shadowReady && this.shadowDepthTexture && this.shadowsEnabled) {
+        Mat4.multiply(this._shadowBiasMat, this._shadowLightViewProj, this._shadowTexMatrix);
+      } else {
+        this._shadowTexMatrix.set(Mat4.identity());
+      }
+      gl.uniformMatrix4fv(u.shadowTexMatrix, false, this._shadowTexMatrix);
+    }
+
+    if (u?.shadowMap) {
+      gl.activeTexture(gl.TEXTURE11);
+      gl.bindTexture(gl.TEXTURE_2D, (this._shadowReady && this.shadowsEnabled) ? this.shadowDepthTexture : null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    // Phase 2: one spot + one point shadowed light (if available)
+    if (u?.spotShadowLightIndex) gl.uniform1i(u.spotShadowLightIndex, this._spotShadowLightIndex | 0);
+    if (u?.spotShadowTexMatrix) gl.uniformMatrix4fv(u.spotShadowTexMatrix, false, this._spotShadowTexMatrix);
+    if (u?.spotShadowMap) {
+      gl.activeTexture(gl.TEXTURE13);
+      gl.bindTexture(gl.TEXTURE_2D, (this._spotShadowLightIndex >= 0 && this.spotShadowDepthTexture) ? this.spotShadowDepthTexture : null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
+    if (u?.pointShadowLightIndex) gl.uniform1i(u.pointShadowLightIndex, this._pointShadowLightIndex | 0);
+    if (u?.pointShadowLightPos) gl.uniform3f(u.pointShadowLightPos, this._pointShadowLightPos[0], this._pointShadowLightPos[1], this._pointShadowLightPos[2]);
+    if (u?.pointShadowTexMatrix) gl.uniformMatrix4fv(u.pointShadowTexMatrix, false, this._pointShadowTexMatrices);
+    if (u?.pointShadowMap) {
+      gl.activeTexture(gl.TEXTURE14);
+      gl.bindTexture(gl.TEXTURE_CUBE_MAP, (this._pointShadowLightIndex >= 0 && this.pointShadowDepthCube) ? this.pointShadowDepthCube : null);
+      gl.activeTexture(gl.TEXTURE0);
+    }
+
     // Shadow atlas + CSM uniforms (updated by renderShadowMaps() each frame)
     if (u?.csmCount) gl.uniform1i(u.csmCount, csmCount);
     // Use the same near/far that were used to compute cascade splits (CSM range may be clamped).
@@ -2078,11 +2160,7 @@ export default class Renderer {
     if (u?.csmLightViewProj) gl.uniformMatrix4fv(u.csmLightViewProj, false, this._csmLightViewProjData);
     if (u?.csmRects) gl.uniform4fv(u.csmRects, this._csmRectData);
     if (u?.shadowAtlasSize) gl.uniform2f(u.shadowAtlasSize, this.shadowAtlasSize, this.shadowAtlasSize);
-    if (u?.shadowAtlas) {
-      gl.activeTexture(gl.TEXTURE11);
-      gl.bindTexture(gl.TEXTURE_2D, (this._shadowReady && this.shadowsEnabled) ? this.shadowDepthTexture : null);
-      gl.activeTexture(gl.TEXTURE0);
-    }
+    // (Old atlas bindings removed in reboot)
 
     // Spot + point shadow atlas data
     if (u?.spotHasShadow) gl.uniform1iv(u.spotHasShadow, this._spotHasShadowData);
@@ -2749,40 +2827,119 @@ export default class Renderer {
     const tile = Math.max(64, (this.shadowMapSize | 0) || 1024);
     this.shadowMapSize = tile;
 
-    // Ensure atlas is large enough for 4 cascades at current tile size.
-    const minAtlas = tile * 2;
-    const atlas = Math.max(minAtlas, (this.shadowAtlasSize | 0) || 2048);
-    this.shadowAtlasSize = atlas;
+    const localTile = Math.max(64, Math.min(tile, (this.localShadowMapSize | 0) || 512));
+    this.localShadowMapSize = localTile;
 
-    // Shadow atlas stores PACKED LINEAR DEPTH (0..1) into an RGBA8 texture.
-    // A depth renderbuffer is attached for correct depth testing during the shadow pass.
+    // --- Directional depth map (2D) ---
+    // Recreate on size change (depth textures are allocated with texImage2D).
+    if (this._shadowMapSize !== tile) {
+      if (this.shadowFramebuffer) gl.deleteFramebuffer(this.shadowFramebuffer);
+      this.shadowFramebuffer = null;
+      if (this.shadowDepthTexture) gl.deleteTexture(this.shadowDepthTexture);
+      this.shadowDepthTexture = null;
+      if (this.shadowDepthRbo) gl.deleteRenderbuffer(this.shadowDepthRbo);
+      this.shadowDepthRbo = null;
+    }
+    this._shadowMapSize = tile;
+
+    // Depth texture for sampling with sampler2DShadow.
     if (!this.shadowDepthTexture) this.shadowDepthTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.shadowDepthTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, atlas, atlas, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, tile, tile, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
 
-    // Depth buffer for shadow rendering (not sampled).
+    // Dummy color attachment for maximum FBO compatibility.
     if (!this.shadowDepthRbo) this.shadowDepthRbo = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, this.shadowDepthRbo);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, atlas, atlas);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, tile, tile);
     gl.bindRenderbuffer(gl.RENDERBUFFER, null);
 
     if (!this.shadowFramebuffer) this.shadowFramebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFramebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.shadowDepthTexture, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, this.shadowDepthRbo);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.shadowDepthRbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.shadowDepthTexture, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this._shadowReady = (status === gl.FRAMEBUFFER_COMPLETE);
     if (!this._shadowReady) {
-      console.warn('Shadow atlas framebuffer incomplete:', status, '(try lowering shadowMapSize or atlas size)');
+      console.warn('Shadow framebuffer incomplete:', status, '(try lowering shadowMapSize)');
     }
+
+    // --- Spot depth map (2D) ---
+    if (this._spotShadowSize !== localTile) {
+      if (this.spotShadowFramebuffer) gl.deleteFramebuffer(this.spotShadowFramebuffer);
+      this.spotShadowFramebuffer = null;
+      if (this.spotShadowDepthTexture) gl.deleteTexture(this.spotShadowDepthTexture);
+      this.spotShadowDepthTexture = null;
+      if (this.spotShadowColorRbo) gl.deleteRenderbuffer(this.spotShadowColorRbo);
+      this.spotShadowColorRbo = null;
+    }
+    this._spotShadowSize = localTile;
+
+    if (!this.spotShadowDepthTexture) this.spotShadowDepthTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.spotShadowDepthTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT16, localTile, localTile, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    if (!this.spotShadowColorRbo) this.spotShadowColorRbo = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.spotShadowColorRbo);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, localTile, localTile);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+
+    if (!this.spotShadowFramebuffer) this.spotShadowFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.spotShadowFramebuffer);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.spotShadowColorRbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, this.spotShadowDepthTexture, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // --- Point depth map (cubemap) ---
+    if (this._pointShadowSize !== localTile) {
+      if (this.pointShadowFramebuffer) gl.deleteFramebuffer(this.pointShadowFramebuffer);
+      this.pointShadowFramebuffer = null;
+      if (this.pointShadowDepthCube) gl.deleteTexture(this.pointShadowDepthCube);
+      this.pointShadowDepthCube = null;
+      if (this.pointShadowColorRbo) gl.deleteRenderbuffer(this.pointShadowColorRbo);
+      this.pointShadowColorRbo = null;
+    }
+    this._pointShadowSize = localTile;
+
+    if (!this.pointShadowDepthCube) this.pointShadowDepthCube = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, this.pointShadowDepthCube);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_WRAP_R, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
+    gl.texParameteri(gl.TEXTURE_CUBE_MAP, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
+    for (let f = 0; f < 6; f++) {
+      gl.texImage2D(gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, 0, gl.DEPTH_COMPONENT16, localTile, localTile, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_SHORT, null);
+    }
+    gl.bindTexture(gl.TEXTURE_CUBE_MAP, null);
+
+    if (!this.pointShadowColorRbo) this.pointShadowColorRbo = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, this.pointShadowColorRbo);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, localTile, localTile);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+
+    if (!this.pointShadowFramebuffer) this.pointShadowFramebuffer = gl.createFramebuffer();
+    // (Depth face attachment is set per-face during rendering.)
   }
 
   _initSceneDepthResources(width, height) {
@@ -2790,8 +2947,24 @@ export default class Renderer {
     if (!this.isWebGL2) return false;
     const w = Math.max(1, width | 0);
     const h = Math.max(1, height | 0);
-    if (this.sceneDepthTexture && this.sceneDepthFramebuffer && this._sceneDepthW === w && this._sceneDepthH === h) {
-      return true;
+    if (this.sceneDepthTexture && this.sceneDepthFramebuffer && this._sceneDepthW === w && this._sceneDepthH === h) return true;
+
+    // If the target size changed, we must recreate resources.
+    // WebGL2 textures allocated with texStorage2D become immutable; calling texStorage2D again will error.
+    // Recreating also avoids incomplete FBOs caused by mismatched attachment sizes.
+    if (this._sceneDepthW !== w || this._sceneDepthH !== h) {
+      if (this.sceneDepthFramebuffer) {
+        gl.deleteFramebuffer(this.sceneDepthFramebuffer);
+        this.sceneDepthFramebuffer = null;
+      }
+      if (this.sceneDepthTexture) {
+        gl.deleteTexture(this.sceneDepthTexture);
+        this.sceneDepthTexture = null;
+      }
+      if (this.sceneNormalTexture) {
+        gl.deleteTexture(this.sceneNormalTexture);
+        this.sceneNormalTexture = null;
+      }
     }
 
     this._sceneDepthW = w;
@@ -2814,6 +2987,7 @@ export default class Renderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Use immutable storage when available; texture is recreated on resize above.
     if (typeof gl.texStorage2D === 'function') {
       gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
     } else {
@@ -2890,7 +3064,9 @@ export default class Renderer {
       // Upload primary shadow (CSM) uniforms so alpha encodes primary visibility for SS shadows.
       const u = this._normalPrepassUniforms;
       const csmCount = this.csmEnabled ? Math.max(1, Math.min(4, this.csmCascadeCount | 0)) : 1;
-      const hasShadowMap = (this._shadowReady && this.shadowDepthTexture && this.shadowsEnabled) ? 1 : 0;
+      // Shadow reboot: normal prepass no longer samples the primary shadow map.
+      // (This shader still contains the old atlas-based logic.)
+      const hasShadowMap = 0;
       if (u?.hasShadowMap) gl.uniform1i(u.hasShadowMap, hasShadowMap);
       if (u?.shadowBias) gl.uniform1f(u.shadowBias, Number.isFinite(this.shadowBias) ? this.shadowBias : 0.0025);
       {
@@ -2921,7 +3097,7 @@ export default class Renderer {
       if (u?.shadowAtlasSize) gl.uniform2f(u.shadowAtlasSize, this.shadowAtlasSize, this.shadowAtlasSize);
       if (u?.shadowAtlas) {
         gl.activeTexture(gl.TEXTURE11);
-        gl.bindTexture(gl.TEXTURE_2D, (this._shadowReady && this.shadowsEnabled) ? this.shadowDepthTexture : null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
         gl.activeTexture(gl.TEXTURE0);
       }
 
@@ -3351,143 +3527,180 @@ export default class Renderer {
     if (!this._shadowReady) return false;
     if (typeof drawCasters !== 'function') return false;
 
+    // Reset phase-2 selections each frame.
+    this._spotShadowLightIndex = -1;
+    this._pointShadowLightIndex = -1;
+    this._spotShadowTexMatrix.set(Mat4.identity());
+    this._pointShadowTexMatrices.fill(0);
+    this._pointShadowLightPos[0] = 0;
+    this._pointShadowLightPos[1] = 0;
+    this._pointShadowLightPos[2] = 0;
+
+    // 1) Directional
+    if (this.beginShadowPass(camera3D, lights)) {
+      try {
+        drawCasters();
+      } finally {
+        this.endShadowPass();
+      }
+    }
+
+    // 2) Spot (single)
+    this._renderSpotShadowMap(lights, drawCasters);
+
+    // 3) Point (single cubemap)
+    this._renderPointShadowMap(lights, drawCasters);
+
+    return true;
+  }
+
+  _renderSpotShadowMap(lights, drawCasters) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.shadowsEnabled) return false;
+    if (!this.shadowProgram || !this.spotShadowFramebuffer || !this.spotShadowDepthTexture) return false;
+    if (typeof drawCasters !== 'function') return false;
+
+    const srcLights = Array.isArray(lights) ? lights : [];
+    let idx = -1;
+    let L = null;
+    for (let i = 0; i < srcLights.length && i < (this.maxPbrLights | 0); i++) {
+      const t = srcLights[i];
+      if (!t) continue;
+      const type = (typeof t.type === 'number') ? (t.type | 0) : -1;
+      if (type !== LightType.Spot) continue;
+      idx = i;
+      L = t;
+      break;
+    }
+    if (idx < 0 || !L) return false;
+
     const gl = this.gl;
     const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const prevVp = gl.getParameter(gl.VIEWPORT);
     const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
     const prevPolyOffset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
-
-    // Allocate atlas tiles for this frame.
-    this._atlasReset();
-    const cascadeCount = this._computeCsmForCamera(camera3D || this._defaultCamera3D, lights);
-
-    // Reserve cascade tiles first (highest importance).
-    for (let i = 0; i < 4; i++) this._csmRectData.fill(0, i * 4, i * 4 + 4);
-    for (let cIdx = 0; cIdx < cascadeCount; cIdx++) {
-      const tile = this._atlasAlloc(this.shadowMapSize, `csm${cIdx}`);
-      if (!tile) break;
-      const r = this._atlasRectUv(tile);
-      const o = cIdx * 4;
-      this._csmRectData[o + 0] = r.ox;
-      this._csmRectData[o + 1] = r.oy;
-      this._csmRectData[o + 2] = r.sx;
-      this._csmRectData[o + 3] = r.sy;
-    }
-
-    // Reset per-light shadow data (spot/point)
-    this._spotHasShadowData.fill(0);
-    this._spotShadowRectData.fill(0);
-    this._spotShadowMatData.fill(0);
-    this._spotShadowNearFarData.fill(0);
-    this._pointShadowBaseData.fill(-1);
-    this._pointShadowRectData.fill(0);
-    this._pointShadowMatData.fill(0);
-    this._pointShadowNearFarData.fill(0);
+    const prevClearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE);
 
     try {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFramebuffer);
+      const view = new Float32Array(16);
+      const vp = new Float32Array(16);
+
+      const pos = Array.isArray(L.position) ? L.position : [0, 2, 0];
+      const dir = Array.isArray(L.direction) ? L.direction : [0, -1, 0];
+      const px0 = Number(pos[0] ?? 0), py0 = Number(pos[1] ?? 2), pz0 = Number(pos[2] ?? 0);
+      const dx0 = Number(dir[0] ?? 0), dy0 = Number(dir[1] ?? -1), dz0 = Number(dir[2] ?? 0);
+      const len = Math.hypot(dx0, dy0, dz0) || 1;
+      const tx = px0 + dx0 / len;
+      const ty = py0 + dy0 / len;
+      const tz = pz0 + dz0 / len;
+      const up = (Math.abs(dy0 / len) > 0.99) ? [0, 0, 1] : [0, 1, 0];
+      Mat4.lookAt(new Vector3(px0, py0, pz0), new Vector3(tx, ty, tz), new Vector3(up[0], up[1], up[2]), view);
+
+      const outerDeg = Number.isFinite(L.outerAngleDeg) ? L.outerAngleDeg : 24.0;
+      const fov = Math.max(0.2, Math.min(Math.PI - 0.1, (outerDeg * Math.PI / 180) * 2.0));
+      const range = Number.isFinite(L.range) ? ((L.range > 0.1) ? L.range : 25.0) : 25.0;
+      const shNear = 0.1;
+      const shFar = range;
+      Mat4.perspective(fov, 1.0, shNear, shFar, this._shadowProj);
+      Mat4.multiply(this._shadowProj, view, vp);
+
+      if (!this._shadowBiasMat) {
+        this._shadowBiasMat = new Float32Array([
+          0.5, 0.0, 0.0, 0.0,
+          0.0, 0.5, 0.0, 0.0,
+          0.0, 0.0, 0.5, 0.0,
+          0.5, 0.5, 0.5, 1.0,
+        ]);
+      }
+      Mat4.multiply(this._shadowBiasMat, vp, this._spotShadowTexMatrix);
+      this._spotShadowLightIndex = idx;
+
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.spotShadowFramebuffer);
+      gl.viewport(0, 0, this.localShadowMapSize, this.localShadowMapSize);
+      gl.clearDepth(1.0);
+      gl.clearColor(1.0, 1.0, 1.0, 1.0);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
       gl.useProgram(this.shadowProgram);
       gl.enable(gl.DEPTH_TEST);
       gl.depthFunc(gl.LEQUAL);
       gl.depthMask(true);
       gl.disable(gl.BLEND);
       gl.enable(gl.POLYGON_OFFSET_FILL);
-      // Keep raster offset small; primary biasing is slope-scaled in shader.
       gl.polygonOffset(1.0, 2.0);
 
+      if (this._shadowUniforms?.lightViewProj) gl.uniformMatrix4fv(this._shadowUniforms.lightViewProj, false, vp);
+      if (this._shadowUniforms?.shadowIsOrtho) gl.uniform1i(this._shadowUniforms.shadowIsOrtho, 0);
+      if (this._shadowUniforms?.shadowNearFar) gl.uniform2f(this._shadowUniforms.shadowNearFar, shNear, shFar);
       this._inShadowPass = true;
+      drawCasters();
+      this._inShadowPass = false;
+      return true;
+    } finally {
+      this._inShadowPass = false;
+      gl.clearColor(prevClearColor[0], prevClearColor[1], prevClearColor[2], prevClearColor[3]);
+      if (prevPolyOffset) gl.enable(gl.POLYGON_OFFSET_FILL);
+      else gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.useProgram(prevProg);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
+      gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
+    }
+  }
 
-      const prevClearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE);
-      gl.clearColor(1.0, 1.0, 1.0, 1.0);
+  _renderPointShadowMap(lights, drawCasters) {
+    if (!this.isReady) return false;
+    if (!this.isWebGL2 || !this.shadowsEnabled) return false;
+    if (!this.shadowProgram || !this.pointShadowFramebuffer || !this.pointShadowDepthCube) return false;
+    if (typeof drawCasters !== 'function') return false;
 
-      for (let cIdx = 0; cIdx < cascadeCount; cIdx++) {
-        const o = cIdx * 4;
-        const ox = this._csmRectData[o + 0];
-        const oy = this._csmRectData[o + 1];
-        const sx = this._csmRectData[o + 2];
-        const sy = this._csmRectData[o + 3];
-        if (sx <= 0 || sy <= 0) continue;
-        const px = (ox * this.shadowAtlasSize) | 0;
-        const py = (oy * this.shadowAtlasSize) | 0;
-        const ps = (sx * this.shadowAtlasSize) | 0;
-        gl.viewport(px, py, ps, ps);
-        gl.enable(gl.SCISSOR_TEST);
-        gl.scissor(px, py, ps, ps);
-        gl.clearDepth(1.0);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        gl.disable(gl.SCISSOR_TEST);
+    const srcLights = Array.isArray(lights) ? lights : [];
+    let idx = -1;
+    let L = null;
+    for (let i = 0; i < srcLights.length && i < (this.maxPbrLights | 0); i++) {
+      const t = srcLights[i];
+      if (!t) continue;
+      const type = (typeof t.type === 'number') ? (t.type | 0) : -1;
+      if (type !== LightType.Point) continue;
+      idx = i;
+      L = t;
+      break;
+    }
+    if (idx < 0 || !L) return false;
 
-        if (this._shadowUniforms?.lightViewProj) {
-          gl.uniformMatrix4fv(
-            this._shadowUniforms.lightViewProj,
-            false,
-            this._csmLightViewProjData.subarray(cIdx * 16, cIdx * 16 + 16)
-          );
-        }
-        if (this._shadowUniforms?.shadowIsOrtho) gl.uniform1i(this._shadowUniforms.shadowIsOrtho, 1);
-        if (this._shadowUniforms?.shadowNearFar) gl.uniform2f(this._shadowUniforms.shadowNearFar, 0.1, 1.0);
+    const gl = this.gl;
+    const prevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const prevVp = gl.getParameter(gl.VIEWPORT);
+    const prevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+    const prevPolyOffset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
+    const prevClearColor = gl.getParameter(gl.COLOR_CLEAR_VALUE);
 
-        drawCasters();
-      }
-
-      // Allocate + render spot/point light shadows (if lights opt-in with `castsShadow: true`)
-      const srcLights = Array.isArray(lights) ? lights : [];
-      const vp = new Float32Array(16);
+    try {
       const view = new Float32Array(16);
+      const vp = new Float32Array(16);
 
-      // Pack spot shadows
-      for (let i = 0; i < srcLights.length && i < (this.maxPbrLights | 0); i++) {
-        const L = srcLights[i];
-        if (!L) continue;
-        const type = (typeof L.type === 'number') ? (L.type | 0) : -1;
-        const casts = !!(L.castsShadow || L.castShadow || L.shadow);
-        if (!casts) continue;
+      const pos = Array.isArray(L.position) ? L.position : [0, 2, 0];
+      const px0 = Number(pos[0] ?? 0), py0 = Number(pos[1] ?? 2), pz0 = Number(pos[2] ?? 0);
+      const range = Number.isFinite(L.range) ? ((L.range > 0.1) ? L.range : 20.0) : 20.0;
+      const shNear = 0.1;
+      const shFar = range;
 
-        if (type === LightType.Spot) {
-          const tile = this._atlasAlloc(this.shadowMapSize, `spot${i}`);
-          if (!tile) continue;
-          const r = this._atlasRectUv(tile);
-          this._spotHasShadowData[i] = 1;
-          this._spotShadowRectData.set([r.ox, r.oy, r.sx, r.sy], i * 4);
+      this._pointShadowLightIndex = idx;
+      this._pointShadowLightPos[0] = px0;
+      this._pointShadowLightPos[1] = py0;
+      this._pointShadowLightPos[2] = pz0;
 
-          const pos = Array.isArray(L.position) ? L.position : [0, 2, 0];
-          const dir = Array.isArray(L.direction) ? L.direction : [0, -1, 0];
-          const px0 = Number(pos[0] ?? 0), py0 = Number(pos[1] ?? 2), pz0 = Number(pos[2] ?? 0);
-          const dx0 = Number(dir[0] ?? 0), dy0 = Number(dir[1] ?? -1), dz0 = Number(dir[2] ?? 0);
-          const len = Math.hypot(dx0, dy0, dz0) || 1;
-          const tx = px0 + dx0 / len;
-          const ty = py0 + dy0 / len;
-          const tz = pz0 + dz0 / len;
-
-          const up = (Math.abs(dy0 / len) > 0.99) ? [0, 0, 1] : [0, 1, 0];
-          Mat4.lookAt(new Vector3(px0, py0, pz0), new Vector3(tx, ty, tz), new Vector3(up[0], up[1], up[2]), view);
-          const outerDeg = Number.isFinite(L.outerAngleDeg) ? L.outerAngleDeg : 24.0;
-          const fov = Math.max(0.2, Math.min(Math.PI - 0.1, (outerDeg * Math.PI / 180) * 2.0));
-          const range = Number.isFinite(L.range) ? Math.max(0.1, L.range) : 25.0;
-          const shNear = 0.1;
-          const shFar = range;
-          Mat4.perspective(fov, 1.0, shNear, shFar, this._shadowProj);
-          Mat4.multiply(this._shadowProj, view, vp);
-          this._spotShadowMatData.set(vp, i * 16);
-          this._spotShadowNearFarData.set([shNear, shFar], i * 2);
-
-          const px = tile.x | 0;
-          const py = tile.y | 0;
-          const ps = tile.size | 0;
-          gl.viewport(px, py, ps, ps);
-          gl.enable(gl.SCISSOR_TEST);
-          gl.scissor(px, py, ps, ps);
-          gl.clearDepth(1.0);
-          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-          gl.disable(gl.SCISSOR_TEST);
-          if (this._shadowUniforms?.lightViewProj) gl.uniformMatrix4fv(this._shadowUniforms.lightViewProj, false, vp);
-          if (this._shadowUniforms?.shadowIsOrtho) gl.uniform1i(this._shadowUniforms.shadowIsOrtho, 0);
-          if (this._shadowUniforms?.shadowNearFar) gl.uniform2f(this._shadowUniforms.shadowNearFar, shNear, shFar);
-          drawCasters();
-        }
+      if (!this._shadowBiasMat) {
+        this._shadowBiasMat = new Float32Array([
+          0.5, 0.0, 0.0, 0.0,
+          0.0, 0.5, 0.0, 0.0,
+          0.0, 0.0, 0.5, 0.0,
+          0.5, 0.5, 0.5, 1.0,
+        ]);
       }
 
-      // Pack point shadows (6 faces each)
+      Mat4.perspective(Math.PI / 2, 1.0, shNear, shFar, this._shadowProj);
+
+      // Face directions (target dir, up)
       const faceDirs = [
         [1, 0, 0,  0, -1, 0],  // +X up -Y
         [-1, 0, 0, 0, -1, 0],  // -X
@@ -3497,63 +3710,56 @@ export default class Renderer {
         [0, 0, -1, 0, -1, 0],  // -Z up -Y
       ];
 
-      for (let i = 0; i < srcLights.length && i < (this.maxPbrLights | 0); i++) {
-        const L = srcLights[i];
-        if (!L) continue;
-        const type = (typeof L.type === 'number') ? (L.type | 0) : -1;
-        const casts = !!(L.castsShadow || L.castShadow || L.shadow);
-        if (!casts) continue;
-        if (type !== LightType.Point) continue;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.pointShadowFramebuffer);
+      // Attach dummy color buffer once.
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, this.pointShadowColorRbo);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      gl.readBuffer(gl.COLOR_ATTACHMENT0);
 
-        const base = i * 6;
-        this._pointShadowBaseData[i] = base;
+      gl.useProgram(this.shadowProgram);
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthFunc(gl.LEQUAL);
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.POLYGON_OFFSET_FILL);
+      gl.polygonOffset(1.0, 2.0);
 
-        const pos = Array.isArray(L.position) ? L.position : [0, 2, 0];
-        const px0 = Number(pos[0] ?? 0), py0 = Number(pos[1] ?? 2), pz0 = Number(pos[2] ?? 0);
-        const range = Number.isFinite(L.range) ? Math.max(0.1, L.range) : 20.0;
+      gl.viewport(0, 0, this.localShadowMapSize, this.localShadowMapSize);
+      gl.clearColor(1.0, 1.0, 1.0, 1.0);
 
-        const shNear = 0.1;
-        const shFar = range;
-        Mat4.perspective(Math.PI / 2, 1.0, shNear, shFar, this._shadowProj);
+      for (let f = 0; f < 6; f++) {
+        // Attach the cubemap face as depth attachment.
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_CUBE_MAP_POSITIVE_X + f, this.pointShadowDepthCube, 0);
 
-        for (let f = 0; f < 6; f++) {
-          const tile = this._atlasAlloc(this.shadowMapSize, `point${i}f${f}`);
-          if (!tile) { this._pointShadowBaseData[i] = -1; break; }
-          const r = this._atlasRectUv(tile);
-          this._pointShadowRectData.set([r.ox, r.oy, r.sx, r.sy], (base + f) * 4);
+        const dd = faceDirs[f];
+        Mat4.lookAt(
+          new Vector3(px0, py0, pz0),
+          new Vector3(px0 + dd[0], py0 + dd[1], pz0 + dd[2]),
+          new Vector3(dd[3], dd[4], dd[5]),
+          view
+        );
+        Mat4.multiply(this._shadowProj, view, vp);
 
-          const dd = faceDirs[f];
-          Mat4.lookAt(
-            new Vector3(px0, py0, pz0),
-            new Vector3(px0 + dd[0], py0 + dd[1], pz0 + dd[2]),
-            new Vector3(dd[3], dd[4], dd[5]),
-            view
-          );
-          Mat4.multiply(this._shadowProj, view, vp);
-          this._pointShadowMatData.set(vp, (base + f) * 16);
-          this._pointShadowNearFarData.set([shNear, shFar], (base + f) * 2);
+        // Store bias*vp for shader projection.
+        const out = this._pointShadowTexMatrices.subarray(f * 16, f * 16 + 16);
+        Mat4.multiply(this._shadowBiasMat, vp, out);
 
-          const px = tile.x | 0;
-          const py = tile.y | 0;
-          const ps = tile.size | 0;
-          gl.viewport(px, py, ps, ps);
-          gl.enable(gl.SCISSOR_TEST);
-          gl.scissor(px, py, ps, ps);
-          gl.clearDepth(1.0);
-          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-          gl.disable(gl.SCISSOR_TEST);
-          if (this._shadowUniforms?.lightViewProj) gl.uniformMatrix4fv(this._shadowUniforms.lightViewProj, false, vp);
-          if (this._shadowUniforms?.shadowIsOrtho) gl.uniform1i(this._shadowUniforms.shadowIsOrtho, 0);
-          if (this._shadowUniforms?.shadowNearFar) gl.uniform2f(this._shadowUniforms.shadowNearFar, shNear, shFar);
-          drawCasters();
-        }
+        gl.clearDepth(1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        if (this._shadowUniforms?.lightViewProj) gl.uniformMatrix4fv(this._shadowUniforms.lightViewProj, false, vp);
+        if (this._shadowUniforms?.shadowIsOrtho) gl.uniform1i(this._shadowUniforms.shadowIsOrtho, 0);
+        if (this._shadowUniforms?.shadowNearFar) gl.uniform2f(this._shadowUniforms.shadowNearFar, shNear, shFar);
+        this._inShadowPass = true;
+        drawCasters();
+        this._inShadowPass = false;
       }
 
-      gl.clearColor(prevClearColor[0], prevClearColor[1], prevClearColor[2], prevClearColor[3]);
       return true;
     } finally {
       this._inShadowPass = false;
-      if (!prevPolyOffset) gl.disable(gl.POLYGON_OFFSET_FILL);
+      gl.clearColor(prevClearColor[0], prevClearColor[1], prevClearColor[2], prevClearColor[3]);
+      if (prevPolyOffset) gl.enable(gl.POLYGON_OFFSET_FILL);
+      else gl.disable(gl.POLYGON_OFFSET_FILL);
       gl.useProgram(prevProg);
       gl.bindFramebuffer(gl.FRAMEBUFFER, prevFb);
       gl.viewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3]);
@@ -3578,6 +3784,8 @@ export default class Renderer {
     this._shadowPrevFb = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const vp = gl.getParameter(gl.VIEWPORT);
     this._shadowPrevVp = new Int32Array(vp); // copy
+    this._shadowPrevProg = gl.getParameter(gl.CURRENT_PROGRAM);
+    this._shadowPrevPolyOffset = gl.isEnabled(gl.POLYGON_OFFSET_FILL);
 
     // Pick a directional light direction (fallback to renderer default).
     let dirArr = this.pbrLightDirection;
@@ -3698,11 +3906,13 @@ export default class Renderer {
   endShadowPass() {
     if (!this._inShadowPass) return;
     const gl = this.gl;
-    gl.disable(gl.POLYGON_OFFSET_FILL);
+    if (this._shadowPrevPolyOffset) gl.enable(gl.POLYGON_OFFSET_FILL);
+    else gl.disable(gl.POLYGON_OFFSET_FILL);
     // Restore the framebuffer + viewport that were active before the shadow pass.
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._shadowPrevFb);
     const vp = this._shadowPrevVp;
     if (vp && vp.length >= 4) gl.viewport(vp[0], vp[1], vp[2], vp[3]);
+    if (this._shadowPrevProg !== undefined) gl.useProgram(this._shadowPrevProg);
     this._inShadowPass = false;
   }
 

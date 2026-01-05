@@ -132,6 +132,11 @@ float _shadowForCascade(int cascadeIdx, vec3 worldPos, float bias) {
   vec2 texel = 1.0 / max(u_shadowAtlasSize, vec2(1.0));
   vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
 
+  // Guard band: keep PCF taps inside the allocated tile.
+  vec2 margin = texel * max(u_shadowPcfRadius, 0.0) * 1.6;
+  margin = min(margin, rect.zw * 0.49);
+  uvAtlas = clamp(uvAtlas, rect.xy + margin, rect.xy + rect.zw - margin);
+
   // Hard shadow: single tap
   if (k == 1) {
     vec2 st = floor(uvAtlas * u_shadowAtlasSize);

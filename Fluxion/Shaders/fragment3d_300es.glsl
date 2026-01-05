@@ -1,6 +1,8 @@
 #version 300 es
 precision highp float;
 precision highp sampler2D;
+precision highp sampler2DShadow;
+precision highp samplerCubeShadow;
 
 in vec3 v_worldPos;
 in vec3 v_worldNormal;
@@ -44,46 +46,30 @@ uniform float u_exposure;          // HDR exposure multiplier (linear)
 // 5 = Ambient Occlusion (after strength applied)
 uniform int u_materialDebugView;
 
-// Shadow Atlas (single depth texture)
-uniform sampler2D u_shadowAtlas;
-uniform vec2 u_shadowAtlasSize; // in pixels
+// --- Shadow maps (depth textures + projected depth compare) ---
+// Directional shadow map
+uniform sampler2DShadow u_shadowMap;
+uniform mat4 u_shadowTexMatrix; // bias * lightViewProj
+uniform int u_hasShadowMap;      // 1 if u_shadowMap is valid
 
-// Cascaded Shadow Maps (CSM) for the main directional light.
-#define MAX_CASCADES 4
-uniform mat4 u_csmLightViewProj[MAX_CASCADES];
-// Atlas rect per cascade: offset.xy, scale.zw (UV)
-uniform vec4 u_csmRects[MAX_CASCADES];
-// End distance for each cascade in VIEW space (linear units), length MAX_CASCADES.
-uniform float u_csmSplits[MAX_CASCADES];
-uniform int u_csmCount;      // 1..MAX_CASCADES
-uniform float u_cameraNear;  // camera near plane
-uniform float u_cameraFar;   // camera far plane
-uniform float u_csmBlend;    // 0..0.5 fraction of cascade length used for blending near boundaries
+// Spot shadow map (only 1 spot light gets shadows for now)
+uniform sampler2DShadow u_spotShadowMap;
+uniform mat4 u_spotShadowTexMatrix;
+uniform int u_spotShadowLightIndex; // packed light index, -1 if none
 
-// Back-compat: old constant bias (still uploaded by some code paths)
+// Point shadow map (depth cubemap; only 1 point light gets shadows for now)
+uniform samplerCubeShadow u_pointShadowMap;
+uniform mat4 u_pointShadowTexMatrix[6];
+uniform vec3 u_pointShadowLightPos;
+uniform int u_pointShadowLightIndex; // packed light index, -1 if none
+
+// Bias added to the receiver depth in shadow space (depth01 units)
 uniform float u_shadowBias;
-// New slope-scaled bias (linear 0..1 depth units)
-uniform float u_shadowBiasMin;
-uniform float u_shadowBiasSlope;
-uniform float u_shadowBiasMax;
-// Shadow terminator mitigation: receiver normal offset in WORLD units.
-uniform float u_shadowNormalOffset;
-uniform int u_hasShadowMap;
-// Shadow filtering
-// - u_shadowPcfKernel: 1 = hard (PS2 style), 3 or 5 = PCF kernel size
-// - u_shadowPcfRadius: sample radius in *texels* (kept uniform across scene)
-// - u_shadowFadeStart/End: fade shadows out with camera distance (world units)
-uniform int u_shadowPcfKernel;
-uniform float u_shadowPcfRadius;
-uniform float u_shadowFadeStart;
-uniform float u_shadowFadeEnd;
 // 0 = shadows affect direct lighting only
 // 1 = shadows also affect INDIRECT diffuse (ambient + diffuse IBL), but NOT specular IBL and NOT emissive
 uniform int u_shadowAffectsIndirect;
 // 0..1 shadow strength (0 = disabled, 1 = full)
 uniform float u_shadowStrength;
-// 0..1 strength for the MAIN directional light's cascaded shadow maps (CSM)
-uniform float u_csmShadowStrength;
 
 // Wrap lighting: softens the terminator transition on curved surfaces.
 // 0 = standard Lambert (hard cutoff at NdotL=0)
@@ -103,15 +89,7 @@ uniform float u_contactShadowMaxDistance;  // world units
 uniform int u_contactShadowSteps;          // e.g. 8..16
 uniform float u_contactShadowThickness;    // depth thickness in 0..1 clip depth units
 
-// Atlas shadows for spot + point lights
-uniform int u_spotHasShadow[MAX_LIGHTS];
-uniform mat4 u_spotShadowMat[MAX_LIGHTS];
-uniform vec4 u_spotShadowRect[MAX_LIGHTS];   // offset.xy, scale.zw
-uniform vec2 u_spotShadowNearFar[MAX_LIGHTS]; // near, far (for linear depth compare)
-uniform int u_pointShadowBase[MAX_LIGHTS];    // base index into face arrays, -1 if none
-uniform mat4 u_pointShadowMat[MAX_LIGHTS * 6];
-uniform vec4 u_pointShadowRect[MAX_LIGHTS * 6];
-uniform vec2 u_pointShadowNearFar[MAX_LIGHTS * 6]; // near, far (for linear depth compare)
+// (Restarted shadows: removed atlas-based spot/point arrays.)
 
 // Environment (IBL)
 uniform samplerCube u_irradianceMap;  // diffuse irradiance cubemap (linear)
@@ -230,48 +208,21 @@ mat3 computeTBN(vec3 N, vec3 pos, vec2 uv) {
   return mat3(T * invMax, B * invMax, N);
 }
 
-float unpackDepth01FromRGBA8(vec4 rgba) {
-  const vec4 bitSh = vec4(
-    1.0 / 16777216.0,
-    1.0 / 65536.0,
-    1.0 / 256.0,
-    1.0
-  );
-  return dot(rgba, bitSh);
+float computeDirectionalShadow(vec3 worldPos) {
+  if (u_hasShadowMap != 1) return 1.0;
+  vec4 proj = u_shadowTexMatrix * vec4(worldPos, 1.0);
+  vec3 uvz = proj.xyz / max(proj.w, 1e-6);
+  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) return 1.0;
+  float refZ = clamp(uvz.z - u_shadowBias, 0.0, 1.0);
+  return texture(u_shadowMap, vec3(uvz.xy, refZ));
 }
 
-float _hash12(vec2 p) {
-  // Cheap stable hash in [0..1)
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
-}
-
-mat2 _rot2(float a) {
-  float s = sin(a), c = cos(a);
-  return mat2(c, -s, s, c);
-}
-
-float shadowBias01FromNdotL(float NdotL) {
-  float ndl = clamp(NdotL, 0.0, 1.0);
-  // Slope-scaled bias (tan(theta)) where theta is angle between normal and light.
-  // This increases bias at grazing angles, but stays low on front-facing surfaces.
-  float sinTheta = sqrt(max(1.0 - ndl * ndl, 0.0));
-  float tanTheta = sinTheta / max(ndl, 0.2); // clamp to avoid huge bias at ndl ~ 0
-
-  float bMin = clamp(u_shadowBiasMin, 0.0, 0.05);
-  float bSlope = clamp(u_shadowBiasSlope, 0.0, 0.05);
-  float bMax = clamp(u_shadowBiasMax, bMin, 0.05);
-
-  float b = bMin + bSlope * tanTheta;
-  return clamp(b, bMin, bMax);
-}
-
-float shadowNormalOffsetFromNdotL(float NdotL) {
-  float ndl = clamp(NdotL, 0.0, 1.0);
-  // Use sin(theta) = sqrt(1 - NdotL^2) which is the geometrically-correct perpendicular
-  // distance to escape the self-shadowing region near the terminator.
-  // This fixes the harsh diagonal lighting breaks on smooth geometry like spheres.
-  float sinTheta = sqrt(max(1.0 - ndl * ndl, 0.0));
-  return max(u_shadowNormalOffset, 0.0) * sinTheta;
+float computeSpotShadow(vec3 worldPos) {
+  vec4 proj = u_spotShadowTexMatrix * vec4(worldPos, 1.0);
+  vec3 uvz = proj.xyz / max(proj.w, 1e-6);
+  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) return 1.0;
+  float refZ = clamp(uvz.z - u_shadowBias, 0.0, 1.0);
+  return texture(u_spotShadowMap, vec3(uvz.xy, refZ));
 }
 
 // Wrap lighting: softens the terminator by allowing light to "wrap" around the surface.
@@ -285,175 +236,6 @@ float wrapNdotL(float NdotL, float wrap) {
   return clamp((NdotL + w) / (1.0 + w), 0.0, 1.0);
 }
 
-// Rotated Poisson disk for smoother PCF and fewer rings.
-// (Values in roughly [-1..1] disk; radius is applied separately.)
-const vec2 _poisson16[16] = vec2[](
-  vec2(-0.94201624, -0.39906216),
-  vec2( 0.94558609, -0.76890725),
-  vec2(-0.09418410, -0.92938870),
-  vec2( 0.34495938,  0.29387760),
-  vec2(-0.91588581,  0.45771432),
-  vec2(-0.81544232, -0.87912464),
-  vec2(-0.38277543,  0.27676845),
-  vec2( 0.97484398,  0.75648379),
-  vec2( 0.44323325, -0.97511554),
-  vec2( 0.53742981, -0.47373420),
-  vec2(-0.26496911, -0.41893023),
-  vec2( 0.79197514,  0.19090188),
-  vec2(-0.24188840,  0.99706507),
-  vec2(-0.81409955,  0.91437590),
-  vec2( 0.19984126,  0.78641367),
-  vec2( 0.14383161, -0.14100790)
-);
-
-float _shadowTapAtlas(vec2 uv, float receiverDepth01, float bias01, float dither01) {
-  float closest01 = unpackDepth01FromRGBA8(texture(u_shadowAtlas, uv));
-  float z = clamp(receiverDepth01 + dither01, 0.0, 1.0);
-  return (z - bias01 > closest01) ? 0.0 : 1.0;
-}
-
-float _linearizeDepth(float depth01, float near, float far) {
-  // depth01 is gl_FragCoord.z in [0..1]
-  float z = depth01 * 2.0 - 1.0; // NDC
-  return (2.0 * near * far) / max((far + near) - z * (far - near), 1e-6);
-}
-
-float _receiverLinear01Perspective(float depth01, vec2 nearFar) {
-  float near = max(nearFar.x, 1e-4);
-  float far = max(nearFar.y, near + 1e-3);
-  float viewD = _linearizeDepth(depth01, near, far);
-  return clamp((viewD - near) / max(far - near, 1e-6), 0.0, 1.0);
-}
-
-float _shadowForCascade(int cascadeIdx, vec3 worldPos, float bias) {
-  vec4 lightClip = u_csmLightViewProj[cascadeIdx] * vec4(worldPos, 1.0);
-  float invW = 1.0 / max(lightClip.w, 1e-6);
-  vec3 ndc = lightClip.xyz * invW;          // -1..1
-  vec3 uvz = ndc * 0.5 + 0.5;               //  0..1
-
-  // Outside the shadow frustum: treat as lit.
-  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) {
-    return 1.0;
-  }
-
-  int k = u_shadowPcfKernel;
-  // Clamp to supported kernel sizes: 1 (hard), 3, 5
-  if (k != 1 && k != 3 && k != 5) k = 3;
-  int halfK = (k - 1) / 2;
-
-  // Remap into atlas
-  vec4 rect = u_csmRects[cascadeIdx]; // offset.xy, scale.zw
-  vec2 uvAtlas = rect.xy + uvz.xy * rect.zw;
-
-  // Convert radius from texels -> UV (atlas texels)
-  vec2 texel = 1.0 / max(u_shadowAtlasSize, vec2(1.0));
-  vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
-
-  // Hard shadow (PS2 style): single tap
-  if (k == 1) {
-    // Stable pattern in light-space: seed from shadow texel coord.
-    vec2 st = floor(uvAtlas * u_shadowAtlasSize);
-    float n = _hash12(st);
-    float dither = (n - 0.5) * (1.0 / 65536.0);
-    return _shadowTapAtlas(uvAtlas, uvz.z, bias, dither);
-  }
-
-  // PCF: rotated Poisson taps (breaks up banding/rings vs regular grids)
-  float sum = 0.0;
-  float wsum = 0.0;
-  int taps = (k == 5) ? 16 : 8;
-  vec2 st = floor(uvAtlas * u_shadowAtlasSize);
-  float n = _hash12(st);
-  mat2 R = _rot2(n * 6.28318530718);
-  float dither = (n - 0.5) * (1.0 / 65536.0);
-  for (int i = 0; i < 16; i++) {
-    if (i >= taps) break;
-    vec2 off = R * _poisson16[i];
-    // Tent weight reduces visible patterns while keeping soft edges.
-    float w = clamp(1.0 - 0.5 * length(off), 0.0, 1.0);
-    sum += _shadowTapAtlas(uvAtlas + off * stepUv, uvz.z, bias, dither) * w;
-    wsum += w;
-  }
-  return (wsum > 0.0) ? (sum / wsum) : 1.0;
-}
-
-float computeDirectionalShadow(vec3 worldPos, float bias) {
-  if (u_hasShadowMap != 1) return 1.0;
-  int c = clamp(u_csmCount, 1, MAX_CASCADES);
-
-  // Use view-space depth to select cascade.
-  float near = max(u_cameraNear, 1e-4);
-  float far = max(u_cameraFar, near + 1e-3);
-  float viewDepth = _linearizeDepth(gl_FragCoord.z, near, far);
-
-  int idx = 0;
-  for (int i = 0; i < MAX_CASCADES; i++) {
-    if (i >= c) break;
-    if (viewDepth <= u_csmSplits[i]) { idx = i; break; }
-    idx = i;
-  }
-
-  // Blend between cascades to avoid hard seams.
-  float start = (idx == 0) ? near : u_csmSplits[idx - 1];
-  float end = u_csmSplits[idx];
-  float len = max(end - start, 1e-3);
-  float blendFrac = clamp(u_csmBlend, 0.0, 0.5);
-  float blendDist = len * blendFrac;
-
-  float s0 = _shadowForCascade(idx, worldPos, bias);
-  if (idx < (c - 1) && blendDist > 0.0) {
-    float blendStart = end - blendDist;
-    if (viewDepth > blendStart) {
-      float t = clamp((viewDepth - blendStart) / max(end - blendStart, 1e-6), 0.0, 1.0);
-      float s1 = _shadowForCascade(idx + 1, worldPos, bias);
-      return mix(s0, s1, t);
-    }
-  }
-  return s0;
-}
-
-float sampleAtlasShadowPerspective(vec4 rect, vec4 clip, vec2 nearFar, float bias) {
-  float invW = 1.0 / max(clip.w, 1e-6);
-  vec3 ndc = clip.xyz * invW;
-  vec3 uvz = ndc * 0.5 + 0.5;
-  if (uvz.x < 0.0 || uvz.x > 1.0 || uvz.y < 0.0 || uvz.y > 1.0 || uvz.z < 0.0 || uvz.z > 1.0) return 1.0;
-
-  vec2 uvAtlas = rect.xy + uvz.xy * rect.zw;
-  float receiver01 = _receiverLinear01Perspective(uvz.z, nearFar);
-  int k = u_shadowPcfKernel;
-  if (k != 1 && k != 3 && k != 5) k = 3;
-  vec2 texel = 1.0 / max(u_shadowAtlasSize, vec2(1.0));
-  vec2 stepUv = texel * max(u_shadowPcfRadius, 0.0);
-
-  if (k == 1) {
-    vec2 st = floor(uvAtlas * u_shadowAtlasSize);
-    float n = _hash12(st);
-    float dither = (n - 0.5) * (1.0 / 65536.0);
-    return _shadowTapAtlas(uvAtlas, receiver01, bias, dither);
-  }
-  float sum = 0.0;
-  float wsum = 0.0;
-  int taps = (k == 5) ? 16 : 8;
-  vec2 st = floor(uvAtlas * u_shadowAtlasSize);
-  float n = _hash12(st);
-  mat2 R = _rot2(n * 6.28318530718);
-  float dither = (n - 0.5) * (1.0 / 65536.0);
-  for (int i = 0; i < 16; i++) {
-    if (i >= taps) break;
-    vec2 off = R * _poisson16[i];
-    float w = clamp(1.0 - 0.5 * length(off), 0.0, 1.0);
-    sum += _shadowTapAtlas(uvAtlas + off * stepUv, receiver01, bias, dither) * w;
-    wsum += w;
-  }
-  return (wsum > 0.0) ? (sum / wsum) : 1.0;
-}
-
-float computeSpotShadow(int lightIndex, vec3 worldPos, float bias) {
-  if (u_spotHasShadow[lightIndex] != 1) return 1.0;
-  vec4 clip = u_spotShadowMat[lightIndex] * vec4(worldPos, 1.0);
-  return sampleAtlasShadowPerspective(u_spotShadowRect[lightIndex], clip, u_spotShadowNearFar[lightIndex], bias);
-}
-
 int _cubeFaceIndex(vec3 v) {
   vec3 a = abs(v);
   if (a.x >= a.y && a.x >= a.z) return (v.x >= 0.0) ? 0 : 1;
@@ -461,14 +243,15 @@ int _cubeFaceIndex(vec3 v) {
   return (v.z >= 0.0) ? 4 : 5;
 }
 
-float computePointShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float bias) {
-  int base = u_pointShadowBase[lightIndex];
-  if (base < 0) return 1.0;
-  vec3 toFrag = worldPos - lightPos;
+float computePointShadow(vec3 worldPos) {
+  vec3 toFrag = worldPos - u_pointShadowLightPos;
   int face = _cubeFaceIndex(toFrag);
-  int idx = base + face;
-  vec4 clip = u_pointShadowMat[idx] * vec4(worldPos, 1.0);
-  return sampleAtlasShadowPerspective(u_pointShadowRect[idx], clip, u_pointShadowNearFar[idx], bias);
+  vec4 proj = u_pointShadowTexMatrix[face] * vec4(worldPos, 1.0);
+  vec3 uvz = proj.xyz / max(proj.w, 1e-6);
+  if (uvz.z < 0.0 || uvz.z > 1.0) return 1.0;
+  float refZ = clamp(uvz.z - u_shadowBias, 0.0, 1.0);
+  vec3 dir = normalize(toFrag);
+  return texture(u_pointShadowMap, vec4(dir, refZ));
 }
 
 // Returns contact occlusion amount in [0..1] (1 = fully occluded).
@@ -599,14 +382,9 @@ void main() {
   // Use an epsilon only for specular math to avoid division instability at silhouettes.
   float NdotV_eps = max(NdotV, 1e-4);
 
-  // Main directional light "to light" direction (used for contact shadows + slope bias).
+  // Main directional light "to light" direction (used for contact shadows).
   vec3 dirToLight = normalize(-u_lightDirInner[0].xyz);
-  
-  // SHADOW CALCULATIONS USE GEOMETRY NORMAL (Ng), NOT SHADING NORMAL (N)
-  // This prevents mismatches where normal mapping would cause incorrect self-shadowing.
-  float mainNdotLGeom = max(dot(Ng, dirToLight), 0.0);  // <-- Ng for shadow bias
-  float mainBias01 = shadowBias01FromNdotL(mainNdotLGeom);
-  vec3 mainShadowPos = v_worldPos + Ng * shadowNormalOffsetFromNdotL(mainNdotLGeom);  // <-- Ng for offset
+  vec3 mainShadowPos = v_worldPos;
 
   // --- Shadow blending system ---
   // Primary occlusion: shadow maps (CSM)
@@ -617,16 +395,11 @@ void main() {
 
   // Soft/hard CSM visibility for the (first) directional light.
   // 1 = lit, 0 = shadowed.
-  float dirShadow = computeDirectionalShadow(mainShadowPos, mainBias01);
-  // Fade shadows out with camera distance (reduces distant shimmering + hard borders).
-  float camDist = length(v_worldPos - u_cameraPos);
-  float fadeT = smoothstep(u_shadowFadeStart, u_shadowFadeEnd, camDist);
-  dirShadow = mix(dirShadow, 1.0, fadeT);
-  float csmStrength = clamp(u_csmShadowStrength, 0.0, 1.0);
-  // Apply strength by blending between "no shadow" (1.0) and computed visibility.
-  float csmVisibility = mix(1.0, dirShadow, csmStrength);
+  float dirShadow = computeDirectionalShadow(mainShadowPos);
+  float dirStrength = clamp(u_shadowStrength, 0.0, 1.0);
+  float dirPrimaryVisibility = mix(1.0, dirShadow, dirStrength);
   // Indirect shadowing follows PRIMARY occlusion only (detail layers should not overly dim ambient).
-  float indirectShadowMul = (u_shadowAffectsIndirect == 1) ? csmVisibility : 1.0;
+  float indirectShadowMul = (u_shadowAffectsIndirect == 1) ? dirPrimaryVisibility : 1.0;
 
   // Contact shadows: short-distance occlusion toward the main directional light.
   // These are subtle and only affect very near intersections (helps grounding).
@@ -636,7 +409,7 @@ void main() {
   // Apply contact occlusion scaled by how "lit" the surface already is according to CSM.
   // - Fully shadowed by CSM (csmVisibility ~ 0): contact adds ~0
   // - Fully lit (csmVisibility ~ 1): contact applies at full strength
-  float dirVisibility = csmVisibility * (1.0 - csmVisibility * contactOcc);
+  float dirVisibility = dirPrimaryVisibility * (1.0 - dirPrimaryVisibility * contactOcc);
 
   // --- Specular anti-aliasing (prevents "tight white dots" on rough dielectrics) ---
   // Increase effective roughness based on how quickly the normal changes across the pixel.
@@ -729,27 +502,21 @@ void main() {
     // Use wrapped NdotL for diffuse to get smooth terminator transition
     vec3 diffuse = (kD * baseColor) / PI;
 
-    // Shadow lookup uses GEOMETRY NORMAL (Ng) for bias and offset to prevent
-    // mismatches between normal-mapped lighting and shadow map sampling.
+    // Shadows: classic projected depth compare.
     float shadow = 1.0;
     if (type == 0) {
       shadow = dirVisibility;
     } else if (type == 2) {
-      // Spot: use Ng for shadow calculations
-      float ndlGeom = max(dot(Ng, L), 0.0);  // <-- Ng
-      float b = shadowBias01FromNdotL(ndlGeom);
-      vec3 p = v_worldPos + Ng * shadowNormalOffsetFromNdotL(ndlGeom);  // <-- Ng
-      shadow = computeSpotShadow(i, p, b);
+      if (u_spotShadowLightIndex >= 0 && i == u_spotShadowLightIndex) {
+        shadow = computeSpotShadow(v_worldPos);
+      }
     } else if (type == 1) {
-      // Point: use Ng for shadow calculations
-      vec3 lightPos = u_lightPosType[i].xyz;
-      float ndlGeom = max(dot(Ng, L), 0.0);  // <-- Ng
-      float b = shadowBias01FromNdotL(ndlGeom);
-      vec3 p = v_worldPos + Ng * shadowNormalOffsetFromNdotL(ndlGeom);  // <-- Ng
-      shadow = computePointShadow(i, p, lightPos, b);
+      if (u_pointShadowLightIndex >= 0 && i == u_pointShadowLightIndex) {
+        shadow = computePointShadow(v_worldPos);
+      }
     }
 
-    // Apply shadow-map strength to non-directional lights (directional uses u_csmShadowStrength + detail blend above).
+    // Apply shadow strength to non-directional lights (directional already applied above).
     if (type != 0) {
       shadow = mix(1.0, shadow, clamp(u_shadowStrength, 0.0, 1.0));
     }

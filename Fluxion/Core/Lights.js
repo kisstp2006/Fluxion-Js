@@ -60,6 +60,9 @@ export class PointLight {
     this.category = 'light';
     this.type = LightType.Point;
     this.name = opts.name || 'PointLight';
+    // Match directional-light behavior: shadows work out-of-the-box.
+    // Scenes can explicitly disable with castsShadow="false".
+    this.castsShadow = true;
     this.position = _toVec3(opts.position, [0, 2, 0]);
     this.color = _toVec3(opts.color, [1, 1, 1]);
     // Intensity is a scalar multiplier (physically-inspired when combined with 1/r^2).
@@ -94,6 +97,9 @@ export class SpotLight {
     this.category = 'light';
     this.type = LightType.Spot;
     this.name = opts.name || 'SpotLight';
+    // Match directional-light behavior: shadows work out-of-the-box.
+    // Scenes can explicitly disable with castsShadow="false".
+    this.castsShadow = true;
     this.position = _toVec3(opts.position, [0, 2, 0]);
     this.direction = _norm3(_toVec3(opts.direction, [0, -1, 0]));
     this.color = _toVec3(opts.color, [1, 1, 1]);
