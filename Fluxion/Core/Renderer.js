@@ -1228,6 +1228,7 @@ export default class Renderer {
               ambientColor: this.gl.getUniformLocation(this.program3D, 'u_ambientColor'),
 
               baseColorFactor: this.gl.getUniformLocation(this.program3D, 'u_baseColorFactor'),
+              uvScale: this.gl.getUniformLocation(this.program3D, 'u_uvScale'),
               metallicFactor: this.gl.getUniformLocation(this.program3D, 'u_metallicFactor'),
               roughnessFactor: this.gl.getUniformLocation(this.program3D, 'u_roughnessFactor'),
               normalScale: this.gl.getUniformLocation(this.program3D, 'u_normalScale'),
@@ -2703,6 +2704,9 @@ export default class Renderer {
     // Factors (prefer PBR naming, but accept legacy albedoColor)
     const baseFactor = m.baseColorFactor || m.albedoColor || [1, 1, 1, 1];
     if (u?.baseColorFactor) gl.uniform4fv(u.baseColorFactor, baseFactor);
+
+    const uvScale = m.uvScale || [1, 1];
+    if (u?.uvScale) gl.uniform2fv(u.uvScale, uvScale);
 
     const metallicFactor = Number.isFinite(m.metallicFactor) ? Math.min(1.0, Math.max(0.0, m.metallicFactor)) : 0.0;
     if (u?.metallicFactor) gl.uniform1f(u.metallicFactor, metallicFactor);

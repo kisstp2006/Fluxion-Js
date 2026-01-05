@@ -35,6 +35,13 @@ export default class SceneLoader {
                 try { mat.albedoColor = [c[0], c[1], c[2], c[3]]; } catch {}
             }
 
+            // UV scale / tiling
+            const uvScaleAttr = node.getAttribute('uvScale') || node.getAttribute('uvTiling') || node.getAttribute('tiling');
+            if (uvScaleAttr) {
+                const uv = SceneLoader._parseVec2(uvScaleAttr);
+                mat.uvScale = [uv[0], uv[1]];
+            }
+
             if (node.hasAttribute('metallicFactor') || node.hasAttribute('metallic')) {
                 const m = parseFloat(node.getAttribute('metallicFactor') || node.getAttribute('metallic') || '0');
                 mat.metallicFactor = Math.min(1, Math.max(0, m));
@@ -316,6 +323,7 @@ export default class SceneLoader {
                     if (srcAttr) matXml.source = srcAttr;
 
                     matXml.baseColorFactor = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color') || '';
+                    matXml.uvScale = child.getAttribute('uvScale') || child.getAttribute('uvTiling') || child.getAttribute('tiling') || '';
                     matXml.metallicFactor = child.getAttribute('metallicFactor') || child.getAttribute('metallic') || '';
                     matXml.roughnessFactor = child.getAttribute('roughnessFactor') || child.getAttribute('roughness') || '';
                     matXml.normalScale = child.getAttribute('normalScale') || '';
@@ -356,6 +364,10 @@ export default class SceneLoader {
                     // Factors (back-compat: albedoColor/color)
                     const baseColorAttr = child.getAttribute('baseColorFactor') || child.getAttribute('albedoColor') || child.getAttribute('color');
                     if (baseColorAttr) mat.albedoColor = this._parseColor(baseColorAttr);
+
+                    // UV scale / tiling
+                    const uvScaleAttr = child.getAttribute('uvScale') || child.getAttribute('uvTiling') || child.getAttribute('tiling');
+                    if (uvScaleAttr) mat.uvScale = this._parseVec2(uvScaleAttr);
 
                     // Metallic/Roughness factors
                     if (child.hasAttribute('metallicFactor') || child.hasAttribute('metallic')) {
@@ -738,6 +750,22 @@ export default class SceneLoader {
         }
 
         return [1, 1, 1, 1];
+    }
+
+    /**
+     * Parse a vec2 string into [x,y] floats.
+     * Supports: "x,y" or "x y" or single "x" (replicated).
+     * @param {string | null} str
+     * @returns {[number,number]}
+     */
+    static _parseVec2(str) {
+        if (!str) return [1, 1];
+        const s = String(str).trim();
+        if (!s) return [1, 1];
+        const parts = s.split(/[\s,]+/).map(p => parseFloat(p.trim())).filter(v => !Number.isNaN(v));
+        if (parts.length >= 2) return [parts[0], parts[1]];
+        if (parts.length === 1) return [parts[0], parts[0]];
+        return [1, 1];
     }
 
     /**

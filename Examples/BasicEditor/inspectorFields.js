@@ -232,6 +232,49 @@ export function syncBoundFields(root) {
 }
 
 /**
+ * Hides/shows inspector fields based on the provided query.
+ * Matches against the visible label text.
+ * @param {HTMLElement | null} root
+ * @param {string} query
+ */
+export function applyInspectorFilter(root, query) {
+	if (!root) return;
+	const q = String(query || '').trim().toLowerCase();
+	const fields = Array.from(root.querySelectorAll('.field')).filter((n) => n instanceof HTMLElement);
+	const titles = Array.from(root.querySelectorAll('.sectionTitle.subSectionTitle')).filter((n) => n instanceof HTMLElement);
+
+	if (!q) {
+		for (const el of fields) /** @type {HTMLElement} */ (el).style.display = '';
+		for (const el of titles) /** @type {HTMLElement} */ (el).style.display = '';
+		return;
+	}
+
+	// First pass: show/hide fields.
+	for (const el of fields) {
+		const h = /** @type {HTMLElement} */ (el);
+		const lab = h.querySelector('.label');
+		const txt = String(lab ? lab.textContent : h.textContent).trim().toLowerCase();
+		h.style.display = txt.includes(q) ? '' : 'none';
+	}
+
+	// Second pass: hide subsection titles that have no visible fields following them.
+	for (const t of titles) {
+		/** @type {HTMLElement|null} */
+		let cur = /** @type {HTMLElement} */ (t);
+		let hasVisible = false;
+		for (let i = 0; i < 200; i++) {
+			cur = /** @type {HTMLElement|null} */ (cur?.nextElementSibling || null);
+			if (!cur) break;
+			if (cur.classList && cur.classList.contains('sectionTitle')) break;
+			if (cur.classList && cur.classList.contains('field')) {
+				if (cur.style.display !== 'none') { hasVisible = true; break; }
+			}
+		}
+		/** @type {HTMLElement} */ (t).style.display = hasVisible ? '' : 'none';
+	}
+}
+
+/**
  * @param {HTMLElement | null} container
  * @param {string} labelText
  * @param {HTMLElement} node
@@ -729,7 +772,7 @@ export function addStringWith(container, label, obj, key, onChanged) {
  * @param {any} obj
  * @param {string} key
  * @param {() => void} onChanged
- * @param {{ acceptExtensions?: string[], importToWorkspaceUrl?: boolean, debounceMs?: number }=} opts
+ * @param {{ acceptExtensions?: string[], importToWorkspaceUrl?: boolean, debounceMs?: number, onClick?: (ev: MouseEvent, input: HTMLInputElement) => void, onFocus?: (ev: FocusEvent, input: HTMLInputElement) => void }=} opts
  */
 export function addStringWithDrop(container, label, obj, key, onChanged, opts = {}) {
 	if (!obj) return;
@@ -737,6 +780,18 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	const input = document.createElement('input');
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
+	const onClick = opts ? opts.onClick : null;
+	if (typeof onClick === 'function') {
+		input.addEventListener('click', (ev) => {
+			try { onClick(/** @type {any} */ (ev), input); } catch {}
+		});
+	}
+	const onFocus = opts ? opts.onFocus : null;
+	if (typeof onFocus === 'function') {
+		input.addEventListener('focus', (ev) => {
+			try { onFocus(/** @type {any} */ (ev), input); } catch {}
+		});
+	}
 	_bindField(input, obj, key, 'text');
 	/** @type {{had:boolean,value:any}|null} */
 	let editBefore = null;

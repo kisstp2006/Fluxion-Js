@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://cyai7bubpvlxk"
+path="res://.godot/imported/depth_prepass_vertex_300es.glsl-6850b0fa4f61c0cebbccf241f0bcc76c.res"
+
+[deps]
+
+source_file="res://game engines/Fluxion-Js/Fluxion/Shaders/depth_prepass_vertex_300es.glsl"
+dest_files=["res://.godot/imported/depth_prepass_vertex_300es.glsl-6850b0fa4f61c0cebbccf241f0bcc76c.res"]
+
+[params]
+

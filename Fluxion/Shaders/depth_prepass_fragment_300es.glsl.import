@@ -1,0 +1,14 @@
+[remap]
+
+importer="glsl"
+type="RDShaderFile"
+uid="uid://6f8x8b0jym07"
+path="res://.godot/imported/depth_prepass_fragment_300es.glsl-33af6676a7d1d8b682f0ac598625b839.res"
+
+[deps]
+
+source_file="res://game engines/Fluxion-Js/Fluxion/Shaders/depth_prepass_fragment_300es.glsl"
+dest_files=["res://.godot/imported/depth_prepass_fragment_300es.glsl-33af6676a7d1d8b682f0ac598625b839.res"]
+
+[params]
+

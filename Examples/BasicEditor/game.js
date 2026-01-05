@@ -68,6 +68,7 @@ const ui = {
   animSpriteModal: /** @type {HTMLDivElement|null} */ (null),
   animSpriteCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   animSpriteSubtitle: /** @type {HTMLDivElement|null} */ (null),
+  inspectorFilterInput: /** @type {HTMLInputElement|null} */ (null),
   animSpriteAnimList: /** @type {HTMLDivElement|null} */ (null),
   animSpriteNameInput: /** @type {HTMLInputElement|null} */ (null),
   animSpriteApplyBtn: /** @type {HTMLButtonElement|null} */ (null),
@@ -479,6 +480,7 @@ const game = {
     ui.mode3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode3dBtn"));
     ui.tree = /** @type {HTMLDivElement} */ (document.getElementById("sceneTree"));
     ui.inspectorSubtitle = /** @type {HTMLDivElement} */ (document.getElementById("inspectorSubtitle"));
+    ui.inspectorFilterInput = /** @type {HTMLInputElement} */ (document.getElementById('inspectorFilterInput'));
     ui.common = /** @type {HTMLDivElement} */ (document.getElementById("inspectorCommon"));
     ui.transform = /** @type {HTMLDivElement} */ (document.getElementById("inspectorTransform"));
     ui.overlay = /** @type {HTMLDivElement} */ (document.getElementById("overlay"));
@@ -493,6 +495,16 @@ const game = {
 
     // Avoid inspector auto-refresh fighting clicks.
     this._setupInspectorInteractionGuards();
+
+    // Inspector filter (non-destructive: hides fields by label).
+    /** @type {any} */ (this)._inspectorFilter = '';
+    ui.inspectorFilterInput?.addEventListener('input', () => {
+      try {
+        /** @type {any} */ (this)._inspectorFilter = String(ui.inspectorFilterInput?.value || '');
+        InspectorFields.applyInspectorFilter(ui.common, /** @type {any} */ (this)._inspectorFilter);
+        InspectorFields.applyInspectorFilter(ui.transform, /** @type {any} */ (this)._inspectorFilter);
+      } catch {}
+    });
 
     // Bottom panel tabs
     ui.assetTabAssetsBtn?.addEventListener('click', () => this._setBottomTab('assets'));
@@ -1539,6 +1551,7 @@ const game = {
       if (!('alphaMode' in data)) data.alphaMode = 'OPAQUE';
       if (!('alphaCutoff' in data)) data.alphaCutoff = 0.5;
       if (!('metallicRoughnessPacked' in data)) data.metallicRoughnessPacked = false;
+      if (!('uvScale' in data)) data.uvScale = [1, 1];
       for (const k of ['baseColorTexture', 'metallicTexture', 'roughnessTexture', 'normalTexture', 'aoTexture', 'emissiveTexture', 'alphaTexture']) {
         if (!(k in data)) data[k] = '';
       }
@@ -1589,7 +1602,21 @@ const game = {
     const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
     const cleanRel = String(cur.pathRel || '').replace(/^[.](?:\\|\/)?/, '').replace(/^\/+/,'').replace(/\\/g,'/');
     const absPath = `${rootAbs}/${cleanRel}`;
-    const content = JSON.stringify(cur.data, null, 2) + '\n';
+    // Keep saved .mat JSON clean: strip editor-only UI keys.
+    const dataToSave = (() => {
+      try {
+        const d = cur.data;
+        const out = (d && typeof d === 'object') ? { ...d } : {};
+        delete out.useBaseColorTexture;
+        delete out.useMetallicTexture;
+        delete out.useRoughnessTexture;
+        return out;
+      } catch {
+        return cur.data;
+      }
+    })();
+
+    const content = JSON.stringify(dataToSave, null, 2) + '\n';
 
     const res = await electronAPI.saveProjectFile(absPath, content);
     if (!res || !res.ok) {

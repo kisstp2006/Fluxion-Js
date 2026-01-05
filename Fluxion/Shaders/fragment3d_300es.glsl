@@ -30,6 +30,7 @@ uniform vec3 u_ambientColor;   // linear RGB (indirect only)
 // NOTE: baseColorFactor is authored like an albedo color (typically picked in sRGB),
 // so we convert its RGB to linear before lighting, matching the texture workflow.
 uniform vec4 u_baseColorFactor;    // sRGB RGB + linear A
+uniform vec2 u_uvScale;            // UV tiling multiplier
 uniform float u_metallicFactor;    // 0..1
 uniform float u_roughnessFactor;   // 0..1
 uniform float u_normalScale;       // >=0
@@ -295,12 +296,13 @@ float computeContactOcclusion(vec3 worldPos, vec3 dirToLight) {
 
 void main() {
   // --- Material sampling ---
-  vec4 baseTex = texture(u_baseColorMap, v_uv);
+  vec2 uv = v_uv * u_uvScale;
+  vec4 baseTex = texture(u_baseColorMap, uv);
   vec3 baseFactorLin = srgbToLinear(u_baseColorFactor.rgb);
   vec3 baseColor = srgbToLinear(baseTex.rgb) * baseFactorLin;
 
   float alpha = baseTex.a * u_baseColorFactor.a;
-  alpha *= texture(u_alphaMap, v_uv).r;
+  alpha *= texture(u_alphaMap, uv).r;
   alpha = clamp(alpha, 0.0, 1.0);
 
   // Alpha mode
@@ -311,8 +313,8 @@ void main() {
     alpha = 1.0;
   }
 
-  vec4 mr = texture(u_metallicMap, v_uv);
-  vec4 rr = texture(u_roughnessMap, v_uv);
+  vec4 mr = texture(u_metallicMap, uv);
+  vec4 rr = texture(u_roughnessMap, uv);
   float metallic = (u_metallicRoughnessPacked == 1)
     ? clamp(mr.b * u_metallicFactor, 0.0, 1.0)
     : clamp(mr.r * u_metallicFactor, 0.0, 1.0);
@@ -320,12 +322,12 @@ void main() {
     ? clamp(mr.g * u_roughnessFactor, 0.04, 1.0)
     : clamp(rr.r * u_roughnessFactor, 0.04, 1.0);
 
-  float aoValue = texture(u_aoMap, v_uv).r;
+  float aoValue = texture(u_aoMap, uv).r;
   float aoStrength = clamp(u_aoStrength, 0.0, 1.0);
   // AO affects INDIRECT lighting only (ambient / IBL diffuse). It must NOT darken direct light or specular.
   float ao = mix(1.0, aoValue, aoStrength);
 
-  vec3 emissive = srgbToLinear(texture(u_emissiveMap, v_uv).rgb) * u_emissiveFactor;
+  vec3 emissive = srgbToLinear(texture(u_emissiveMap, uv).rgb) * u_emissiveFactor;
 
   // ============================================================================
   // GEOMETRY NORMAL (Ng) vs SHADING NORMAL (N) SEPARATION
@@ -344,10 +346,10 @@ void main() {
   
   // Shading normal: starts as geometric, then modified by normal map
   vec3 N = Ng;
-  vec3 nTex = texture(u_normalMap, v_uv).xyz * 2.0 - 1.0;
+  vec3 nTex = texture(u_normalMap, uv).xyz * 2.0 - 1.0;
   nTex.xy *= max(u_normalScale, 0.0);
   nTex = normalize(nTex);
-  mat3 TBN = computeTBN(N, v_worldPos, v_uv);
+  mat3 TBN = computeTBN(N, v_worldPos, uv);
   N = normalize(TBN * nTex);
 
   // --- Material debug view (bypass ALL lighting) ---

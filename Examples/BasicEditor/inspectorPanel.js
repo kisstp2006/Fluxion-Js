@@ -493,10 +493,42 @@ export function rebuildInspector(host, ui) {
       return;
     }
 
+    /** @param {string} key @param {boolean} def */
+    const ensureUiBool = (key, def) => {
+      try {
+        // If it exists and is enumerable (from old saves), keep but we will strip on save.
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+          data[key] = !!data[key];
+          return;
+        }
+        Object.defineProperty(data, key, { value: !!def, writable: true, configurable: true, enumerable: false });
+      } catch {
+        // Fallback: enumerable property (will be stripped on save).
+        // @ts-ignore
+        data[key] = !!def;
+      }
+    };
+
     const requestSave = () => {
       try {
         if (typeof host._requestSaveMatAsset === 'function') host._requestSaveMatAsset();
       } catch {}
+    };
+
+    /** @param {string} title @param {boolean=} open */
+    const addGroup = (title, open = true) => {
+      if (!ui.common) return null;
+      const details = document.createElement('details');
+      details.open = !!open;
+      const summary = document.createElement('summary');
+      summary.className = 'sectionTitle subSectionTitle';
+      summary.textContent = title;
+      details.appendChild(summary);
+      const inner = document.createElement('div');
+      inner.className = 'form';
+      details.appendChild(inner);
+      ui.common.appendChild(details);
+      return inner;
     };
 
     const ensureTextureDrivenDefaults = () => {
@@ -562,6 +594,44 @@ export function rebuildInspector(host, ui) {
       InspectorFields.addField(container, label, wrap);
     };
 
+    /**
+     * @param {HTMLElement | null} container
+     * @param {string} label
+     * @param {any} obj
+     * @param {string} key
+     */
+    const addVec2ArrayWith = (container, label, obj, key) => {
+      if (!container || !obj || !(key in obj)) return;
+      const arr = obj[key];
+      if (!Array.isArray(arr) || arr.length < 2) return;
+
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.gap = '6px';
+
+      /** @param {number} i */
+      const make = (i) => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.01';
+        input.value = String(Number(arr[i]) || 1);
+        input.style.width = '80px';
+        const apply = () => {
+          const v = Number(input.value);
+          if (!Number.isFinite(v)) return;
+          arr[i] = v;
+          requestSave();
+        };
+        input.addEventListener('input', apply);
+        input.addEventListener('change', apply);
+        return input;
+      };
+
+      wrap.appendChild(make(0));
+      wrap.appendChild(make(1));
+      InspectorFields.addField(container, label, wrap);
+    };
+
     /** @param {HTMLElement|null} container */
     const getLastField = (container) => {
       if (!container) return null;
@@ -576,80 +646,153 @@ export function rebuildInspector(host, ui) {
     /** @type {HTMLDivElement|null} */
     let aoStrengthField = null;
 
+    /** @type {HTMLDivElement|null} */
+    let baseColorFactorField = null;
+    /** @type {HTMLDivElement|null} */
+    let baseColorTextureField = null;
+    /** @type {HTMLDivElement|null} */
+    let metallicTextureField = null;
+    /** @type {HTMLDivElement|null} */
+    let roughnessTextureField = null;
+
+    // Optional UI booleans (editor-only; stripped on save).
+    ensureUiBool('useBaseColorTexture', !!String(data.baseColorTexture || '').trim());
+    ensureUiBool('useMetallicTexture', !!String(data.metallicTexture || '').trim());
+    ensureUiBool('useRoughnessTexture', !!String(data.roughnessTexture || '').trim());
+
     const updateMatAssetVisibility = () => {
+      const useBaseTex = !!data.useBaseColorTexture;
+      const useMetalTex = !!data.useMetallicTexture;
+      const useRoughTex = !!data.useRoughnessTexture;
+
       const hasMetalTex = !!String(data.metallicTexture || '').trim();
       const hasRoughTex = !!String(data.roughnessTexture || '').trim();
       const hasAoTex = !!String(data.aoTexture || '').trim();
 
-      if (metallicFactorField) metallicFactorField.style.display = hasMetalTex ? 'none' : '';
-      if (roughnessFactorField) roughnessFactorField.style.display = hasRoughTex ? 'none' : '';
+      if (baseColorFactorField) baseColorFactorField.style.display = useBaseTex ? 'none' : '';
+      if (baseColorTextureField) baseColorTextureField.style.display = useBaseTex ? '' : 'none';
+
+      if (metallicFactorField) metallicFactorField.style.display = useMetalTex ? 'none' : '';
+      if (metallicTextureField) metallicTextureField.style.display = useMetalTex ? '' : 'none';
+
+      if (roughnessFactorField) roughnessFactorField.style.display = useRoughTex ? 'none' : '';
+      if (roughnessTextureField) roughnessTextureField.style.display = useRoughTex ? '' : 'none';
+
       if (aoStrengthField) aoStrengthField.style.display = hasAoTex ? 'none' : '';
+
+      // If user disables texture usage, ensure the texture path is cleared so runtime behavior matches.
+      // (We don't use the boolean at runtime; clearing keeps results intuitive.)
+      try {
+        if (!useBaseTex && String(data.baseColorTexture || '').trim()) data.baseColorTexture = '';
+        if (!useMetalTex && String(data.metallicTexture || '').trim()) data.metallicTexture = '';
+        if (!useRoughTex && String(data.roughnessTexture || '').trim()) data.roughnessTexture = '';
+      } catch {}
     };
 
-    // Scalars / enums / booleans
-    InspectorFields.addAutoWith(ui.common, 'baseColorFactor', data, 'baseColorFactor', requestSave);
+    // Groups
+    const gAlbedo = addGroup('Albedo', true);
+    const gOrm = addGroup('Orm', true);
+    const gNormal = addGroup('Normal Map', false);
+    const gAo = addGroup('Ambient Occlusion', false);
+    const gEmission = addGroup('Emission', false);
+    const gTransparency = addGroup('Transparency', false);
+    const gUv = addGroup('Uv', false);
 
-    InspectorFields.addAutoWith(ui.common, 'metallicFactor', data, 'metallicFactor', requestSave);
-    metallicFactorField = getLastField(ui.common);
+    // Albedo
+    InspectorFields.addAutoWith(gAlbedo, 'Color', data, 'baseColorFactor', requestSave);
+    baseColorFactorField = getLastField(gAlbedo);
+    InspectorFields.addToggleWith(gAlbedo, 'Use Texture', data, 'useBaseColorTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    });
 
-    InspectorFields.addAutoWith(ui.common, 'roughnessFactor', data, 'roughnessFactor', requestSave);
-    roughnessFactorField = getLastField(ui.common);
-
-    InspectorFields.addAutoWith(ui.common, 'normalScale', data, 'normalScale', requestSave);
-
-    InspectorFields.addAutoWith(ui.common, 'aoStrength', data, 'aoStrength', requestSave);
-    aoStrengthField = getLastField(ui.common);
-
-    InspectorFields.addAutoWith(ui.common, 'alphaMode', data, 'alphaMode', requestSave);
-    InspectorFields.addAutoWith(ui.common, 'alphaCutoff', data, 'alphaCutoff', requestSave);
-    InspectorFields.addAutoWith(ui.common, 'metallicRoughnessPacked', data, 'metallicRoughnessPacked', () => {
+    // ORM
+    InspectorFields.addAutoWith(gOrm, 'Metallic', data, 'metallicFactor', requestSave);
+    metallicFactorField = getLastField(gOrm);
+    InspectorFields.addToggleWith(gOrm, 'Metallic Texture', data, 'useMetallicTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    });
+    InspectorFields.addAutoWith(gOrm, 'Roughness', data, 'roughnessFactor', requestSave);
+    roughnessFactorField = getLastField(gOrm);
+    InspectorFields.addToggleWith(gOrm, 'Roughness Texture', data, 'useRoughnessTexture', () => {
+      ensureTextureDrivenDefaults();
+      updateMatAssetVisibility();
+      requestSave();
+    });
+    InspectorFields.addAutoWith(gOrm, 'Packed MR', data, 'metallicRoughnessPacked', () => {
       ensureTextureDrivenDefaults();
       requestSave();
     });
 
-    // Vec3
-    addVec3ArrayWith(ui.common, 'emissiveFactor', data, 'emissiveFactor');
+    // Normal/AO/Emission/Transparency/UV
+    InspectorFields.addAutoWith(gNormal, 'Scale', data, 'normalScale', requestSave);
+    InspectorFields.addAutoWith(gAo, 'Strength', data, 'aoStrength', requestSave);
+    aoStrengthField = getLastField(gAo);
+    addVec3ArrayWith(gEmission, 'Color', data, 'emissiveFactor');
+    InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', data, 'alphaMode', requestSave);
+    InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', data, 'alphaCutoff', requestSave);
+    if (!('uvScale' in data)) data.uvScale = [1, 1];
+    if (!Array.isArray(data.uvScale) || data.uvScale.length < 2) data.uvScale = [1, 1];
+    addVec2ArrayWith(gUv, 'UV Scale', data, 'uvScale');
 
-    // Textures
+    // Texture pickers
     const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
-    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', data, 'baseColorTexture', () => {
+    InspectorFields.addStringWithDrop(gAlbedo, 'Texture', data, 'baseColorTexture', () => {
+      ensureTextureDrivenDefaults();
+      // When a texture is set manually, force toggle on.
+      try { data.useBaseColorTexture = !!String(data.baseColorTexture || '').trim(); } catch {}
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    baseColorTextureField = getLastField(gAlbedo);
+
+    InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture File', data, 'metallicTexture', () => {
+      ensureTextureDrivenDefaults();
+      try { data.useMetallicTexture = !!String(data.metallicTexture || '').trim(); } catch {}
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    metallicTextureField = getLastField(gOrm);
+
+    InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture File', data, 'roughnessTexture', () => {
+      ensureTextureDrivenDefaults();
+      try { data.useRoughnessTexture = !!String(data.roughnessTexture || '').trim(); } catch {}
+      updateMatAssetVisibility();
+      requestSave();
+    }, texOpts);
+    roughnessTextureField = getLastField(gOrm);
+
+    InspectorFields.addStringWithDrop(gNormal, 'Texture', data, 'normalTexture', () => {
+      ensureTextureDrivenDefaults();
+      requestSave();
+    }, texOpts);
+
+    InspectorFields.addStringWithDrop(gAo, 'Texture', data, 'aoTexture', () => {
       ensureTextureDrivenDefaults();
       updateMatAssetVisibility();
       requestSave();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', data, 'metallicTexture', () => {
+
+    InspectorFields.addStringWithDrop(gEmission, 'Texture', data, 'emissiveTexture', () => {
       ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
       requestSave();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', data, 'roughnessTexture', () => {
+
+    InspectorFields.addStringWithDrop(gTransparency, 'Alpha Texture', data, 'alphaTexture', () => {
       ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', data, 'normalTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', data, 'aoTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', data, 'emissiveTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', data, 'alphaTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
       requestSave();
     }, texOpts);
 
     // Initial visibility.
     updateMatAssetVisibility();
+
+    // Apply inspector filter (if any) after building UI.
+    try {
+      InspectorFields.applyInspectorFilter(ui.common, String(host?._inspectorFilter || ''));
+    } catch {}
 
     return;
   }
@@ -1265,6 +1408,19 @@ export function rebuildInspector(host, ui) {
         const r = getRenderer();
         const baseUrl = getSceneBaseUrl();
 
+        /** @param {string} rawPath */
+        const tryOpenMatAsset = async (rawPath) => {
+          const raw = String(rawPath || '').trim();
+          if (!raw) return;
+          if (!raw.toLowerCase().endsWith('.mat')) return;
+          try {
+            if (typeof host._loadMatAssetForInspector === 'function') await host._loadMatAssetForInspector(raw);
+            if (typeof host.rebuildInspector === 'function') host.rebuildInspector();
+          } catch (e) {
+            console.warn('Failed to open material asset inspector for', raw, e);
+          }
+        };
+
         /** @param {string} matKey @param {string} rawPath */
         const applyMatOverride = (matKey, rawPath) => {
           const raw = String(rawPath || '').trim();
@@ -1299,7 +1455,12 @@ export function rebuildInspector(host, ui) {
           const rowObj = { file: overrideMap.get(matKey) || '' };
           InspectorFields.addStringWithDrop(ui.common, `gltfMat[${i}] ${short}`, rowObj, 'file', () => {
             applyMatOverride(matKey, String(rowObj.file || ''));
-          }, { acceptExtensions: ['.mat'], debounceMs: 250 });
+          }, {
+            acceptExtensions: ['.mat'],
+            debounceMs: 250,
+            onClick: (_ev, input) => { tryOpenMatAsset(input.value); },
+            onFocus: (_ev, input) => { tryOpenMatAsset(input.value); },
+          });
         }
       }
     } catch {}
@@ -1307,6 +1468,19 @@ export function rebuildInspector(host, ui) {
     // Bind a UI field to the material source path (stored on the scene-level Material stub).
     const currentStub = findMatStub(String(obj.materialName || ''));
     obj.materialFile = currentStub?.source || '';
+
+    /** @param {string} rawPath */
+    const tryOpenMatAsset = async (rawPath) => {
+      const raw = String(rawPath || '').trim();
+      if (!raw) return;
+      if (!raw.toLowerCase().endsWith('.mat')) return;
+      try {
+        if (typeof host._loadMatAssetForInspector === 'function') await host._loadMatAssetForInspector(raw);
+        if (typeof host.rebuildInspector === 'function') host.rebuildInspector();
+      } catch (e) {
+        console.warn('Failed to open material asset inspector for', raw, e);
+      }
+    };
 
     InspectorFields.addStringWithDrop(ui.common, 'material', obj, 'materialFile', () => {
       const raw = String(obj.materialFile || '').trim();
@@ -1341,7 +1515,12 @@ export function rebuildInspector(host, ui) {
       p.then((mat) => {
         if (mat) obj.setMaterial?.(mat);
       }).catch(() => {});
-    }, { acceptExtensions: ['.mat'], debounceMs: 250 });
+    }, {
+      acceptExtensions: ['.mat'],
+      debounceMs: 250,
+      onClick: (_ev, input) => { tryOpenMatAsset(input.value); },
+      onFocus: (_ev, input) => { tryOpenMatAsset(input.value); },
+    });
 
     // Inline material settings (stored on the Material stub; applied live to the loaded material).
     const matStub = findMatStub(String(obj.materialName || ''));
@@ -1419,19 +1598,29 @@ export function rebuildInspector(host, ui) {
     if (typeof obj.rotation === 'number') InspectorFields.addNumber(host, ui.transform, 'rotation', obj, 'rotation');
     if (typeof obj.zoom === 'number') InspectorFields.addNumber(host, ui.transform, 'zoom', obj, 'zoom');
   } else {
-    // Support both (x,y,z,rotX,rotY,rotZ) and (position Vector3).
-    if (typeof obj.x === 'number') InspectorFields.addNumber(host, ui.transform, 'x', obj, 'x');
-    if (typeof obj.y === 'number') InspectorFields.addNumber(host, ui.transform, 'y', obj, 'y');
-    if (typeof obj.z === 'number') InspectorFields.addNumber(host, ui.transform, 'z', obj, 'z');
+    // Support both (x,y,z,rotX,rotY,rotZ) and vector-style (position/rotation).
+    // Some node types expose BOTH; avoid showing duplicates by preferring vectors.
+    const hasPosVec = !!(obj.position && typeof obj.position.x === 'number' && typeof obj.position.y === 'number' && typeof obj.position.z === 'number');
+    const hasRotVec = !!(obj.rotation && typeof obj.rotation.x === 'number' && typeof obj.rotation.y === 'number' && typeof obj.rotation.z === 'number');
 
-    if (typeof obj.rotX === 'number') InspectorFields.addNumber(host, ui.transform, 'rotX', obj, 'rotX');
-    if (typeof obj.rotY === 'number') InspectorFields.addNumber(host, ui.transform, 'rotY', obj, 'rotY');
-    if (typeof obj.rotZ === 'number') InspectorFields.addNumber(host, ui.transform, 'rotZ', obj, 'rotZ');
-
-    if (obj.position && typeof obj.position.x === 'number') {
+    if (hasPosVec) {
       InspectorFields.addNumber(host, ui.transform, 'pos.x', obj.position, 'x');
       InspectorFields.addNumber(host, ui.transform, 'pos.y', obj.position, 'y');
       InspectorFields.addNumber(host, ui.transform, 'pos.z', obj.position, 'z');
+    } else {
+      if (typeof obj.x === 'number') InspectorFields.addNumber(host, ui.transform, 'x', obj, 'x');
+      if (typeof obj.y === 'number') InspectorFields.addNumber(host, ui.transform, 'y', obj, 'y');
+      if (typeof obj.z === 'number') InspectorFields.addNumber(host, ui.transform, 'z', obj, 'z');
+    }
+
+    if (hasRotVec) {
+      InspectorFields.addNumber(host, ui.transform, 'rot.x', obj.rotation, 'x');
+      InspectorFields.addNumber(host, ui.transform, 'rot.y', obj.rotation, 'y');
+      InspectorFields.addNumber(host, ui.transform, 'rot.z', obj.rotation, 'z');
+    } else {
+      if (typeof obj.rotX === 'number') InspectorFields.addNumber(host, ui.transform, 'rotX', obj, 'rotX');
+      if (typeof obj.rotY === 'number') InspectorFields.addNumber(host, ui.transform, 'rotY', obj, 'rotY');
+      if (typeof obj.rotZ === 'number') InspectorFields.addNumber(host, ui.transform, 'rotZ', obj, 'rotZ');
     }
 
     if (obj.target && typeof obj.target.x === 'number') {
@@ -1474,5 +1663,11 @@ export function syncInspector(host, ui) {
     // Sync only simple bound fields; complex compound widgets are left alone.
     InspectorFields.syncBoundFields(ui.common);
     InspectorFields.syncBoundFields(ui.transform);
+
+    // Keep filter applied while syncing.
+    try {
+      InspectorFields.applyInspectorFilter(ui.common, String(host?._inspectorFilter || ''));
+      InspectorFields.applyInspectorFilter(ui.transform, String(host?._inspectorFilter || ''));
+    } catch {}
   } catch {}
 }

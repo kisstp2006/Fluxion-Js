@@ -40,6 +40,8 @@ export default class Material {
   constructor() {
     /** @type {[number,number,number,number]} linear RGBA */
     this.baseColorFactor = [1, 1, 1, 1];
+    /** @type {[number,number]} UV tiling multiplier (1,1 = default) */
+    this.uvScale = [1, 1];
     this.metallicFactor = 0.0;
     this.roughnessFactor = 1.0;
     this.normalScale = 1.0;
@@ -111,6 +113,9 @@ export default class Material {
         data.baseColorFactor ?? data.baseColor ?? data.albedoColor,
         mat.baseColorFactor
       );
+
+      // UV scale / tiling
+      mat.uvScale = Material._parseVec2(data.uvScale ?? data.uvTiling ?? data.tiling, mat.uvScale);
 
       // Metallic / Roughness factors
       mat.metallicFactor = Material._clamp(Material._parseNumber(data.metallicFactor ?? data.metallic, mat.metallicFactor), 0.0, 1.0);
@@ -276,6 +281,29 @@ export default class Material {
     }
 
     return fallback || [0, 0, 0];
+  }
+
+  static _parseVec2(v, fallback) {
+    if (Array.isArray(v)) {
+      const x = Number(v[0]);
+      const y = Number(v[1]);
+      if (Number.isFinite(x) && Number.isFinite(y)) return [x, y];
+      if (Number.isFinite(x) && !Number.isFinite(y)) return [x, x];
+    }
+
+    if (typeof v === 'number') {
+      return Number.isFinite(v) ? [v, v] : (fallback || [1, 1]);
+    }
+
+    if (typeof v === 'string') {
+      const s = v.trim();
+      if (!s) return fallback || [1, 1];
+      const parts = s.split(/[\s,]+/).map((p) => parseFloat(p)).filter((n) => Number.isFinite(n));
+      if (parts.length >= 2) return [parts[0], parts[1]];
+      if (parts.length === 1) return [parts[0], parts[0]];
+    }
+
+    return fallback || [1, 1];
   }
 
   /**
