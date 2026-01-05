@@ -645,48 +645,20 @@ export function rebuildInspector(host, ui) {
     let roughnessFactorField = null;
     /** @type {HTMLDivElement|null} */
     let aoStrengthField = null;
-
     /** @type {HTMLDivElement|null} */
     let baseColorFactorField = null;
-    /** @type {HTMLDivElement|null} */
-    let baseColorTextureField = null;
-    /** @type {HTMLDivElement|null} */
-    let metallicTextureField = null;
-    /** @type {HTMLDivElement|null} */
-    let roughnessTextureField = null;
-
-    // Optional UI booleans (editor-only; stripped on save).
-    ensureUiBool('useBaseColorTexture', !!String(data.baseColorTexture || '').trim());
-    ensureUiBool('useMetallicTexture', !!String(data.metallicTexture || '').trim());
-    ensureUiBool('useRoughnessTexture', !!String(data.roughnessTexture || '').trim());
 
     const updateMatAssetVisibility = () => {
-      const useBaseTex = !!data.useBaseColorTexture;
-      const useMetalTex = !!data.useMetallicTexture;
-      const useRoughTex = !!data.useRoughnessTexture;
-
+      // Hide scalar multipliers when textures are present (per user requirement)
+      const hasBaseTex = !!String(data.baseColorTexture || '').trim();
       const hasMetalTex = !!String(data.metallicTexture || '').trim();
       const hasRoughTex = !!String(data.roughnessTexture || '').trim();
       const hasAoTex = !!String(data.aoTexture || '').trim();
 
-      if (baseColorFactorField) baseColorFactorField.style.display = useBaseTex ? 'none' : '';
-      if (baseColorTextureField) baseColorTextureField.style.display = useBaseTex ? '' : 'none';
-
-      if (metallicFactorField) metallicFactorField.style.display = useMetalTex ? 'none' : '';
-      if (metallicTextureField) metallicTextureField.style.display = useMetalTex ? '' : 'none';
-
-      if (roughnessFactorField) roughnessFactorField.style.display = useRoughTex ? 'none' : '';
-      if (roughnessTextureField) roughnessTextureField.style.display = useRoughTex ? '' : 'none';
-
+      if (baseColorFactorField) baseColorFactorField.style.display = hasBaseTex ? 'none' : '';
+      if (metallicFactorField) metallicFactorField.style.display = hasMetalTex ? 'none' : '';
+      if (roughnessFactorField) roughnessFactorField.style.display = hasRoughTex ? 'none' : '';
       if (aoStrengthField) aoStrengthField.style.display = hasAoTex ? 'none' : '';
-
-      // If user disables texture usage, ensure the texture path is cleared so runtime behavior matches.
-      // (We don't use the boolean at runtime; clearing keeps results intuitive.)
-      try {
-        if (!useBaseTex && String(data.baseColorTexture || '').trim()) data.baseColorTexture = '';
-        if (!useMetalTex && String(data.metallicTexture || '').trim()) data.metallicTexture = '';
-        if (!useRoughTex && String(data.roughnessTexture || '').trim()) data.roughnessTexture = '';
-      } catch {}
     };
 
     // Groups
@@ -701,27 +673,12 @@ export function rebuildInspector(host, ui) {
     // Albedo
     InspectorFields.addAutoWith(gAlbedo, 'Color', data, 'baseColorFactor', requestSave);
     baseColorFactorField = getLastField(gAlbedo);
-    InspectorFields.addToggleWith(gAlbedo, 'Use Texture', data, 'useBaseColorTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    });
 
     // ORM
     InspectorFields.addAutoWith(gOrm, 'Metallic', data, 'metallicFactor', requestSave);
     metallicFactorField = getLastField(gOrm);
-    InspectorFields.addToggleWith(gOrm, 'Metallic Texture', data, 'useMetallicTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    });
     InspectorFields.addAutoWith(gOrm, 'Roughness', data, 'roughnessFactor', requestSave);
     roughnessFactorField = getLastField(gOrm);
-    InspectorFields.addToggleWith(gOrm, 'Roughness Texture', data, 'useRoughnessTexture', () => {
-      ensureTextureDrivenDefaults();
-      updateMatAssetVisibility();
-      requestSave();
-    });
     InspectorFields.addAutoWith(gOrm, 'Packed MR', data, 'metallicRoughnessPacked', () => {
       ensureTextureDrivenDefaults();
       requestSave();
@@ -742,28 +699,21 @@ export function rebuildInspector(host, ui) {
     const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
     InspectorFields.addStringWithDrop(gAlbedo, 'Texture', data, 'baseColorTexture', () => {
       ensureTextureDrivenDefaults();
-      // When a texture is set manually, force toggle on.
-      try { data.useBaseColorTexture = !!String(data.baseColorTexture || '').trim(); } catch {}
       updateMatAssetVisibility();
       requestSave();
     }, texOpts);
-    baseColorTextureField = getLastField(gAlbedo);
 
-    InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture File', data, 'metallicTexture', () => {
+    InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture', data, 'metallicTexture', () => {
       ensureTextureDrivenDefaults();
-      try { data.useMetallicTexture = !!String(data.metallicTexture || '').trim(); } catch {}
       updateMatAssetVisibility();
       requestSave();
     }, texOpts);
-    metallicTextureField = getLastField(gOrm);
 
-    InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture File', data, 'roughnessTexture', () => {
+    InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture', data, 'roughnessTexture', () => {
       ensureTextureDrivenDefaults();
-      try { data.useRoughnessTexture = !!String(data.roughnessTexture || '').trim(); } catch {}
       updateMatAssetVisibility();
       requestSave();
     }, texOpts);
-    roughnessTextureField = getLastField(gOrm);
 
     InspectorFields.addStringWithDrop(gNormal, 'Texture', data, 'normalTexture', () => {
       ensureTextureDrivenDefaults();
