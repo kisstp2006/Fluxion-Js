@@ -729,7 +729,7 @@ export function addStringWith(container, label, obj, key, onChanged) {
  * @param {any} obj
  * @param {string} key
  * @param {() => void} onChanged
- * @param {{ acceptExtensions?: string[], importToWorkspaceUrl?: boolean }=} opts
+ * @param {{ acceptExtensions?: string[], importToWorkspaceUrl?: boolean, debounceMs?: number }=} opts
  */
 export function addStringWithDrop(container, label, obj, key, onChanged, opts = {}) {
 	if (!obj) return;
@@ -740,6 +740,28 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	_bindField(input, obj, key, 'text');
 	/** @type {{had:boolean,value:any}|null} */
 	let editBefore = null;
+
+	const debounceMs = Math.max(0, Number(opts.debounceMs || 0));
+	/** @type {any} */
+	let debounceTimer = null;
+	/** @param {boolean} immediate */
+	const runChanged = (immediate) => {
+		if (!debounceMs || debounceMs <= 0) {
+			try { onChanged(); } catch {}
+			return;
+		}
+		if (immediate) {
+			try { if (debounceTimer) clearTimeout(debounceTimer); } catch {}
+			debounceTimer = null;
+			try { onChanged(); } catch {}
+			return;
+		}
+		try { if (debounceTimer) clearTimeout(debounceTimer); } catch {}
+		debounceTimer = setTimeout(() => {
+			debounceTimer = null;
+			try { onChanged(); } catch {}
+		}, debounceMs);
+	};
 
 	const accept = Array.isArray(opts.acceptExtensions)
 		? opts.acceptExtensions.map((s) => String(s || '').toLowerCase()).filter(Boolean)
@@ -752,17 +774,16 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		return accept.some((ext) => s.endsWith(ext));
 	};
 
-	const apply = () => {
+	/** @param {boolean} immediate */
+	const apply = (immediate) => {
 		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = String(input.value ?? '');
-		try {
-			onChanged();
-		} catch {}
+		runChanged(!!immediate);
 	};
 
-	input.addEventListener('input', apply);
+	input.addEventListener('input', () => apply(false));
 	input.addEventListener('change', () => {
-		apply();
+		apply(true);
 		const after = _captureProp(obj, key);
 		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
 		editBefore = null;
@@ -806,7 +827,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 							if (!acceptValue(rel)) return;
 							const next = opts.importToWorkspaceUrl ? `fluxion://workspace/${rel.replace(/^\/+/, '')}` : rel;
 							input.value = next;
-							apply();
+							apply(true);
 							const after = _captureProp(obj, key);
 							if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
 							editBefore = null;
@@ -842,7 +863,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		if (!acceptValue(text)) return;
 
 		input.value = text;
-		apply();
+		apply(true);
 		const after = _captureProp(obj, key);
 		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
 		editBefore = null;
@@ -1014,7 +1035,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 				for (const rel of files) {
 					addItem(rel, () => {
 						input.value = toValue(rel);
-						apply();
+						apply(true);
 						close();
 					});
 				}
@@ -1408,9 +1429,31 @@ export function addCssColor(container, label, obj, key) {
  * @param {string} key
  * @param {() => void} onChanged
  */
-export function addCssColorWith(container, label, obj, key, onChanged) {
+export function addCssColorWith(container, label, obj, key, onChanged, opts = {}) {
 	if (!obj) return;
 	if (!(key in obj)) return;
+
+	const debounceMs = Math.max(0, Number((/** @type {any} */ (opts))?.debounceMs || 0));
+	/** @type {any} */
+	let debounceTimer = null;
+	/** @param {boolean} immediate */
+	const runChanged = (immediate) => {
+		if (!debounceMs || debounceMs <= 0) {
+			try { onChanged(); } catch {}
+			return;
+		}
+		if (immediate) {
+			try { if (debounceTimer) clearTimeout(debounceTimer); } catch {}
+			debounceTimer = null;
+			try { onChanged(); } catch {}
+			return;
+		}
+		try { if (debounceTimer) clearTimeout(debounceTimer); } catch {}
+		debounceTimer = setTimeout(() => {
+			debounceTimer = null;
+			try { onChanged(); } catch {}
+		}, debounceMs);
+	};
 
 	const wrap = document.createElement('div');
 	wrap.className = 'row rowCenter';
@@ -1443,9 +1486,7 @@ export function addCssColorWith(container, label, obj, key, onChanged) {
 	const applyText = () => {
 		obj[key] = String(text.value ?? '');
 		syncPickerFromText();
-		try {
-			onChanged();
-		} catch {}
+		runChanged(false);
 	};
 
 	picker.addEventListener('input', () => {
@@ -1453,14 +1494,16 @@ export function addCssColorWith(container, label, obj, key, onChanged) {
 		if (hex) {
 			text.value = hex;
 			obj[key] = hex;
-			try {
-				onChanged();
-			} catch {}
+			runChanged(false);
 		}
 	});
 
 	text.addEventListener('input', applyText);
-	text.addEventListener('change', applyText);
+	text.addEventListener('change', () => {
+		obj[key] = String(text.value ?? '');
+		syncPickerFromText();
+		runChanged(true);
+	});
 
 	syncPickerFromText();
 

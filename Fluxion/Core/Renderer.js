@@ -3276,7 +3276,7 @@ export default class Renderer {
       tmp.center.scale(1 / 8);
 
       // light view (position doesn't affect an ortho shadow much; just keep it stable)
-      const dist = Math.max(10.0, (Number(this.shadowFar) || 80) * 0.5);
+      let dist = Math.max(10.0, (Number(this.shadowFar) || 80) * 0.5);
       tmp.lightPos.set(tmp.center.x - lx * dist, tmp.center.y - ly * dist, tmp.center.z - lz * dist);
       Mat4.lookAt(tmp.lightPos, tmp.center, this._shadowUp, this._shadowView);
 
@@ -3289,6 +3289,20 @@ export default class Renderer {
         if (x < minX) minX = x; if (x > maxX) maxX = x;
         if (y < minY) minY = y; if (y > maxY) maxY = y;
         if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      }
+
+      // Ensure the entire cascade volume is in front of the light camera.
+      // If the farthest point ends up behind the light camera (maxZ > 0), the orthographic projection
+      // can clip aggressively and produce empty/invalid shadow data.
+      // Pushing the light position back along the light direction only shifts Z in light space; X/Y bounds stay stable.
+      const zPad = 10.0;
+      if (maxZ > -zPad) {
+        const pushBack = (maxZ + zPad);
+        dist += pushBack;
+        tmp.lightPos.set(tmp.center.x - lx * dist, tmp.center.y - ly * dist, tmp.center.z - lz * dist);
+        Mat4.lookAt(tmp.lightPos, tmp.center, this._shadowUp, this._shadowView);
+        minZ -= pushBack;
+        maxZ -= pushBack;
       }
 
       // Stabilize: square extents + snap to texel grid to reduce shimmering.
@@ -3306,7 +3320,6 @@ export default class Renderer {
       minY = cy - extent * 0.5;
       maxY = cy + extent * 0.5;
 
-      const zPad = 10.0;
       // Mat4.ortho in this engine expects near/far as POSITIVE distances along -Z (OpenGL convention),
       // while our light-view Z values for points in front are typically NEGATIVE.
       // Convert the light-space Z bounds into positive near/far distances so depth testing stores the nearest surface.

@@ -413,12 +413,12 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
     InspectorFields.addCssColorWith(ui.common, 'color', stub, 'color', () => {
       applySkyboxFromStub();
-    });
+    }, { debounceMs: 200 });
 
     // PBR indirect ambient (u_ambientColor). Stored as a color string in XML.
     InspectorFields.addCssColorWith(ui.common, 'ambientColor', stub, 'ambientColor', () => {
       applyAmbientFromStub();
-    });
+    }, { debounceMs: 200 });
 
     InspectorFields.addToggleWith(ui.common, 'equirectangular', stub, 'equirectangular', () => {
       applySkyboxFromStub();
@@ -430,26 +430,26 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
     if (!!stub.equirectangular) {
       InspectorFields.addStringWithDrop(ui.common, 'source', stub, 'source', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
     } else {
       InspectorFields.addStringWithDrop(ui.common, 'right', stub, 'right', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
       InspectorFields.addStringWithDrop(ui.common, 'left', stub, 'left', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
       InspectorFields.addStringWithDrop(ui.common, 'top', stub, 'top', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
       InspectorFields.addStringWithDrop(ui.common, 'bottom', stub, 'bottom', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
       InspectorFields.addStringWithDrop(ui.common, 'front', stub, 'front', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
       InspectorFields.addStringWithDrop(ui.common, 'back', stub, 'back', () => {
         applySkyboxFromStub();
-      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'] });
+      }, { acceptExtensions: ['.hdr', '.exr', '.png', '.jpg', '.jpeg', '.webp'], debounceMs: 250 });
     }
 
     // Apply current values once so selecting the stub syncs renderer state.
@@ -755,7 +755,7 @@ export function rebuildInspector(host, ui) {
           obj.loadTexture(String(obj.imageSrc || ''));
         }
       } catch {}
-    }, { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'], importToWorkspaceUrl: true });
+    }, { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp'], importToWorkspaceUrl: true, debounceMs: 200 });
   }
 
   // AnimatedSprite frame size
@@ -1058,7 +1058,7 @@ export function rebuildInspector(host, ui) {
 
       // Primitive/named resource path: clear cached mesh so it rebuilds next draw.
       try { obj.setSource?.(raw); } catch { obj.source = raw; }
-    }, { acceptExtensions: ['.gltf', '.glb'], importToWorkspaceUrl: true });
+    }, { acceptExtensions: ['.gltf', '.glb'], importToWorkspaceUrl: true, debounceMs: 250 });
 
     // Material assignment and per-material overrides show up frequently; group them.
     addSubSection('Rendering');
@@ -1299,7 +1299,7 @@ export function rebuildInspector(host, ui) {
           const rowObj = { file: overrideMap.get(matKey) || '' };
           InspectorFields.addStringWithDrop(ui.common, `gltfMat[${i}] ${short}`, rowObj, 'file', () => {
             applyMatOverride(matKey, String(rowObj.file || ''));
-          }, { acceptExtensions: ['.mat'] });
+          }, { acceptExtensions: ['.mat'], debounceMs: 250 });
         }
       }
     } catch {}
@@ -1341,7 +1341,7 @@ export function rebuildInspector(host, ui) {
       p.then((mat) => {
         if (mat) obj.setMaterial?.(mat);
       }).catch(() => {});
-    }, { acceptExtensions: ['.mat'] });
+    }, { acceptExtensions: ['.mat'], debounceMs: 250 });
 
     // Inline material settings (stored on the Material stub; applied live to the loaded material).
     const matStub = findMatStub(String(obj.materialName || ''));
