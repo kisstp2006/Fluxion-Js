@@ -647,7 +647,11 @@ export function rebuildInspector(host, ui) {
 
   // followCamera + base offsets
   if (obj && typeof obj === 'object' && ('followCamera' in obj)) {
-    InspectorFields.addToggle(ui.common, 'followCamera', obj, 'followCamera');
+    // followCamera toggles conditional fields (baseX/baseY), so rebuild.
+    InspectorFields.addToggleWith(ui.common, 'followCamera', obj, 'followCamera', () => {
+      try { host._blockInspectorAutoRefresh?.(0.35); } catch {}
+      try { host.rebuildInspector?.(); } catch {}
+    });
     if (obj.followCamera) {
       InspectorFields.addNumber(host, ui.common, 'baseX', obj, 'baseX');
       InspectorFields.addNumber(host, ui.common, 'baseY', obj, 'baseY');
@@ -1288,4 +1292,39 @@ export function rebuildInspector(host, ui) {
       InspectorFields.addNumber(host, ui.transform, 'target.z', obj.target, 'z');
     }
   }
+}
+
+/**
+ * Lightweight refresh of the inspector UI without rebuilding its DOM.
+ * This avoids focus/scroll flicker from the timer-based rebuild.
+ *
+ * @param {any} host
+ * @param {InspectorUI} ui
+ */
+export function syncInspector(host, ui) {
+  try {
+    const matAsset = /** @type {any} */ (host?._inspectorMatAsset || null);
+    const obj = host?.selected;
+
+    if (ui.inspectorSubtitle) {
+      if (matAsset && typeof matAsset === 'object' && typeof matAsset.pathRel === 'string' && matAsset.pathRel) {
+        const pathRel = String(matAsset.pathRel || '');
+        const base = (() => {
+          const s = String(pathRel || '').replace(/\\/g, '/');
+          const i = s.lastIndexOf('/');
+          return i >= 0 ? s.slice(i + 1) : s;
+        })();
+        ui.inspectorSubtitle.textContent = base || 'Material';
+      } else if (!obj) {
+        ui.inspectorSubtitle.textContent = host?._projectMeta ? 'Project' : 'No selection';
+      } else {
+        const name = obj?.name ? String(obj.name) : (obj ? (obj.constructor?.name || '(object)') : 'No selection');
+        ui.inspectorSubtitle.textContent = name;
+      }
+    }
+
+    // Sync only simple bound fields; complex compound widgets are left alone.
+    InspectorFields.syncBoundFields(ui.common);
+    InspectorFields.syncBoundFields(ui.transform);
+  } catch {}
 }

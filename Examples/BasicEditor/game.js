@@ -37,6 +37,7 @@ import {
   blockInspectorAutoRefresh,
   setupInspectorInteractionGuards,
   rebuildInspector as rebuildInspectorPanel,
+  syncInspector as syncInspectorPanel,
   rebuildInspectorXmlStub as rebuildInspectorXmlStubPanel,
 } from "./inspectorPanel.js";
 
@@ -4855,6 +4856,10 @@ const game = {
     rebuildInspectorPanel(this, /** @type {any} */ (ui));
   },
 
+  syncInspector() {
+    syncInspectorPanel(this, /** @type {any} */ (ui));
+  },
+
   /**
    * Inspector for scene-level XML stub entries like <Font/>, <Mesh/>, <Material/>, <Skybox/>.
    * @param {any} stub
@@ -5795,7 +5800,8 @@ const game = {
       this._inspectorAutoRefreshT += dt;
       if (this._inspectorAutoRefreshT >= 0.2) {
         this._inspectorAutoRefreshT = 0;
-        this.rebuildInspector();
+        // Avoid full DOM rebuilds (can steal focus / scroll). Just sync values.
+        this.syncInspector();
       }
     }
   },

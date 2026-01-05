@@ -6,6 +6,92 @@
  */
 
 /**
+ * Lightweight input binding so the inspector can refresh displayed values
+ * without rebuilding the entire DOM.
+ *
+ * We intentionally keep this minimal: only simple 1:1 object-property fields.
+ */
+
+/**
+ * @typedef {{
+ *  obj: any,
+ *  key: string,
+ *  kind: 'text'|'number'|'checkbox'|'nullable-number',
+ * }} BoundField
+ */
+
+/** @type {WeakMap<HTMLElement, BoundField>} */
+const _boundFields = new WeakMap();
+
+/**
+ * @param {HTMLElement} el
+ * @param {any} obj
+ * @param {string} key
+ * @param {BoundField['kind']} kind
+ */
+function _bindField(el, obj, key, kind) {
+	try {
+		if (!el || !obj || !key) return;
+		_boundFields.set(el, { obj, key: String(key), kind });
+	} catch {}
+}
+
+/**
+ * Refresh bound inputs under the provided root node.
+ * Does nothing for focused inputs to avoid fighting the user.
+ * @param {HTMLElement | null} root
+ */
+export function syncBoundFields(root) {
+	if (!root) return;
+	const active = (document.activeElement instanceof HTMLElement) ? document.activeElement : null;
+
+	/** @type {HTMLElement[]} */
+	const nodes = Array.from(root.querySelectorAll('input, select, textarea'));
+	for (const el of nodes) {
+		if (!(el instanceof HTMLElement)) continue;
+		if (active && (el === active || el.contains(active))) continue;
+
+		const b = _boundFields.get(el);
+		if (!b) continue;
+		const obj = b.obj;
+		const key = b.key;
+		try {
+			if (!obj || !(key in obj)) continue;
+
+			if (b.kind === 'checkbox') {
+				const input = /** @type {HTMLInputElement} */ (/** @type {any} */ (el));
+				const next = !!obj[key];
+				if (input.checked !== next) input.checked = next;
+				continue;
+			}
+
+			if (b.kind === 'text') {
+				const input = /** @type {HTMLInputElement} */ (/** @type {any} */ (el));
+				const next = String(obj[key] ?? '');
+				if (input.value !== next) input.value = next;
+				continue;
+			}
+
+			if (b.kind === 'number') {
+				const input = /** @type {HTMLInputElement} */ (/** @type {any} */ (el));
+				const cur = Number(obj[key]);
+				const next = String(Number.isFinite(cur) ? cur : 0);
+				if (input.value !== next) input.value = next;
+				continue;
+			}
+
+			if (b.kind === 'nullable-number') {
+				const input = /** @type {HTMLInputElement} */ (/** @type {any} */ (el));
+				const v = obj[key];
+				const next = (v === null || v === undefined || v === '') ? '' : String(Number(v));
+				if (input.value !== next) input.value = next;
+				continue;
+			}
+		} catch {}
+	}
+}
+
+/**
  * @param {HTMLElement | null} container
  * @param {string} labelText
  * @param {HTMLElement} node
@@ -56,6 +142,7 @@ export function addToggle(container, label, obj, key) {
 	const input = document.createElement('input');
 	input.type = 'checkbox';
 	input.checked = !!obj[key];
+	_bindField(input, obj, key, 'checkbox');
 	input.addEventListener('change', () => {
 		obj[key] = !!input.checked;
 	});
@@ -84,6 +171,7 @@ export function addToggleWith(container, label, obj, key, onChanged) {
 	const input = document.createElement('input');
 	input.type = 'checkbox';
 	input.checked = !!obj[key];
+	_bindField(input, obj, key, 'checkbox');
 	input.addEventListener('change', () => {
 		obj[key] = !!input.checked;
 		try {
@@ -115,6 +203,7 @@ export function addNumber(host, container, label, obj, key) {
 	input.type = 'number';
 	input.step = '0.01';
 	input.value = String(Number(obj[key]) || 0);
+	_bindField(input, obj, key, 'number');
 
 	const apply = () => {
 		const v = Number(input.value);
@@ -156,6 +245,7 @@ export function addNumberWith(container, label, obj, key, onChanged, opts = {}) 
 	if (Number.isFinite(Number(opts.min))) input.min = String(Number(opts.min));
 	if (Number.isFinite(Number(opts.max))) input.max = String(Number(opts.max));
 	input.value = String(Number(obj[key]) || 0);
+	_bindField(input, obj, key, 'number');
 
 	const apply = () => {
 		const v = Number(input.value);
@@ -404,6 +494,7 @@ export function addString(container, label, obj, key) {
 	const input = document.createElement('input');
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
+	_bindField(input, obj, key, 'text');
 	const apply = () => {
 		obj[key] = String(input.value ?? '');
 	};
@@ -426,6 +517,7 @@ export function addStringWith(container, label, obj, key, onChanged) {
 	const input = document.createElement('input');
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
+	_bindField(input, obj, key, 'text');
 	const apply = () => {
 		obj[key] = String(input.value ?? '');
 		try {
@@ -452,6 +544,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	const input = document.createElement('input');
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
+	_bindField(input, obj, key, 'text');
 
 	const accept = Array.isArray(opts.acceptExtensions)
 		? opts.acceptExtensions.map((s) => String(s || '').toLowerCase()).filter(Boolean)
@@ -768,6 +861,7 @@ export function addNullableNumber(container, label, obj, key) {
 	const cur = obj[key];
 	if (cur === null || cur === undefined || cur === '') input.value = '';
 	else input.value = String(Number(cur));
+	_bindField(input, obj, key, 'nullable-number');
 
 	const apply = () => {
 		const raw = String(input.value ?? '').trim();
