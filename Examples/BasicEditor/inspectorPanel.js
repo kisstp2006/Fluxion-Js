@@ -602,14 +602,6 @@ export function rebuildInspector(host, ui) {
   }
 
   // Common fields
-  if (ui.common) {
-    const title = document.createElement('div');
-    title.className = 'sectionTitle';
-    title.textContent = 'Selection';
-    title.style.marginTop = '12px';
-    ui.common.appendChild(title);
-  }
-
   InspectorFields.addReadonly(ui.common, 'type', obj.constructor?.name || 'unknown');
   InspectorFields.addStringWith(ui.common, 'name', obj, 'name', () => host.rebuildTree());
   InspectorFields.addToggle(ui.common, 'active', obj, 'active');
@@ -724,8 +716,18 @@ export function rebuildInspector(host, ui) {
     InspectorFields.addNumber(host, ui.common, 'volume', obj, 'volume');
   }
 
+  /** @param {string} title */
+  const addSubSection = (title) => {
+    if (!ui.common) return;
+    const el = document.createElement('div');
+    el.className = 'sectionTitle subSectionTitle';
+    el.textContent = title;
+    ui.common.appendChild(el);
+  };
+
   // MeshNode fields
   if (obj && obj.constructor?.name === 'MeshNode') {
+    addSubSection('Assets');
     // MeshNode.source is normally a primitive name or a named <Mesh name="..."/> resource.
     // In the editor, also accept a direct .gltf/.glb path and auto-register a mesh resource.
     const sceneAny = /** @type {any} */ (host.currentScene || null);
@@ -978,6 +980,9 @@ export function rebuildInspector(host, ui) {
       // Primitive/named resource path: clear cached mesh so it rebuilds next draw.
       try { obj.setSource?.(raw); } catch { obj.source = raw; }
     }, { acceptExtensions: ['.gltf', '.glb'], importToWorkspaceUrl: true });
+
+    // Material assignment and per-material overrides show up frequently; group them.
+    addSubSection('Rendering');
     // --- Material (.mat) input + inline overrides ---
     // (sceneAny/getRenderer/getSceneBaseUrl are defined above)
 
@@ -1201,6 +1206,7 @@ export function rebuildInspector(host, ui) {
     // Inline material settings (stored on the Material stub; applied live to the loaded material).
     const matStub = findMatStub(String(obj.materialName || ''));
     if (matStub) {
+      addSubSection('Overrides');
       if (!('baseColorFactor' in matStub)) matStub.baseColorFactor = '';
       if (!('metallicFactor' in matStub)) matStub.metallicFactor = '';
       if (!('roughnessFactor' in matStub)) matStub.roughnessFactor = '';
@@ -1225,6 +1231,7 @@ export function rebuildInspector(host, ui) {
     // Primitive params when meshDefinition is inline
     const p = obj?.meshDefinition?.params;
     if (p && typeof p === 'object') {
+      addSubSection('Primitive Params');
       for (const k of ['width', 'height', 'depth', 'size', 'radius', 'subdivisions', 'radialSegments', 'heightSegments', 'capSegments']) {
         if (!(k in p)) continue;
         InspectorFields.addNumber(host, ui.common, `param.${k}`, p, k);
@@ -1234,6 +1241,7 @@ export function rebuildInspector(host, ui) {
 
   // Lights
   if (obj && obj.isLight) {
+    addSubSection('Lighting');
     if (Array.isArray(obj.color) && obj.color.length >= 3) InspectorFields.addColorVec3(ui.common, 'color', obj.color);
     if (typeof obj.intensity === 'number') InspectorFields.addNumber(host, ui.common, 'intensity', obj, 'intensity');
     if (obj.constructor?.name === 'DirectionalLight') {

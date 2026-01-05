@@ -23,6 +23,115 @@
 /** @type {WeakMap<HTMLElement, BoundField>} */
 const _boundFields = new WeakMap();
 
+/** @type {WeakMap<object, number>} */
+const _objectIds = new WeakMap();
+let _nextObjectId = 1;
+
+/** @param {object} o */
+function _getObjectId(o) {
+	let id = _objectIds.get(o);
+	if (!id) {
+		id = _nextObjectId++;
+		_objectIds.set(o, id);
+	}
+	return id;
+}
+
+function _getUndo() {
+	try {
+		const u = /** @type {any} */ (window).__fluxionUndo;
+		if (u && typeof u.push === 'function') return u;
+	} catch {}
+	return null;
+}
+
+/** @param {any} obj @param {string} key */
+function _captureProp(obj, key) {
+	const had = !!(obj && typeof obj === 'object' && Object.prototype.hasOwnProperty.call(obj, key));
+	return { had, value: had ? obj[key] : undefined };
+}
+
+/** @param {any} obj @param {string} key @param {{had:boolean,value:any}} state */
+function _restoreProp(obj, key, state) {
+	if (!obj || typeof obj !== 'object') return;
+	if (state.had) {
+		obj[key] = state.value;
+	} else {
+		try {
+			delete obj[key];
+		} catch {
+			obj[key] = undefined;
+		}
+	}
+	// Some engine objects cache derived values.
+	try {
+		if ('_dirty' in obj) {
+			// @ts-ignore
+			obj._dirty = true;
+		}
+	} catch {}
+}
+
+/** @param {{had:boolean,value:any}} a @param {{had:boolean,value:any}} b */
+function _propStateEqual(a, b) {
+	if (!!a.had !== !!b.had) return false;
+	if (!a.had && !b.had) return true;
+	return Object.is(a.value, b.value);
+}
+
+/**
+ * @param {any} obj
+ * @param {string} key
+ * @param {{had:boolean,value:any}} before
+ * @param {{had:boolean,value:any}} after
+ * @param {string} label
+ */
+function _pushUndoProp(obj, key, before, after, label) {
+	const u = _getUndo();
+	if (!u) return;
+	if (!obj || typeof obj !== 'object') return;
+	if (_propStateEqual(before, after)) return;
+
+	const mergeKey = `prop:${_getObjectId(obj)}:${String(key)}`;
+	u.push({
+		label,
+		mergeKey,
+		undo: () => _restoreProp(obj, key, before),
+		redo: () => _restoreProp(obj, key, after),
+	});
+}
+
+/**
+ * @param {any} obj
+ * @param {string} keyA
+ * @param {string} keyB
+ * @param {{had:boolean,value:any}} beforeA
+ * @param {{had:boolean,value:any}} afterA
+ * @param {{had:boolean,value:any}} beforeB
+ * @param {{had:boolean,value:any}} afterB
+ * @param {string} label
+ */
+function _pushUndoPropPair(obj, keyA, keyB, beforeA, afterA, beforeB, afterB, label) {
+	const u = _getUndo();
+	if (!u) return;
+	if (!obj || typeof obj !== 'object') return;
+	const changed = !_propStateEqual(beforeA, afterA) || !_propStateEqual(beforeB, afterB);
+	if (!changed) return;
+	const mergeKey = `prop2:${_getObjectId(obj)}:${String(keyA)}:${String(keyB)}`;
+	u.push({
+		label,
+		mergeKey,
+		undo: () => {
+			_restoreProp(obj, keyA, beforeA);
+			_restoreProp(obj, keyB, beforeB);
+		},
+		redo: () => {
+			_restoreProp(obj, keyA, afterA);
+			_restoreProp(obj, keyB, afterB);
+		},
+	});
+}
+
 /**
  * @param {HTMLElement} el
  * @param {any} obj
@@ -34,6 +143,37 @@ function _bindField(el, obj, key, kind) {
 		if (!el || !obj || !key) return;
 		_boundFields.set(el, { obj, key: String(key), kind });
 	} catch {}
+}
+
+/**
+ * Creates a simple stacked value container with an optional hint line.
+ * @param {HTMLElement} control
+ * @param {string=} hintText
+ */
+function _wrapWithHint(control, hintText = '') {
+	const wrap = document.createElement('div');
+	wrap.className = 'valueStack';
+	wrap.appendChild(control);
+
+	const hint = document.createElement('div');
+	hint.className = 'fieldHint';
+	hint.textContent = hintText;
+	wrap.appendChild(hint);
+
+	return { wrap, hint };
+}
+
+/** @param {HTMLInputElement} input @param {HTMLElement} hint @param {string} msg */
+function _setInvalid(input, hint, msg) {
+	input.classList.add('invalid');
+	hint.textContent = msg;
+	hint.classList.add('show');
+}
+
+/** @param {HTMLInputElement} input @param {HTMLElement} hint */
+function _clearInvalid(input, hint) {
+	input.classList.remove('invalid');
+	hint.classList.remove('show');
 }
 
 /**
@@ -122,13 +262,10 @@ export function addField(container, labelText, node) {
  * @param {string | number} text
  */
 export function addReadonly(container, label, text) {
-	const span = document.createElement('div');
-	span.textContent = String(text);
-	span.style.padding = '8px 10px';
-	span.style.border = '1px solid var(--border)';
-	span.style.borderRadius = '6px';
-	span.style.background = '#1a1a1a';
-	addField(container, label, span);
+	const box = document.createElement('div');
+	box.className = 'readonlyBox';
+	box.textContent = String(text);
+	addField(container, label, box);
 }
 
 /**
@@ -144,7 +281,10 @@ export function addToggle(container, label, obj, key) {
 	input.checked = !!obj[key];
 	_bindField(input, obj, key, 'checkbox');
 	input.addEventListener('change', () => {
+		const before = _captureProp(obj, key);
 		obj[key] = !!input.checked;
+		const after = _captureProp(obj, key);
+		_pushUndoProp(obj, key, before, after, label);
 	});
 
 	const wrap = document.createElement('label');
@@ -173,10 +313,13 @@ export function addToggleWith(container, label, obj, key, onChanged) {
 	input.checked = !!obj[key];
 	_bindField(input, obj, key, 'checkbox');
 	input.addEventListener('change', () => {
+		const before = _captureProp(obj, key);
 		obj[key] = !!input.checked;
 		try {
 			onChanged();
 		} catch {}
+		const after = _captureProp(obj, key);
+		_pushUndoProp(obj, key, before, after, label);
 	});
 
 	const wrap = document.createElement('label');
@@ -204,10 +347,19 @@ export function addNumber(host, container, label, obj, key) {
 	input.step = '0.01';
 	input.value = String(Number(obj[key]) || 0);
 	_bindField(input, obj, key, 'number');
+	const { wrap, hint } = _wrapWithHint(input);
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 
 	const apply = () => {
-		const v = Number(input.value);
-		if (!Number.isFinite(v)) return;
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) {
+			_setInvalid(input, hint, 'Enter a valid number.');
+			return;
+		}
+		_clearInvalid(input, hint);
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = v;
 		// Some engine objects cache matrices (e.g. Camera3D).
 		if (obj && typeof obj === 'object' && ('_dirty' in obj)) {
@@ -222,8 +374,17 @@ export function addNumber(host, container, label, obj, key) {
 	};
 
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
-	addField(container, label, input);
+	input.addEventListener('change', () => {
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) return;
+		if (!editBefore) editBefore = _captureProp(obj, key);
+		apply();
+		const after = _captureProp(obj, key);
+		_pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
+	addField(container, label, wrap);
 }
 
 /**
@@ -246,10 +407,19 @@ export function addNumberWith(container, label, obj, key, onChanged, opts = {}) 
 	if (Number.isFinite(Number(opts.max))) input.max = String(Number(opts.max));
 	input.value = String(Number(obj[key]) || 0);
 	_bindField(input, obj, key, 'number');
+	const { wrap, hint } = _wrapWithHint(input);
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 
 	const apply = () => {
-		const v = Number(input.value);
-		if (!Number.isFinite(v)) return;
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) {
+			_setInvalid(input, hint, 'Enter a valid number.');
+			return;
+		}
+		_clearInvalid(input, hint);
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = v;
 		try {
 			onChanged();
@@ -257,8 +427,17 @@ export function addNumberWith(container, label, obj, key, onChanged, opts = {}) 
 	};
 
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
-	addField(container, label, input);
+	input.addEventListener('change', () => {
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) return;
+		if (!editBefore) editBefore = _captureProp(obj, key);
+		apply();
+		const after = _captureProp(obj, key);
+		_pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
+	addField(container, label, wrap);
 }
 
 /**
@@ -307,10 +486,8 @@ export function addSliderStringWith(container, label, obj, key, onChanged, opts 
 
 	const clearBtn = document.createElement('button');
 	clearBtn.type = 'button';
-	clearBtn.className = 'btn';
+	clearBtn.className = 'btn btnSmall';
 	clearBtn.textContent = 'Clear';
-	clearBtn.style.padding = '6px 10px';
-	clearBtn.style.lineHeight = '1';
 
 	const syncFromObj = () => {
 		const v = asNum();
@@ -495,11 +672,19 @@ export function addString(container, label, obj, key) {
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
 	_bindField(input, obj, key, 'text');
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 	const apply = () => {
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = String(input.value ?? '');
 	};
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
+	input.addEventListener('change', () => {
+		apply();
+		const after = _captureProp(obj, key);
+		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
 	addField(container, label, input);
 }
 
@@ -518,14 +703,22 @@ export function addStringWith(container, label, obj, key, onChanged) {
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
 	_bindField(input, obj, key, 'text');
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 	const apply = () => {
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = String(input.value ?? '');
 		try {
 			onChanged();
 		} catch {}
 	};
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
+	input.addEventListener('change', () => {
+		apply();
+		const after = _captureProp(obj, key);
+		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
 	addField(container, label, input);
 }
 
@@ -545,11 +738,14 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	input.type = 'text';
 	input.value = String(obj[key] ?? '');
 	_bindField(input, obj, key, 'text');
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 
 	const accept = Array.isArray(opts.acceptExtensions)
 		? opts.acceptExtensions.map((s) => String(s || '').toLowerCase()).filter(Boolean)
 		: null;
 
+	/** @param {string} v */
 	const acceptValue = (v) => {
 		if (!accept || accept.length === 0) return true;
 		const s = String(v || '').toLowerCase();
@@ -557,6 +753,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	};
 
 	const apply = () => {
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = String(input.value ?? '');
 		try {
 			onChanged();
@@ -564,7 +761,12 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	};
 
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
+	input.addEventListener('change', () => {
+		apply();
+		const after = _captureProp(obj, key);
+		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
 
 	input.addEventListener('dragover', (e) => {
 		// Allow drop.
@@ -583,7 +785,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		// If OS files are dropped, import them into the project via Electron IPC.
 		// This enables: drag from Windows Explorer -> drop on inspector field.
 		try {
-			const electronAPI = /** @type {any} */ ((window && window.electronAPI) ? window.electronAPI : null);
+			const electronAPI = /** @type {any} */ ((/** @type {any} */ (window)).electronAPI || null);
 			const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
 			if (canImport && dt.files && dt.files.length > 0) {
 				const paths = [];
@@ -605,6 +807,9 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 							const next = opts.importToWorkspaceUrl ? `fluxion://workspace/${rel.replace(/^\/+/, '')}` : rel;
 							input.value = next;
 							apply();
+							const after = _captureProp(obj, key);
+							if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+							editBefore = null;
 						})
 						.catch(() => {});
 					return;
@@ -638,10 +843,13 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 
 		input.value = text;
 		apply();
+		const after = _captureProp(obj, key);
+		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
 	});
 
 	// Optional asset picker button (shows project files matching acceptExtensions).
-	const electronAPI = /** @type {any} */ ((window && window.electronAPI) ? window.electronAPI : null);
+	const electronAPI = /** @type {any} */ ((/** @type {any} */ (window)).electronAPI || null);
 	const canPick = !!(accept && accept.length > 0 && electronAPI && typeof electronAPI.listProjectDir === 'function');
 
 	/** @param {string} rel */
@@ -674,6 +882,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
 
+		/** @param {MouseEvent} e */
 		const onDocMouseDown = (e) => {
 			const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
 			if (!t) return;
@@ -681,6 +890,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			close();
 		};
 
+		/** @param {KeyboardEvent} e */
 		const onKeyDown = (e) => {
 			if (e.key === 'Escape') close();
 		};
@@ -706,6 +916,11 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			});
 		} catch {}
 
+		/**
+		 * @param {string} labelText
+		 * @param {() => void} onClick
+		 * @param {boolean=} enabled
+		 */
 		const addItem = (labelText, onClick, enabled = true) => {
 			const btn = document.createElement('button');
 			btn.type = 'button';
@@ -716,7 +931,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 				btn.style.opacity = '0.6';
 				btn.style.cursor = 'default';
 			}
-			btn.addEventListener('click', (e) => {
+			btn.addEventListener('click', /** @param {MouseEvent} e */ (e) => {
 				e.preventDefault();
 				e.stopPropagation();
 				if (!enabled) return;
@@ -821,7 +1036,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	pickBtn.className = 'btn';
 	pickBtn.textContent = 'Pick';
 	pickBtn.style.flex = '0 0 auto';
-	pickBtn.style.padding = '8px 10px';
+	pickBtn.classList.add('btnSmall');
 	pickBtn.addEventListener('click', (e) => {
 		e.preventDefault();
 		e.stopPropagation();
@@ -829,10 +1044,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	});
 
 	const row = document.createElement('div');
-	row.style.display = 'flex';
-	row.style.gap = '6px';
-	row.style.alignItems = 'center';
-	row.style.width = '100%';
+	row.className = 'rowTight rowCenter';
 	row.appendChild(input);
 	row.appendChild(pickBtn);
 	addField(container, label, row);
@@ -862,10 +1074,15 @@ export function addNullableNumber(container, label, obj, key) {
 	if (cur === null || cur === undefined || cur === '') input.value = '';
 	else input.value = String(Number(cur));
 	_bindField(input, obj, key, 'nullable-number');
+	const { wrap, hint } = _wrapWithHint(input);
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 
 	const apply = () => {
 		const raw = String(input.value ?? '').trim();
 		if (!raw) {
+			_clearInvalid(input, hint);
+			if (!editBefore) editBefore = _captureProp(obj, key);
 			if (emptyMode === 'null') {
 				obj[key] = null;
 			} else {
@@ -878,13 +1095,23 @@ export function addNullableNumber(container, label, obj, key) {
 			return;
 		}
 		const v = Number(raw);
-		if (!Number.isFinite(v)) return;
+		if (!Number.isFinite(v)) {
+			_setInvalid(input, hint, 'Enter a valid number, or clear it.');
+			return;
+		}
+		_clearInvalid(input, hint);
+		if (!editBefore) editBefore = _captureProp(obj, key);
 		obj[key] = v;
 	};
 
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
-	addField(container, label, input);
+	input.addEventListener('change', () => {
+		apply();
+		const after = _captureProp(obj, key);
+		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
+		editBefore = null;
+	});
+	addField(container, label, wrap);
 }
 
 /**
@@ -899,8 +1126,9 @@ export function addVec3Array(container, label, arr, opts = {}) {
 	const normalize = !!opts.normalize;
 
 	const wrap = document.createElement('div');
-	wrap.style.display = 'flex';
-	wrap.style.gap = '6px';
+	wrap.className = 'vec3Row';
+	/** @type {number[]|null} */
+	let editBefore = null;
 
 	/** @type {HTMLInputElement[]} */
 	const inputs = [];
@@ -911,12 +1139,19 @@ export function addVec3Array(container, label, arr, opts = {}) {
 		input.type = 'number';
 		input.step = '0.01';
 		input.value = String(Number(arr[i]) || 0);
-		input.style.width = '80px';
+		input.classList.add('vec3Input');
 
 		const apply = () => {
-			const v = Number(input.value);
-			if (!Number.isFinite(v)) return;
+			const raw = String(input.value ?? '').trim();
+			const v = Number(raw);
+			if (!raw || !Number.isFinite(v)) {
+				input.classList.add('invalid');
+				return;
+			}
+			input.classList.remove('invalid');
+			if (!editBefore) editBefore = [Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0];
 			arr[i] = v;
+
 			if (normalize) {
 				const x = Number(arr[0]) || 0;
 				const y = Number(arr[1]) || 0;
@@ -934,12 +1169,31 @@ export function addVec3Array(container, label, arr, opts = {}) {
 		};
 
 		input.addEventListener('input', apply);
-		input.addEventListener('change', apply);
+		input.addEventListener('change', () => {
+			apply();
+			if (!editBefore) return;
+			const beforeCopy = [Number(editBefore[0]) || 0, Number(editBefore[1]) || 0, Number(editBefore[2]) || 0];
+			const afterCopy = [Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0];
+			const same = Object.is(beforeCopy[0], afterCopy[0]) && Object.is(beforeCopy[1], afterCopy[1]) && Object.is(beforeCopy[2], afterCopy[2]);
+			if (!same) {
+				const u = _getUndo();
+				if (u) {
+					const mergeKey = `vec3:${_getObjectId(arr)}:${String(label)}`;
+					u.push({
+						label: String(label || 'Vector'),
+						mergeKey,
+						undo: () => { arr[0] = beforeCopy[0]; arr[1] = beforeCopy[1]; arr[2] = beforeCopy[2]; },
+						redo: () => { arr[0] = afterCopy[0]; arr[1] = afterCopy[1]; arr[2] = afterCopy[2]; },
+					});
+				}
+			}
+			editBefore = null;
+		});
 		return input;
 	};
 
 	inputs.push(make(0), make(1), make(2));
-	for (const i of inputs) wrap.appendChild(i);
+	for (const input of inputs) wrap.appendChild(input);
 	addField(container, label, wrap);
 }
 
@@ -1096,18 +1350,11 @@ export function addCssColor(container, label, obj, key) {
 	if (!(key in obj)) return;
 
 	const wrap = document.createElement('div');
-	wrap.style.display = 'flex';
-	wrap.style.gap = '8px';
-	wrap.style.alignItems = 'center';
+	wrap.className = 'row rowCenter';
 
 	const picker = document.createElement('input');
 	picker.type = 'color';
-	picker.style.width = '44px';
-	picker.style.height = '34px';
-	picker.style.padding = '0';
-	picker.style.border = '1px solid var(--border)';
-	picker.style.borderRadius = '6px';
-	picker.style.background = 'transparent';
+	picker.className = 'colorPicker';
 
 	const text = document.createElement('input');
 	text.type = 'text';
@@ -1166,18 +1413,11 @@ export function addCssColorWith(container, label, obj, key, onChanged) {
 	if (!(key in obj)) return;
 
 	const wrap = document.createElement('div');
-	wrap.style.display = 'flex';
-	wrap.style.gap = '8px';
-	wrap.style.alignItems = 'center';
+	wrap.className = 'row rowCenter';
 
 	const picker = document.createElement('input');
 	picker.type = 'color';
-	picker.style.width = '44px';
-	picker.style.height = '34px';
-	picker.style.padding = '0';
-	picker.style.border = '1px solid var(--border)';
-	picker.style.borderRadius = '6px';
-	picker.style.background = 'transparent';
+	picker.className = 'colorPicker';
 
 	const text = document.createElement('input');
 	text.type = 'text';
@@ -1274,9 +1514,17 @@ export function addNumber2DPos(container, label, obj, key) {
 	input.type = 'number';
 	input.step = '0.01';
 	input.value = String(Number(obj[key]) || 0);
+	/** @type {{had:boolean,value:any}|null} */
+	let beforeMain = null;
+	/** @type {{had:boolean,value:any}|null} */
+	let beforeBase = null;
+	const baseKey = (key === 'x') ? 'baseX' : 'baseY';
 	const apply = () => {
-		const v = Number(input.value);
-		if (!Number.isFinite(v)) return;
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) return;
+		if (!beforeMain) beforeMain = _captureProp(obj, key);
+		if (!beforeBase) beforeBase = _captureProp(obj, baseKey);
 		if (obj.followCamera) {
 			if (key === 'x') obj.baseX = v;
 			if (key === 'y') obj.baseY = v;
@@ -1284,7 +1532,15 @@ export function addNumber2DPos(container, label, obj, key) {
 		obj[key] = v;
 	};
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
+	input.addEventListener('change', () => {
+		apply();
+		if (!beforeMain || !beforeBase) { beforeMain = null; beforeBase = null; return; }
+		const afterMain = _captureProp(obj, key);
+		const afterBase = _captureProp(obj, baseKey);
+		_pushUndoPropPair(obj, key, baseKey, beforeMain, afterMain, beforeBase, afterBase, label);
+		beforeMain = null;
+		beforeBase = null;
+	});
 	addField(container, label, input);
 }
 
@@ -1314,9 +1570,13 @@ export function add2DLayerField(host, container, obj) {
 	input.type = 'number';
 	input.step = '1';
 	input.value = String(Number(obj.layer) || 0);
+	/** @type {{had:boolean,value:any}|null} */
+	let editBefore = null;
 	const apply = () => {
-		const v = Number(input.value);
-		if (!Number.isFinite(v)) return;
+		const raw = String(input.value ?? '').trim();
+		const v = Number(raw);
+		if (!raw || !Number.isFinite(v)) return;
+		if (!editBefore) editBefore = _captureProp(obj, 'layer');
 		obj.layer = v;
 		// Scene caches sorted 2D objects; mark dirty so the new layer takes effect.
 		if (host?.currentScene) {
@@ -1325,7 +1585,13 @@ export function add2DLayerField(host, container, obj) {
 		}
 	};
 	input.addEventListener('input', apply);
-	input.addEventListener('change', apply);
+	input.addEventListener('change', () => {
+		apply();
+		if (!editBefore) return;
+		const after = _captureProp(obj, 'layer');
+		_pushUndoProp(obj, 'layer', editBefore, after, 'layer');
+		editBefore = null;
+	});
 	addField(container, 'layer', input);
 }
 

@@ -189,6 +189,57 @@ const game = {
     queued: false,
   },
 
+  _undo: {
+    /** @type {{ label: string, mergeKey?: string, t: number, undo: () => void, redo: () => void }[]} */
+    stack: [],
+    /** @type {{ label: string, mergeKey?: string, t: number, undo: () => void, redo: () => void }[]} */
+    redoStack: [],
+    max: 200,
+
+    /** @param {{ label: string, mergeKey?: string, undo: () => void, redo: () => void }} action */
+    push(action) {
+      try {
+        if (!action || typeof action.undo !== 'function' || typeof action.redo !== 'function') return;
+        const t = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        const a = { label: String(action.label || 'Edit'), mergeKey: action.mergeKey ? String(action.mergeKey) : undefined, t, undo: action.undo, redo: action.redo };
+
+        const last = this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
+        const canMerge = !!(last && a.mergeKey && last.mergeKey === a.mergeKey && (t - last.t) <= 650);
+        if (canMerge) {
+          // Keep the oldest undo() but update redo() to latest.
+          last.t = t;
+          last.redo = a.redo;
+          last.label = a.label;
+        } else {
+          this.stack.push(a);
+          if (this.stack.length > this.max) this.stack.splice(0, this.stack.length - this.max);
+        }
+        this.redoStack.length = 0;
+      } catch {}
+    },
+
+    canUndo() { return this.stack.length > 0; },
+    canRedo() { return this.redoStack.length > 0; },
+
+    /** @returns {boolean} */
+    undo() {
+      const a = this.stack.pop();
+      if (!a) return false;
+      try { a.undo(); } catch (e) { console.warn('Undo failed', e); }
+      this.redoStack.push(a);
+      return true;
+    },
+
+    /** @returns {boolean} */
+    redo() {
+      const a = this.redoStack.pop();
+      if (!a) return false;
+      try { a.redo(); } catch (e) { console.warn('Redo failed', e); }
+      this.stack.push(a);
+      return true;
+    },
+  },
+
   _gizmo: {
     active: false,
     mode: /** @type {'translate'|'rotate'} */ ('translate'),
@@ -4860,6 +4911,12 @@ const game = {
     syncInspectorPanel(this, /** @type {any} */ (ui));
   },
 
+  _afterUndoRedo() {
+    try { this.rebuildTree(); } catch {}
+    try { this.rebuildInspector(); } catch {}
+    try { if (this._renderer) this._requestViewportSync(this._renderer); } catch {}
+  },
+
   /**
    * Inspector for scene-level XML stub entries like <Font/>, <Mesh/>, <Material/>, <Skybox/>.
    * @param {any} stub
@@ -5951,6 +6008,37 @@ const game = {
     }
   },
 };
+
+// Expose editor undo manager for inspector field helpers.
+try {
+  /** @type {any} */ (window).__fluxionUndo = game._undo;
+} catch {}
+
+// Keyboard shortcuts: Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z (when not typing in an input).
+try {
+  window.addEventListener('keydown', (e) => {
+    if (!(e instanceof KeyboardEvent)) return;
+    if (!e.ctrlKey) return;
+
+    const tag = String((/** @type {HTMLElement|null} */ (document.activeElement))?.tagName || '').toLowerCase();
+    const isTyping = tag === 'input' || tag === 'textarea' || tag === 'select';
+    if (isTyping) return;
+
+    const key = String(e.key || '').toLowerCase();
+    const wantsUndo = key === 'z' && !e.shiftKey;
+    const wantsRedo = key === 'y' || (key === 'z' && e.shiftKey);
+    if (!wantsUndo && !wantsRedo) return;
+
+    let changed = false;
+    if (wantsUndo) changed = !!game._undo.undo();
+    if (wantsRedo) changed = !!game._undo.redo();
+    if (changed) {
+      e.preventDefault();
+      e.stopPropagation();
+      game._afterUndoRedo();
+    }
+  }, true);
+} catch {}
 
 new Engine("gameCanvas", game, 1280, 720, true, true, {
   renderer: {
