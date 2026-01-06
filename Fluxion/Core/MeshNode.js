@@ -240,14 +240,34 @@ export default class MeshNode {
     // GLTF mesh (already converted, stored directly)
     // For GLTF, params is the entire mesh definition object with .mesh property
     if (t === 'gltf') {
-      if (p.mesh && p.mesh instanceof Mesh) {
-        return p.mesh; // Return the pre-converted Mesh object
+      if (p.mesh) {
+        // More robust check: verify it has the expected Mesh methods/properties
+        const hasMeshSignature = (
+          p.mesh.vertexCount !== undefined &&
+          p.mesh.vbo !== undefined &&
+          typeof p.mesh.upload === 'function'
+        );
+        
+        if (hasMeshSignature || p.mesh instanceof Mesh) {
+          return p.mesh; // Return the pre-converted Mesh object
+        } else {
+          console.error('GLTF: Mesh object exists but does not have expected Mesh signature', { 
+            type, 
+            hasMesh: !!p.mesh,
+            meshType: typeof p.mesh,
+            meshConstructor: p.mesh?.constructor?.name,
+            hasVertexCount: 'vertexCount' in (p.mesh || {}),
+            hasVbo: 'vbo' in (p.mesh || {}),
+            hasUpload: typeof p.mesh?.upload === 'function'
+          });
+          // Fallback to cube instead of returning null (which would cause issues)
+          return Mesh.createCube(gl, 2, 2, 2);
+        }
       } else {
-        console.error('GLTF: Mesh definition missing or invalid mesh object', { 
-          type, 
-          hasMesh: !!p.mesh,
-          meshType: typeof p.mesh,
-          meshConstructor: p.mesh?.constructor?.name
+        console.error('GLTF: Mesh definition missing mesh object', { 
+          type,
+          params: p,
+          keys: Object.keys(p || {})
         });
         // Fallback to cube instead of returning null (which would cause issues)
         return Mesh.createCube(gl, 2, 2, 2);

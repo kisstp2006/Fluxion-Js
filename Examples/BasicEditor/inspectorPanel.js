@@ -1403,13 +1403,8 @@ export function rebuildInspector(host, ui) {
           const short = matKey.includes('::') ? matKey.split('::').slice(-1)[0] : matKey;
           /** @type {any} */
           const rowObj = { file: overrideMap.get(matKey) || '' };
-          InspectorFields.addStringWithDrop(ui.common, `gltfMat[${i}] ${short}`, rowObj, 'file', () => {
+          InspectorFields.addStringWith(ui.common, `gltfMat[${i}] ${short}`, rowObj, 'file', () => {
             applyMatOverride(matKey, String(rowObj.file || ''));
-          }, {
-            acceptExtensions: ['.mat'],
-            debounceMs: 250,
-            onClick: (_ev, input) => { tryOpenMatAsset(input.value); },
-            onFocus: (_ev, input) => { tryOpenMatAsset(input.value); },
           });
         }
       }

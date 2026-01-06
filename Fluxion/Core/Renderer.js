@@ -1824,11 +1824,19 @@ export default class Renderer {
       return this.textureCache.get(cacheKey).texture;
     }
 
-    const texture = this.gl.createTexture();
+    const gl = this.gl;
+    
+    // Save current active texture unit to restore it later
+    const prevActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+    
+    // Always create 2D textures on TEXTURE0 to avoid corrupting 3D shader texture bindings
+    gl.activeTexture(gl.TEXTURE0);
+
+    const texture = gl.createTexture();
     // Store texture dimensions (WebGLTexture doesn't have width/height properties)
     this._textureDimensions.set(texture, { width: image.width, height: image.height });
 
-    this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
     this.gl.pixelStorei(this.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     // Make (0,0) in UV space correspond to the top-left of the source image/canvas.
     // This matches our engine's 2D convention (Y down) and keeps sprites/text upright.
@@ -1862,9 +1870,12 @@ export default class Renderer {
     }
 
     // Reset state to avoid surprising other uploads.
-    this.gl.pixelStorei(this.gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
 
-    this.gl.bindTexture(this.gl.TEXTURE_2D, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    
+    // Restore the previous active texture unit to avoid interfering with 3D rendering
+    gl.activeTexture(prevActiveTexture);
     
     // Cache texture if key provided
     if (cacheKey) {
@@ -1913,6 +1924,10 @@ export default class Renderer {
     gl.colorMask(true, true, true, true);
     gl.depthMask(true);
     gl.stencilMask(0xFF);
+    // Unbind any VAO to ensure clean state
+    if (this.isWebGL2 && typeof gl.bindVertexArray === 'function') {
+      gl.bindVertexArray(null);
+    }
 
     if (this.enablePostProcessing && this.mainScreenFramebuffer) {
       // Render to offscreen target for post-processing.
@@ -1931,7 +1946,7 @@ export default class Renderer {
       // No post-processing: render directly to the default framebuffer.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       gl.viewport(this.viewport.x, this.viewport.y, this.viewport.width, this.viewport.height);
     }
 
@@ -2049,6 +2064,12 @@ export default class Renderer {
     this.flush();
 
     const gl = this.gl;
+    
+    // Defensive: unbind any VAO from previous 2D rendering
+    if (typeof gl.bindVertexArray === 'function') {
+      gl.bindVertexArray(null);
+    }
+    
     const cam = camera3D || this._defaultCamera3D;
     this._last3DCamera = cam;
 

@@ -673,7 +673,7 @@ export function addAutoWith(container, label, obj, key, onChanged) {
 		}
 
 		// Color-ish string fields.
-		if (k.includes('color')) {
+		if (k.includes('color') || k.includes('emissive')) {
 			addCssColorWith(container, label, obj, key, onChanged);
 			return;
 		}

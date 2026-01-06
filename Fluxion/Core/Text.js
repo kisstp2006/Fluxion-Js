@@ -148,7 +148,13 @@ export default class Text extends Sprite {
         }
         
         if (this.texture) {
-            this.renderer.gl.deleteTexture(this.texture);
+            const gl = this.renderer.gl;
+            // Save active texture unit to avoid corrupting 3D shader state
+            const prevActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.deleteTexture(this.texture);
+            gl.activeTexture(prevActiveTexture);
             // Clean up dimension entry (WeakMap will auto-cleanup, but explicit is better)
             if (this.renderer._textureDimensions) {
                 // WeakMap doesn't have delete, but the texture is deleted so entry will be GC'd
@@ -176,7 +182,13 @@ export default class Text extends Sprite {
         }
 
         if (this.texture && this.renderer?.gl) {
-            this.renderer.gl.deleteTexture(this.texture);
+            const gl = this.renderer.gl;
+            // Save active texture unit to avoid corrupting 3D shader state
+            const prevActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.deleteTexture(this.texture);
+            gl.activeTexture(prevActiveTexture);
         }
         this.texture = null;
     }

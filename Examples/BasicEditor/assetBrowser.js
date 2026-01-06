@@ -806,23 +806,23 @@ export function createAssetBrowser(opts) {
     addMenuItem({
       label: 'Create Folder...',
       enabled: true,
-      onClick: () => doCreateFolder(ctx.pasteDestDir || state.cwd),
+      onClick: async () => await doCreateFolder(ctx.pasteDestDir || state.cwd),
     });
     addMenuSep();
     addMenuItem({
       label: 'Create Scene (.xml)',
       enabled: true,
-      onClick: () => doCreate('scene', ctx.pasteDestDir || state.cwd),
+      onClick: async () => await doCreate('scene', ctx.pasteDestDir || state.cwd),
     });
     addMenuItem({
       label: 'Create Script (.js)',
       enabled: true,
-      onClick: () => doCreate('script', ctx.pasteDestDir || state.cwd),
+      onClick: async () => await doCreate('script', ctx.pasteDestDir || state.cwd),
     });
     addMenuItem({
       label: 'Create Material (.mat)',
       enabled: true,
-      onClick: () => doCreate('material', ctx.pasteDestDir || state.cwd),
+      onClick: async () => await doCreate('material', ctx.pasteDestDir || state.cwd),
     });
     addMenuSep();
     addMenuItem({ label: 'Delete', enabled: hasTarget, onClick: hasTarget ? doDeleteSelected : null });
