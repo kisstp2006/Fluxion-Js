@@ -354,6 +354,7 @@ export function createAssetBrowser(opts) {
       /** @type {any} */
       const out = {
         baseColorFactor: Array.isArray(pbr.baseColorFactor) ? pbr.baseColorFactor : [1, 1, 1, 1],
+        uvScale: [1, 1],
         metallicFactor: (typeof pbr.metallicFactor === 'number') ? pbr.metallicFactor : 1.0,
         roughnessFactor: (typeof pbr.roughnessFactor === 'number') ? pbr.roughnessFactor : 1.0,
       };
@@ -724,6 +725,7 @@ export function createAssetBrowser(opts) {
       ext = '.mat';
       content = JSON.stringify({
         baseColorFactor: '#ffffffff',
+        uvScale: [1, 1],
         metallicFactor: 0.0,
         roughnessFactor: 0.65,
         normalScale: 1.0,
@@ -940,7 +942,7 @@ export function createAssetBrowser(opts) {
         } catch {}
       });
 
-      ui.assetGrid.addEventListener('drop', (e) => {
+      ui.assetGrid.addEventListener('drop', async (e) => {
         const electronAPI = /** @type {any} */ (window).electronAPI;
         const canImport = !!(electronAPI && typeof electronAPI.importExternalFiles === 'function');
         if (!canImport) return;
@@ -952,31 +954,100 @@ export function createAssetBrowser(opts) {
         if (!dt || !dt.files || dt.files.length === 0) return;
 
         // In Electron, File objects usually have a .path property.
-        const paths = [];
+        /** @type {Map<string, File>} */
+        const byPath = new Map();
+        /** @type {string[]} */
+        const pathsIn = [];
         for (const f of Array.from(dt.files)) {
           // @ts-ignore
           const p = String(f && (f.path || f.webkitRelativePath || f.name) ? (f.path || f.webkitRelativePath || f.name) : '').trim();
-          if (p) paths.push(p);
+          if (!p) continue;
+          pathsIn.push(p);
+          try { byPath.set(p, f); } catch {}
         }
-        if (paths.length === 0) return;
+        if (pathsIn.length === 0) return;
 
-        Promise.resolve(electronAPI.importExternalFiles(paths, state.cwd))
-          .then(async (res) => {
-            if (!res || !res.ok) {
-              alert(res && res.error ? res.error : 'Import failed');
-              return;
+        // If a .gltf is being imported, also import its external dependencies (buffers/images)
+        // from the same folder. This fixes common ERR_FILE_NOT_FOUND issues when a GLTF references
+        // a .bin and textures.
+        /** @param {string} absPath */
+        const dirnameAbs = (absPath) => {
+          const s = String(absPath || '');
+          const i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
+          return i >= 0 ? s.slice(0, i) : '';
+        };
+        /** @param {string} baseDirAbs @param {string} relUri */
+        const joinAbs = (baseDirAbs, relUri) => {
+          const b = String(baseDirAbs || '').replace(/[\\/]+$/, '');
+          const r = String(relUri || '').replace(/^[\\/]+/, '');
+          const sep = b.includes('\\') ? '\\' : '/';
+          const rr = r.replace(/\//g, sep);
+          return b ? `${b}${sep}${rr}` : rr;
+        };
+        /** @param {string} uri */
+        const isExternalRef = (uri) => {
+          const u = String(uri || '').trim();
+          if (!u) return false;
+          if (/^data:/i.test(u)) return false;
+          if (/^[a-z]+:\/\//i.test(u)) return false;
+          // Windows absolute path or *nix absolute path
+          if (/^[a-zA-Z]:[\\/]/.test(u)) return false;
+          if (u.startsWith('/') || u.startsWith('\\')) return false;
+          return true;
+        };
+
+        /** @type {Set<string>} */
+        const allPaths = new Set(pathsIn);
+        for (const abs of pathsIn) {
+          const lower = String(abs).toLowerCase();
+          if (!lower.endsWith('.gltf')) continue;
+
+          const fileObj = byPath.get(abs) || null;
+          if (!fileObj || typeof fileObj.text !== 'function') continue;
+
+          try {
+            const text = await fileObj.text();
+            const gltf = JSON.parse(String(text || ''));
+            const baseDirAbs = dirnameAbs(abs);
+
+            // buffers
+            if (Array.isArray(gltf?.buffers)) {
+              for (const b of gltf.buffers) {
+                const uri = String(b?.uri || '').trim();
+                if (!isExternalRef(uri)) continue;
+                allPaths.add(joinAbs(baseDirAbs, uri));
+              }
             }
-            const imported = Array.isArray(res.imported) ? res.imported : [];
-            if (imported.length > 0) {
-              const rel = String(imported[0]?.destRel || '');
-              if (rel) state.selected = rel;
+            // images
+            if (Array.isArray(gltf?.images)) {
+              for (const img of gltf.images) {
+                const uri = String(img?.uri || '').trim();
+                if (!isExternalRef(uri)) continue;
+                allPaths.add(joinAbs(baseDirAbs, uri));
+              }
             }
-            await render();
-          })
-          .catch((err) => {
-            console.error(err);
-            alert('Import failed');
-          });
+          } catch (err) {
+            // Don't block import on parse errors; just import the selected files.
+            console.warn('GLTF dependency scan failed', abs, err);
+          }
+        }
+
+        try {
+          const res = await electronAPI.importExternalFiles(Array.from(allPaths), state.cwd);
+          if (!res || !res.ok) {
+            alert(res && res.error ? res.error : 'Import failed');
+            return;
+          }
+          const imported = Array.isArray(res.imported) ? res.imported : [];
+          if (imported.length > 0) {
+            const rel = String(imported[0]?.destRel || '');
+            if (rel) state.selected = rel;
+          }
+          await render();
+        } catch (err) {
+          console.error(err);
+          alert('Import failed');
+        }
       });
     }
 

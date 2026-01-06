@@ -374,14 +374,19 @@ export function convertGLTFToFluxion(glTF, gl, renderer) {
     // Convert scene nodes to MeshNodes.
     // NOTE: Fluxion's MeshNode does not currently inherit parent transforms when drawing children,
     // so we compute WORLD transforms here by traversing the glTF scene graph.
+    // Process all scenes (not just the first one)
     if (glTF.scenes && glTF.scenes.length > 0) {
-        const scene = glTF.scenes[0];
-        if (scene.nodes) {
-            const identity = Mat4.identity();
-            for (const nodeId of scene.nodes) {
-                const node = glTF.nodes[nodeId];
-                if (!node) continue;
-                _convertGLTFNodeRecursive(node, glTF, meshes, materials, identity, nodes);
+        for (let sceneIdx = 0; sceneIdx < glTF.scenes.length; sceneIdx++) {
+            const scene = glTF.scenes[sceneIdx];
+            if (scene.nodes) {
+                const identity = Mat4.identity();
+                for (const nodeId of scene.nodes) {
+                    const node = glTF.nodes[nodeId];
+                    if (!node) continue;
+                    // Prefix node names with scene name to avoid collisions across scenes
+                    const scenePrefix = glTF.scenes.length > 1 && scene.name ? `${scene.name}_` : '';
+                    _convertGLTFNodeRecursive(node, glTF, meshes, materials, identity, nodes, scenePrefix);
+                }
             }
         }
     }
@@ -503,7 +508,7 @@ function _composeGltfTRSMatrix(node) {
     return out;
 }
 
-function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorld, outNodes) {
+function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorld, outNodes, scenePrefix = '') {
     const local = gltfNode.matrix ? gltfNode.matrix : _composeGltfTRSMatrix(gltfNode);
     const world = Mat4.multiply(parentWorld, local, new Float32Array(16));
 
@@ -520,7 +525,7 @@ function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorl
                 if (!meshObj) continue;
 
                 const meshNode = new MeshNode();
-                meshNode.name = gltfNode.name || meshKey;
+                meshNode.name = `${scenePrefix}${gltfNode.name || meshKey}`;
                 meshNode.x = trs.position[0];
                 meshNode.y = trs.position[1];
                 meshNode.z = trs.position[2];
@@ -563,7 +568,7 @@ function _convertGLTFNodeRecursive(gltfNode, glTF, meshes, materials, parentWorl
     if (gltfNode.children) {
         for (const child of gltfNode.children) {
             if (!child) continue;
-            _convertGLTFNodeRecursive(child, glTF, meshes, materials, world, outNodes);
+            _convertGLTFNodeRecursive(child, glTF, meshes, materials, world, outNodes, scenePrefix);
         }
     }
 }
@@ -587,7 +592,11 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
         // Get accessors
         const positionAccessor = primitive.attributes.POSITION;
         const normalAccessor = primitive.attributes.NORMAL;
+        const tangentAccessor = primitive.attributes.TANGENT;
+        const colorAccessor = primitive.attributes.COLOR_0 || primitive.attributes.COLOR;
         const texCoordAccessor = primitive.attributes.TEXCOORD_0 || primitive.attributes.TEXCOORD;
+        const jointsAccessor = primitive.attributes.JOINTS_0 || primitive.attributes.JOINTS;
+        const weightsAccessor = primitive.attributes.WEIGHTS_0 || primitive.attributes.WEIGHTS;
         // minimal-gltf-loader keeps `primitive.indices` as an accessor ID (number)
         // and only hooks up attributes to accessor objects.
         const indicesRef = primitive.indices;
@@ -612,42 +621,127 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
             continue;
         }
         const normalData = normalAccessor ? _extractAccessorData(normalAccessor) : null;
+        const tangentData = tangentAccessor ? _extractAccessorData(tangentAccessor) : null;
+        const colorData = colorAccessor ? _extractAccessorData(colorAccessor) : null;
         const texCoordData = texCoordAccessor ? _extractAccessorData(texCoordAccessor) : null;
+        const jointsData = jointsAccessor ? _extractAccessorData(jointsAccessor) : null;
+        const weightsData = weightsAccessor ? _extractAccessorData(weightsAccessor) : null;
         const indicesData = indicesAccessor ? _extractAccessorData(indicesAccessor) : null;
 
-        // Convert to interleaved format: [x,y,z, nx,ny,nz, u,v]
+        // Convert to interleaved format: [x,y,z, nx,ny,nz, tx,ty,tz,tw, u,v, r,g,b,a, j0,j1,j2,j3, w0,w1,w2,w3]
+        // Fluxion Mesh expects: [x,y,z, nx,ny,nz, u,v] (8 floats per vertex)
+        // Extended with optional: tangent (4), color (4), joints (4), weights (4)
         const vertexCount = positionAccessor.count;
-        const vertices = new Float32Array(vertexCount * 8);
+        
+        // Determine vertex stride based on what's available
+        let vertexStride = 8; // base: position (3) + normal (3) + uv (2)
+        if (tangentData) vertexStride += 4;
+        if (colorData) vertexStride += 4;
+        if (jointsData) vertexStride += 4;
+        if (weightsData) vertexStride += 4;
+        
+        const vertices = new Float32Array(vertexCount * vertexStride);
 
         for (let i = 0; i < vertexCount; i++) {
             const posIdx = i * 3;
             const normIdx = i * 3;
+            const tanIdx = i * 4;
+            const colIdx = i * 4;
             const uvIdx = i * 2;
-            const vertIdx = i * 8;
+            const jointIdx = i * 4;
+            const weightIdx = i * 4;
+            let vertIdx = i * vertexStride;
 
             // Position
             vertices[vertIdx + 0] = positionData[posIdx + 0] || 0;
             vertices[vertIdx + 1] = positionData[posIdx + 1] || 0;
             vertices[vertIdx + 2] = positionData[posIdx + 2] || 0;
+            vertIdx += 3;
 
             // Normal (default to [0,1,0] if missing)
             if (normalData && normalData.length > normIdx + 2) {
-                vertices[vertIdx + 3] = normalData[normIdx + 0] || 0;
-                vertices[vertIdx + 4] = normalData[normIdx + 1] || 1;
-                vertices[vertIdx + 5] = normalData[normIdx + 2] || 0;
+                vertices[vertIdx + 0] = normalData[normIdx + 0] || 0;
+                vertices[vertIdx + 1] = normalData[normIdx + 1] || 1;
+                vertices[vertIdx + 2] = normalData[normIdx + 2] || 0;
             } else {
-                vertices[vertIdx + 3] = 0;
-                vertices[vertIdx + 4] = 1;
-                vertices[vertIdx + 5] = 0;
+                vertices[vertIdx + 0] = 0;
+                vertices[vertIdx + 1] = 1;
+                vertices[vertIdx + 2] = 0;
             }
+            vertIdx += 3;
 
             // UV (default to [0,0] if missing)
             if (texCoordData && texCoordData.length > uvIdx + 1) {
-                vertices[vertIdx + 6] = texCoordData[uvIdx + 0] || 0;
-                vertices[vertIdx + 7] = texCoordData[uvIdx + 1] || 0;
+                vertices[vertIdx + 0] = texCoordData[uvIdx + 0] || 0;
+                vertices[vertIdx + 1] = texCoordData[uvIdx + 1] || 0;
             } else {
-                vertices[vertIdx + 6] = 0;
-                vertices[vertIdx + 7] = 0;
+                vertices[vertIdx + 0] = 0;
+                vertices[vertIdx + 1] = 0;
+            }
+            vertIdx += 2;
+
+            // Tangent (default to [1,0,0,1] if missing but requested)
+            if (tangentData) {
+                if (tangentData.length > tanIdx + 3) {
+                    vertices[vertIdx + 0] = tangentData[tanIdx + 0] || 1;
+                    vertices[vertIdx + 1] = tangentData[tanIdx + 1] || 0;
+                    vertices[vertIdx + 2] = tangentData[tanIdx + 2] || 0;
+                    vertices[vertIdx + 3] = tangentData[tanIdx + 3] || 1; // tangent.w indicates handedness
+                } else {
+                    vertices[vertIdx + 0] = 1;
+                    vertices[vertIdx + 1] = 0;
+                    vertices[vertIdx + 2] = 0;
+                    vertices[vertIdx + 3] = 1;
+                }
+                vertIdx += 4;
+            }
+
+            // Vertex Color (default to [1,1,1,1] if missing but requested)
+            if (colorData) {
+                if (colorData.length > colIdx + 3) {
+                    vertices[vertIdx + 0] = colorData[colIdx + 0] || 1;
+                    vertices[vertIdx + 1] = colorData[colIdx + 1] || 1;
+                    vertices[vertIdx + 2] = colorData[colIdx + 2] || 1;
+                    vertices[vertIdx + 3] = colorData[colIdx + 3] !== undefined ? colorData[colIdx + 3] : 1;
+                } else {
+                    vertices[vertIdx + 0] = 1;
+                    vertices[vertIdx + 1] = 1;
+                    vertices[vertIdx + 2] = 1;
+                    vertices[vertIdx + 3] = 1;
+                }
+                vertIdx += 4;
+            }
+
+            // Skeletal Joints (default to [0,0,0,0] if missing but requested)
+            if (jointsData) {
+                if (jointsData.length > jointIdx + 3) {
+                    vertices[vertIdx + 0] = jointsData[jointIdx + 0] || 0;
+                    vertices[vertIdx + 1] = jointsData[jointIdx + 1] || 0;
+                    vertices[vertIdx + 2] = jointsData[jointIdx + 2] || 0;
+                    vertices[vertIdx + 3] = jointsData[jointIdx + 3] || 0;
+                } else {
+                    vertices[vertIdx + 0] = 0;
+                    vertices[vertIdx + 1] = 0;
+                    vertices[vertIdx + 2] = 0;
+                    vertices[vertIdx + 3] = 0;
+                }
+                vertIdx += 4;
+            }
+
+            // Skeletal Weights (default to [1,0,0,0] if missing but requested)
+            if (weightsData) {
+                if (weightsData.length > weightIdx + 3) {
+                    vertices[vertIdx + 0] = weightsData[weightIdx + 0] || 0;
+                    vertices[vertIdx + 1] = weightsData[weightIdx + 1] || 0;
+                    vertices[vertIdx + 2] = weightsData[weightIdx + 2] || 0;
+                    vertices[vertIdx + 3] = weightsData[weightIdx + 3] || 0;
+                } else {
+                    vertices[vertIdx + 0] = 1; // First weight = 1 if only one weight
+                    vertices[vertIdx + 1] = 0;
+                    vertices[vertIdx + 2] = 0;
+                    vertices[vertIdx + 3] = 0;
+                }
+                vertIdx += 4;
             }
         }
 
@@ -667,9 +761,21 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
             }
         }
 
-        // Create Fluxion Mesh
-        const mesh = new Mesh(gl, vertices, indices);
-        console.log(`GLTF: Created mesh "${gltfMesh.name || 'unnamed'}" with ${vertexCount} vertices, ${indices ? indices.length : 0} indices`);
+        // Create Fluxion Mesh with attributes metadata
+        const meshAttributes = {
+            tangent: !!tangentData,
+            color: !!colorData,
+            joints: !!jointsData,
+            weights: !!weightsData
+        };
+        const mesh = new Mesh(gl, vertices, indices, meshAttributes);
+        console.log(`GLTF: Created mesh "${gltfMesh.name || 'unnamed'}" with ${vertexCount} vertices, ${indices ? indices.length : 0} indices`, {
+            hasNormals: !!normalData,
+            hasTangents: !!tangentData,
+            hasColors: !!colorData,
+            hasJoints: !!jointsData,
+            hasWeights: !!weightsData
+        });
         fluxionMeshes.push(mesh);
     }
 
@@ -788,6 +894,11 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     }
     if (gltfMat.alphaCutoff !== undefined) {
         mat.alphaCutoff = gltfMat.alphaCutoff;
+    }
+
+    // Double-sided / culling
+    if (gltfMat.doubleSided !== undefined) {
+        mat.doubleSided = !!gltfMat.doubleSided;
     }
 
     return mat;

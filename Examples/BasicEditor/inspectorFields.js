@@ -649,6 +649,39 @@ export function addAutoWith(container, label, obj, key, onChanged) {
 
 	const v = obj[key];
 	const k = String(key || '').toLowerCase();
+	const l = String(label || '').toLowerCase();
+
+	/**
+	 * @param {string} a
+	 * @returns {boolean}
+	 */
+	const _isColorishName = (a) => {
+		const s = String(a || '').toLowerCase();
+		return (
+			s.includes('color') ||
+			s.includes('tint') ||
+			s.includes('emissive') ||
+			s.includes('albedo') ||
+			s.includes('diffuse') ||
+			s.includes('ambient') ||
+			s.includes('specular') ||
+			s.includes('fog') ||
+			s.includes('sky') ||
+			s.includes('fill') ||
+			s.includes('stroke')
+		);
+	};
+	const isColorish = _isColorishName(k) || _isColorishName(l);
+
+	// Color arrays (vec3/vec4) -> color picker.
+	if (Array.isArray(v) && (v.length === 3 || v.length === 4) && isColorish) {
+		if (v.length === 3) {
+			addColorVec3With(container, label, obj, key, onChanged);
+			return;
+		}
+		addColorVec4With(container, label, obj, key, onChanged);
+		return;
+	}
 
 	if (typeof v === 'boolean') {
 		addToggleWith(container, label, obj, key, onChanged);
@@ -672,8 +705,9 @@ export function addAutoWith(container, label, obj, key, onChanged) {
 			return;
 		}
 
-		// Color-ish string fields.
-		if (k.includes('color') || k.includes('emissive')) {
+		// Color-ish string fields (by name/label or by being parseable as a CSS color).
+		const isParseableCssColor = !!cssColorToHex(String(v || '').trim());
+		if (isColorish || isParseableCssColor) {
 			addCssColorWith(container, label, obj, key, onChanged);
 			return;
 		}
@@ -700,6 +734,133 @@ export function addAutoWith(container, label, obj, key, onChanged) {
 
 	// Fallback
 	addStringWith(container, label, obj, key, onChanged);
+}
+
+/**
+ * Like addColorVec3 but edits a vec3 array stored on an object field and runs a callback.
+ * Supports both 0..1 and 0..255 storage (preserves original scale).
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {() => void} onChanged
+ */
+export function addColorVec3With(container, label, obj, key, onChanged) {
+	if (!container || !obj) return;
+	if (!(key in obj)) return;
+	const arr = obj[key];
+	if (!Array.isArray(arr) || arr.length < 3) return;
+
+	const wrap = document.createElement('div');
+	wrap.className = 'row rowCenter';
+
+	const picker = document.createElement('input');
+	picker.type = 'color';
+	picker.className = 'colorPicker';
+
+	const max = Math.max(Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0);
+	const use255 = max > 1.001;
+	const to01 = (n) => {
+		const x = Number(n) || 0;
+		return use255 ? (x / 255) : x;
+	};
+	const r = Math.max(0, Math.min(1, to01(arr[0])));
+	const g = Math.max(0, Math.min(1, to01(arr[1])));
+	const b = Math.max(0, Math.min(1, to01(arr[2])));
+	picker.value = rgb01ToHex(r, g, b);
+
+	picker.addEventListener('input', () => {
+		const rgb = hexToRgb01(String(picker.value || ''));
+		if (!rgb) return;
+		if (use255) {
+			arr[0] = Math.round(rgb[0] * 255);
+			arr[1] = Math.round(rgb[1] * 255);
+			arr[2] = Math.round(rgb[2] * 255);
+		} else {
+			arr[0] = rgb[0];
+			arr[1] = rgb[1];
+			arr[2] = rgb[2];
+		}
+		try { onChanged(); } catch {}
+	});
+
+	wrap.appendChild(picker);
+	addField(container, label, wrap);
+}
+
+/**
+ * Like addColorVec3With but for RGBA vec4 arrays.
+ * Shows a color picker for RGB plus a numeric Alpha field.
+ * Supports both 0..1 and 0..255 storage (preserves original scale).
+ * @param {HTMLElement | null} container
+ * @param {string} label
+ * @param {any} obj
+ * @param {string} key
+ * @param {() => void} onChanged
+ */
+export function addColorVec4With(container, label, obj, key, onChanged) {
+	if (!container || !obj) return;
+	if (!(key in obj)) return;
+	const arr = obj[key];
+	if (!Array.isArray(arr) || arr.length < 4) return;
+
+	const wrap = document.createElement('div');
+	wrap.className = 'row rowCenter';
+	wrap.style.gap = '8px';
+
+	const picker = document.createElement('input');
+	picker.type = 'color';
+	picker.className = 'colorPicker';
+
+	const max = Math.max(Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0, Number(arr[3]) || 0);
+	const use255 = max > 1.001;
+	const to01 = (n) => {
+		const x = Number(n) || 0;
+		return use255 ? (x / 255) : x;
+	};
+	const r = Math.max(0, Math.min(1, to01(arr[0])));
+	const g = Math.max(0, Math.min(1, to01(arr[1])));
+	const b = Math.max(0, Math.min(1, to01(arr[2])));
+	picker.value = rgb01ToHex(r, g, b);
+
+	const alpha = document.createElement('input');
+	alpha.type = 'number';
+	alpha.step = '0.01';
+	alpha.min = use255 ? '0' : '0';
+	alpha.max = use255 ? '255' : '1';
+	alpha.style.width = '90px';
+	alpha.value = String(use255 ? (Number(arr[3]) || 255) : Math.max(0, Math.min(1, Number(arr[3]) || 1)));
+	alpha.title = 'Alpha';
+
+	const applyAlpha = (immediate) => {
+		const raw = String(alpha.value ?? '').trim();
+		if (!raw) return;
+		const v = Number(raw);
+		if (!Number.isFinite(v)) return;
+		arr[3] = use255 ? Math.max(0, Math.min(255, v)) : Math.max(0, Math.min(1, v));
+		try { onChanged(); } catch {}
+	};
+	alpha.addEventListener('input', () => applyAlpha(false));
+	alpha.addEventListener('change', () => applyAlpha(true));
+
+	picker.addEventListener('input', () => {
+		const rgb = hexToRgb01(String(picker.value || ''));
+		if (!rgb) return;
+		if (use255) {
+			arr[0] = Math.round(rgb[0] * 255);
+			arr[1] = Math.round(rgb[1] * 255);
+			arr[2] = Math.round(rgb[2] * 255);
+		} else {
+			arr[0] = rgb[0];
+			arr[1] = rgb[1];
+			arr[2] = rgb[2];
+		}
+		try { onChanged(); } catch {}
+	});
+
+	wrap.appendChild(picker);
+	wrap.appendChild(alpha);
+	addField(container, label, wrap);
 }
 
 /**

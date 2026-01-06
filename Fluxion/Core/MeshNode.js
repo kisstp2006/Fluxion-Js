@@ -187,11 +187,20 @@ export default class MeshNode {
     }
 
     // Cache meshes by geometry only (materials/colors should not create new meshes).
-    // For GLTF, use the mesh object itself as part of the key
-    const key = (def?.type === 'gltf' && def.mesh) 
+    // For GLTF, use the mesh object itself as part of the key.
+    // For group/container nodes, cache the null result too so we don't re-run every frame.
+    const key = (def?.type === 'gltf' && def.mesh)
       ? `gltf:${MeshNode._getGltfMeshId(def.mesh)}`
       : JSON.stringify({ type, params: def?.params || null });
-    if (this._mesh && this._meshKey === key) return;
+
+    if (this._meshKey === key) return;
+
+    const typeLower = String(type || '').toLowerCase();
+    if (typeLower === 'group' || typeLower === 'empty' || typeLower === 'gltf-group') {
+      this._mesh = null;
+      this._meshKey = key;
+      return;
+    }
 
     const cache = MeshNode._getCache(gl);
     const cached = cache.get(key);
@@ -214,12 +223,19 @@ export default class MeshNode {
         });
       }
     } else {
-      console.warn('MeshNode: Failed to create mesh', { 
-        type, 
-        source: this.source,
-        meshDefinition: def,
-        params 
-      });
+      // Only warn for real mesh types; group/empty/gltf-group are expected to be mesh-less containers.
+      const tl = String(type || '').toLowerCase();
+      if (tl !== 'group' && tl !== 'empty' && tl !== 'gltf-group') {
+        console.warn('MeshNode: Failed to create mesh', {
+          type,
+          source: this.source,
+          meshDefinition: def,
+          params
+        });
+      }
+      // Cache the null result so we don't re-run every frame.
+      this._mesh = null;
+      this._meshKey = key;
     }
   }
 
@@ -233,7 +249,7 @@ export default class MeshNode {
     const p = params || {};
 
     // Group/empty node: intentionally has no mesh; used as a container.
-    if (t === 'group' || t === 'empty') {
+    if (t === 'group' || t === 'empty' || t === 'gltf-group') {
       return null;
     }
 

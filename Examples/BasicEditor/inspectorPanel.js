@@ -61,6 +61,26 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
   InspectorFields.addReadonly(ui.common, 'type', String(stub.__xmlTag || 'XML'));
 
+  /**
+   * @param {string} title
+   * @param {boolean=} open
+   * @returns {HTMLDivElement|null}
+   */
+  function addGroup(title, open = true) {
+    if (!ui.common) return null;
+    const details = document.createElement('details');
+    details.open = !!open;
+    const summary = document.createElement('summary');
+    summary.className = 'sectionTitle subSectionTitle';
+    summary.textContent = title;
+    details.appendChild(summary);
+    const inner = document.createElement('div');
+    inner.className = 'form';
+    details.appendChild(inner);
+    ui.common.appendChild(details);
+    return inner;
+  }
+
   const tag = String(stub.__xmlTag || '');
   if (tag === 'Font') {
     InspectorFields.addStringWith(ui.common, 'family', stub, 'family', () => host.rebuildTree());
@@ -206,65 +226,131 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
     let roughnessFactorField = null;
     /** @type {HTMLDivElement|null} */
     let aoStrengthField = null;
+    /** @type {HTMLDivElement|null} */
+    let baseColorFactorField = null;
 
     const updateMaterialStubVisibility = () => {
+      const hasBaseTex = !!String(stub.baseColorTexture || '').trim();
       const hasMetalTex = !!String(stub.metallicTexture || '').trim();
       const hasRoughTex = !!String(stub.roughnessTexture || '').trim();
       const hasAoTex = !!String(stub.aoTexture || '').trim();
 
+      if (baseColorFactorField) baseColorFactorField.style.display = hasBaseTex ? 'none' : '';
       if (metallicFactorField) metallicFactorField.style.display = hasMetalTex ? 'none' : '';
       if (roughnessFactorField) roughnessFactorField.style.display = hasRoughTex ? 'none' : '';
       if (aoStrengthField) aoStrengthField.style.display = hasAoTex ? 'none' : '';
     };
 
-    // Build fields explicitly so we can toggle visibility of factor rows.
+    // Source field
     InspectorFields.addAutoWith(ui.common, 'source', stub, 'source', () => {});
-    InspectorFields.addAutoWith(ui.common, 'baseColorFactor', stub, 'baseColorFactor', () => {});
 
-    InspectorFields.addAutoWith(ui.common, 'metallicFactor', stub, 'metallicFactor', () => {});
-    metallicFactorField = getLastField(ui.common);
-
-    InspectorFields.addAutoWith(ui.common, 'roughnessFactor', stub, 'roughnessFactor', () => {});
-    roughnessFactorField = getLastField(ui.common);
-
-    InspectorFields.addAutoWith(ui.common, 'normalScale', stub, 'normalScale', () => {});
-
-    InspectorFields.addAutoWith(ui.common, 'aoStrength', stub, 'aoStrength', () => {});
-    aoStrengthField = getLastField(ui.common);
-
-    InspectorFields.addAutoWith(ui.common, 'emissiveFactor', stub, 'emissiveFactor', () => {});
-    InspectorFields.addAutoWith(ui.common, 'alphaMode', stub, 'alphaMode', () => {});
-    InspectorFields.addAutoWith(ui.common, 'alphaCutoff', stub, 'alphaCutoff', () => {});
+    // Groups matching standalone material UI
+    const gAlbedo = addGroup('Albedo', true);
+    const gOrm = addGroup('Orm', true);
+    const gNormal = addGroup('Normal Map', false);
+    const gAo = addGroup('Ambient Occlusion', false);
+    const gEmission = addGroup('Emission', false);
+    const gTransparency = addGroup('Transparency', false);
 
     const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
-    InspectorFields.addStringWithDrop(ui.common, 'baseColorTexture', stub, 'baseColorTexture', () => {
+
+    // Albedo
+    InspectorFields.addAutoWith(gAlbedo, 'Color', stub, 'baseColorFactor', () => {});
+    baseColorFactorField = getLastField(gAlbedo);
+    InspectorFields.addStringWithDrop(gAlbedo, 'Texture', stub, 'baseColorTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'metallicTexture', stub, 'metallicTexture', () => {
+
+    // ORM
+    InspectorFields.addAutoWith(gOrm, 'Metallic', stub, 'metallicFactor', () => {});
+    metallicFactorField = getLastField(gOrm);
+    InspectorFields.addAutoWith(gOrm, 'Roughness', stub, 'roughnessFactor', () => {});
+    roughnessFactorField = getLastField(gOrm);
+    InspectorFields.addAutoWith(gOrm, 'Packed MR', stub, 'metallicRoughnessPacked', () => {});
+    InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture', stub, 'metallicTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'roughnessTexture', stub, 'roughnessTexture', () => {
+    InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture', stub, 'roughnessTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'normalTexture', stub, 'normalTexture', () => {
+
+    // Normal Map
+    InspectorFields.addAutoWith(gNormal, 'Scale', stub, 'normalScale', () => {});
+    InspectorFields.addStringWithDrop(gNormal, 'Texture', stub, 'normalTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'aoTexture', stub, 'aoTexture', () => {
+
+    // Ambient Occlusion
+    InspectorFields.addAutoWith(gAo, 'Strength', stub, 'aoStrength', () => {});
+    aoStrengthField = getLastField(gAo);
+    InspectorFields.addStringWithDrop(gAo, 'Texture', stub, 'aoTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'emissiveTexture', stub, 'emissiveTexture', () => {
+
+    // Emission
+    InspectorFields.addAutoWith(gEmission, 'Color', stub, 'emissiveFactor', () => {});
+    InspectorFields.addStringWithDrop(gEmission, 'Texture', stub, 'emissiveTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
-    InspectorFields.addStringWithDrop(ui.common, 'alphaTexture', stub, 'alphaTexture', () => {
+
+    // Transparency
+    InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', stub, 'alphaMode', () => {});
+    InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', stub, 'alphaCutoff', () => {});
+    InspectorFields.addStringWithDrop(gTransparency, 'Alpha Texture', stub, 'alphaTexture', () => {
       onTextureAuthored();
       updateMaterialStubVisibility();
     }, texOpts);
+
+    // UV
+    if (!('uvScale' in stub)) stub.uvScale = [1, 1];
+    if (!Array.isArray(stub.uvScale) || stub.uvScale.length < 2) stub.uvScale = [1, 1];
+    const gUv = addGroup('Uv', false);
+
+    /**
+     * @param {HTMLElement|null} container
+     * @param {string} label
+     * @param {any} obj
+     * @param {string} key
+     */
+    const addVec2ArrayWith = (container, label, obj, key) => {
+      if (!container || !obj) return;
+      if (!(key in obj)) return;
+      const arr = obj[key];
+      if (!Array.isArray(arr) || arr.length < 2) return;
+
+      const wrap = document.createElement('div');
+      wrap.style.display = 'flex';
+      wrap.style.gap = '6px';
+
+      /** @param {number} i */
+      const make = (i) => {
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.01';
+        input.value = String(Number(arr[i]) || 1);
+        input.style.width = '80px';
+        const apply = () => {
+          const v = Number(input.value);
+          if (!Number.isFinite(v)) return;
+          arr[i] = v;
+        };
+        input.addEventListener('input', apply);
+        input.addEventListener('change', apply);
+        return input;
+      };
+
+      wrap.appendChild(make(0));
+      wrap.appendChild(make(1));
+      InspectorFields.addField(container, label, wrap);
+    };
+
+    addVec2ArrayWith(gUv, 'UV Scale', stub, 'uvScale');
 
     // Initial visibility (hide factors when a texture is present).
     updateMaterialStubVisibility();
@@ -461,6 +547,26 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
 /** @param {any} host @param {InspectorUI} ui */
 export function rebuildInspector(host, ui) {
+  /**
+   * @param {string} title
+   * @param {boolean=} open
+   * @returns {HTMLDivElement|null}
+   */
+  function addGroup(title, open = true) {
+    if (!ui.common) return null;
+    const details = document.createElement('details');
+    details.open = !!open;
+    const summary = document.createElement('summary');
+    summary.className = 'sectionTitle subSectionTitle';
+    summary.textContent = title;
+    details.appendChild(summary);
+    const inner = document.createElement('div');
+    inner.className = 'form';
+    details.appendChild(inner);
+    ui.common.appendChild(details);
+    return inner;
+  }
+
   const matAsset = /** @type {any} */ (host?._inspectorMatAsset || null);
   if (matAsset && typeof matAsset === 'object' && typeof matAsset.pathRel === 'string' && matAsset.pathRel) {
     const pathRel = String(matAsset.pathRel || '');
@@ -688,7 +794,7 @@ export function rebuildInspector(host, ui) {
     InspectorFields.addAutoWith(gNormal, 'Scale', data, 'normalScale', requestSave);
     InspectorFields.addAutoWith(gAo, 'Strength', data, 'aoStrength', requestSave);
     aoStrengthField = getLastField(gAo);
-    addVec3ArrayWith(gEmission, 'Color', data, 'emissiveFactor');
+    InspectorFields.addAutoWith(gEmission, 'Color', data, 'emissiveFactor', requestSave);
     InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', data, 'alphaMode', requestSave);
     InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', data, 'alphaCutoff', requestSave);
     if (!('uvScale' in data)) data.uvScale = [1, 1];
@@ -1468,7 +1574,13 @@ export function rebuildInspector(host, ui) {
     });
 
     // Inline material settings (stored on the Material stub; applied live to the loaded material).
-    const matStub = findMatStub(String(obj.materialName || ''));
+    // Ensure a material stub exists if the node has a material assigned
+    let matStub = findMatStub(String(obj.materialName || ''));
+    if (!matStub && (obj.materialName || obj.materialFile)) {
+      // Create a stub for the material if it doesn't exist
+      matStub = ensureMatStubForNode(obj.materialFile || '');
+    }
+    
     if (matStub) {
       addSubSection('Overrides');
       if (!('baseColorFactor' in matStub)) matStub.baseColorFactor = '';
@@ -1479,17 +1591,128 @@ export function rebuildInspector(host, ui) {
       if (!('emissiveFactor' in matStub)) matStub.emissiveFactor = '';
       if (!('alphaMode' in matStub)) matStub.alphaMode = '';
       if (!('alphaCutoff' in matStub)) matStub.alphaCutoff = '';
+      if (!('baseColorTexture' in matStub)) matStub.baseColorTexture = '';
+      if (!('metallicTexture' in matStub)) matStub.metallicTexture = '';
+      if (!('roughnessTexture' in matStub)) matStub.roughnessTexture = '';
+      if (!('metallicRoughnessPacked' in matStub)) matStub.metallicRoughnessPacked = false;
+      if (!('normalTexture' in matStub)) matStub.normalTexture = '';
+      if (!('aoTexture' in matStub)) matStub.aoTexture = '';
+      if (!('emissiveTexture' in matStub)) matStub.emissiveTexture = '';
+      if (!('alphaTexture' in matStub)) matStub.alphaTexture = '';
+      if (!('uvScale' in matStub)) matStub.uvScale = [1, 1];
+      if (!Array.isArray(matStub.uvScale) || matStub.uvScale.length < 2) matStub.uvScale = [1, 1];
 
       const apply = () => applyLiveMaterialFromStub(matStub);
 
-      InspectorFields.addAutoWith(ui.common, 'baseColor', matStub, 'baseColorFactor', apply);
-      InspectorFields.addAutoWith(ui.common, 'metallic', matStub, 'metallicFactor', apply);
-      InspectorFields.addAutoWith(ui.common, 'roughness', matStub, 'roughnessFactor', apply);
-      InspectorFields.addAutoWith(ui.common, 'normalScale', matStub, 'normalScale', apply);
-      InspectorFields.addAutoWith(ui.common, 'aoStrength', matStub, 'aoStrength', apply);
-      InspectorFields.addAutoWith(ui.common, 'emissive', matStub, 'emissiveFactor', apply);
-      InspectorFields.addAutoWith(ui.common, 'alphaMode', matStub, 'alphaMode', apply);
-      InspectorFields.addAutoWith(ui.common, 'alphaCutoff', matStub, 'alphaCutoff', apply);
+      // Groups matching standalone material UI
+      const gAlbedo = addGroup('Albedo', true);
+      const gOrm = addGroup('Orm', true);
+      const gNormal = addGroup('Normal Map', false);
+      const gAo = addGroup('Ambient Occlusion', false);
+      const gEmission = addGroup('Emission', false);
+      const gTransparency = addGroup('Transparency', false);
+      const gUv = addGroup('Uv', false);
+
+      // Albedo
+      InspectorFields.addAutoWith(gAlbedo, 'Color', matStub, 'baseColorFactor', apply);
+      const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
+      InspectorFields.addStringWithDrop(gAlbedo, 'Texture', matStub, 'baseColorTexture', apply, texOpts);
+
+      // ORM
+      InspectorFields.addAutoWith(gOrm, 'Metallic', matStub, 'metallicFactor', apply);
+      InspectorFields.addAutoWith(gOrm, 'Roughness', matStub, 'roughnessFactor', apply);
+      InspectorFields.addAutoWith(gOrm, 'Packed MR', matStub, 'metallicRoughnessPacked', apply);
+      InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture', matStub, 'metallicTexture', apply, texOpts);
+      InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture', matStub, 'roughnessTexture', apply, texOpts);
+
+      // Normal Map
+      InspectorFields.addAutoWith(gNormal, 'Scale', matStub, 'normalScale', apply);
+      InspectorFields.addStringWithDrop(gNormal, 'Texture', matStub, 'normalTexture', apply, texOpts);
+
+      // Ambient Occlusion
+      InspectorFields.addAutoWith(gAo, 'Strength', matStub, 'aoStrength', apply);
+      InspectorFields.addStringWithDrop(gAo, 'Texture', matStub, 'aoTexture', apply, texOpts);
+
+      // Emission
+      /**
+       * @param {HTMLElement|null} container
+       * @param {string} label
+       * @param {any} obj
+       * @param {string} key
+       */
+      const addVec3ArrayWith = (container, label, obj, key) => {
+        if (!container || !obj || !(key in obj)) return;
+        const arr = obj[key];
+        if (!Array.isArray(arr) || arr.length < 3) return;
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.gap = '6px';
+        /** @param {number} i */
+        const make = (i) => {
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.step = '0.01';
+          input.value = String(Number(arr[i]) || 0);
+          input.style.width = '80px';
+          const applyVec = () => {
+            const v = Number(input.value);
+            if (!Number.isFinite(v)) return;
+            arr[i] = v;
+            apply();
+          };
+          input.addEventListener('input', applyVec);
+          input.addEventListener('change', applyVec);
+          return input;
+        };
+        wrap.appendChild(make(0));
+        wrap.appendChild(make(1));
+        wrap.appendChild(make(2));
+        InspectorFields.addField(container, label, wrap);
+      };
+      InspectorFields.addAutoWith(gEmission, 'Color', matStub, 'emissiveFactor', apply);
+      InspectorFields.addStringWithDrop(gEmission, 'Texture', matStub, 'emissiveTexture', apply, texOpts);
+
+      // Transparency
+      InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', matStub, 'alphaMode', apply);
+      InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', matStub, 'alphaCutoff', apply);
+      InspectorFields.addStringWithDrop(gTransparency, 'Alpha Texture', matStub, 'alphaTexture', apply, texOpts);
+
+      // UV
+      /**
+       * @param {HTMLElement|null} container
+       * @param {string} label
+       * @param {any} obj
+       * @param {string} key
+       */
+      const addVec2ArrayWith = (container, label, obj, key) => {
+        if (!container || !obj || !(key in obj)) return;
+        const arr = obj[key];
+        if (!Array.isArray(arr) || arr.length < 2) return;
+        const wrap = document.createElement('div');
+        wrap.style.display = 'flex';
+        wrap.style.gap = '6px';
+        /** @param {number} i */
+        const make = (i) => {
+          const input = document.createElement('input');
+          input.type = 'number';
+          input.step = '0.01';
+          input.value = String(Number(arr[i]) || 1);
+          input.style.width = '80px';
+          const applyVec = () => {
+            const v = Number(input.value);
+            if (!Number.isFinite(v)) return;
+            arr[i] = v;
+            apply();
+          };
+          input.addEventListener('input', applyVec);
+          input.addEventListener('change', applyVec);
+          return input;
+        };
+        wrap.appendChild(make(0));
+        wrap.appendChild(make(1));
+        InspectorFields.addField(container, label, wrap);
+      };
+      addVec2ArrayWith(gUv, 'UV Scale', matStub, 'uvScale');
     }
 
     // Primitive params when meshDefinition is inline

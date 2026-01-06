@@ -522,7 +522,9 @@ const game = {
     this._setMainTab('viewport');
 
     // Drag & drop OS files onto the viewport (GLTF import).
-    // We only react to OS file drops (dataTransfer.files), not internal asset drags.
+    // Supports:
+    // - OS file drops (dataTransfer.files)
+    // - Internal asset drags from the asset browser (dataTransfer text/plain pathRel)
     if (ui.viewportView) {
       ui.viewportView.addEventListener('dragover', (e) => {
         const dt = e.dataTransfer;
@@ -530,30 +532,54 @@ const game = {
         // Some Chromium builds report dt.files as empty until drop.
         const types = Array.from(dt.types || []);
         const hasFiles = types.includes('Files') || (dt.files && dt.files.length > 0);
-        if (!hasFiles) return;
+        let hasAssetDrag = false;
+        if (!hasFiles && types.includes('text/plain')) {
+          try {
+            const raw = String(dt.getData('text/plain') || '').trim();
+            const low = raw.toLowerCase();
+            hasAssetDrag = !!raw && (low.endsWith('.gltf') || low.endsWith('.glb'));
+          } catch {}
+        }
+        if (!hasFiles && !hasAssetDrag) return;
         e.preventDefault();
         try { dt.dropEffect = 'copy'; } catch {}
       });
 
       ui.viewportView.addEventListener('drop', (e) => {
         const dt = e.dataTransfer;
-        if (!dt || !dt.files || dt.files.length === 0) return;
+        if (!dt) return;
 
         e.preventDefault();
         e.stopPropagation();
 
-        const paths = [];
-        for (const f of Array.from(dt.files)) {
-          // @ts-ignore - Electron File objects often have a .path
-          const p = String(f && (f.path || f.webkitRelativePath || f.name) ? (f.path || f.webkitRelativePath || f.name) : '').trim();
-          if (p) paths.push(p);
-        }
-        if (paths.length === 0) return;
+        // Case 1: OS file drop (Electron File objects have .path)
+        if (dt.files && dt.files.length > 0) {
+          const paths = [];
+          for (const f of Array.from(dt.files)) {
+            // @ts-ignore - Electron File objects often have a .path
+            const p = String(f && (f.path || f.webkitRelativePath || f.name) ? (f.path || f.webkitRelativePath || f.name) : '').trim();
+            if (p) paths.push(p);
+          }
+          if (paths.length === 0) return;
 
-        this._handleViewportExternalFileDrop(paths).catch((err) => {
-          console.error(err);
-          alert('Import failed');
-        });
+          this._handleViewportExternalFileDrop(paths).catch((err) => {
+            console.error(err);
+            alert('Import failed');
+          });
+          return;
+        }
+
+        // Case 2: internal asset drag (text/plain project-relative path)
+        try {
+          const raw = String(dt.getData('text/plain') || '').trim();
+          const low = raw.toLowerCase();
+          if (raw && (low.endsWith('.gltf') || low.endsWith('.glb'))) {
+            this._spawnWorkspaceGltfToScene(raw).catch((err) => {
+              console.error(err);
+              alert('Spawn failed');
+            });
+          }
+        } catch {}
       });
     }
 
@@ -974,6 +1000,203 @@ const game = {
         }
 
         // Auto-apply GLTF default material hint when present.
+        if (!node.material && node.meshDefinition && node.meshDefinition.type === 'gltf' && node.meshDefinition.material) {
+          const hint = node.meshDefinition.material;
+          const mdef = (typeof hint === 'string') ? scene.getMaterialDefinition(hint) : hint;
+          if (mdef) {
+            if (typeof mdef.then === 'function') {
+              const mat = await mdef;
+              if (mat) node.setMaterial(mat);
+            } else {
+              node.setMaterial(mdef);
+            }
+          }
+        }
+
+        if (this._renderer) this._requestViewportSync(this._renderer);
+      } catch (e) {
+        console.warn('Failed to finalize GLTF spawn', e);
+      }
+    }).catch(() => {});
+
+    this.selected = node;
+    this.rebuildTree();
+    this.rebuildInspector();
+    if (this._renderer) this._requestViewportSync(this._renderer);
+  },
+
+  /**
+   * Spawn an already-imported GLTF from the asset browser into the scene.
+   * (This is separate from OS file drops; no import step is needed.)
+   * @param {string} pathRel
+   */
+  async _spawnWorkspaceGltfToScene(pathRel) {
+    const scene = this.currentScene;
+    const renderer = this._renderer;
+    if (!scene || !renderer) return;
+
+    const gl = renderer.gl;
+    if (!gl) {
+      alert('WebGL context is not available yet.');
+      return;
+    }
+
+    const p0 = String(pathRel || '').trim().replace(/\\/g, '/');
+    const clean = p0.replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
+    const lower = clean.toLowerCase();
+    if (!lower.endsWith('.gltf')) {
+      if (lower.endsWith('.glb')) {
+        alert('GLB (.glb) is not supported yet. Please use a .gltf file.');
+      }
+      return;
+    }
+
+    /** @type {any} */
+    const sceneAny = /** @type {any} */ (scene);
+    if (!Array.isArray(sceneAny._meshXml)) sceneAny._meshXml = [];
+
+    const fileName = clean.split('/').pop() || 'Model.gltf';
+    const base0 = fileName.replace(/\.[^/.]+$/, '');
+    const base = String(base0 || 'Model').replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_+|_+$/g, '') || 'Model';
+
+    /** @param {string} name */
+    const meshNameIsFree = (name) => {
+      const n = String(name || '').trim();
+      if (!n) return false;
+      if (scene.getMeshDefinition && scene.getMeshDefinition(n)) return false;
+      const meshesXml = /** @type {any[]} */ (Array.isArray(sceneAny._meshXml) ? sceneAny._meshXml : []);
+      if (meshesXml.some((m) => m && String(m.name || '') === n)) return false;
+      return true;
+    };
+
+    let meshName = base;
+    if (!meshNameIsFree(meshName)) {
+      for (let i = 2; i < 1000; i++) {
+        const n = `${base}${i}`;
+        if (meshNameIsFree(n)) { meshName = n; break; }
+      }
+    }
+
+    const sourceForXml = `/${clean.replace(/^\/+/, '')}`;
+    sceneAny._meshXml.push({ __xmlTag: 'Mesh', name: meshName, source: sourceForXml, type: '', color: '', params: {} });
+
+    if (!(sceneAny.__importedMeshResources instanceof Map)) {
+      sceneAny.__importedMeshResources = new Map();
+    }
+    /** @type {{ source: string, meshKeys: string[], materialKeys: string[] }} */
+    const importMeta = { source: sourceForXml, meshKeys: [meshName], materialKeys: [] };
+    sceneAny.__importedMeshResources.set(meshName, importMeta);
+
+    const gltfUrl = `fluxion://workspace/${encodeURIComponent(clean.replace(/^\/+/, ''))}`;
+
+    const loadPromise = (async () => {
+      try {
+        /** @type {any} */
+        const result = await loadGLTF(gltfUrl, gl, renderer);
+
+        const ns = `${meshName}::`;
+        /** @param {string} k */
+        const nsMat = (k) => `${ns}${k}`;
+        /** @param {string} k */
+        const nsMesh = (k) => `${ns}${k}`;
+
+        for (const [meshN, mesh] of result.meshes.entries()) {
+          const matKey = result.meshMaterials?.get(meshN);
+          const hint = nsMat(matKey || '__gltf_default__');
+          scene.registerMesh(nsMesh(meshN), { type: 'gltf', mesh, material: hint });
+          try { importMeta.meshKeys.push(nsMesh(meshN)); } catch {}
+          if (!scene.getMeshDefinition(meshN)) {
+            scene.registerMesh(meshN, { type: 'gltf', mesh, material: hint });
+          }
+        }
+
+        if (result.meshes.size > 0) {
+          const firstEntry = Array.from(result.meshes.entries())[0];
+          const firstMeshName = firstEntry[0];
+          const primMatch = /^(.*)_Primitive_(\d+)$/.exec(firstMeshName);
+          const baseName = primMatch ? primMatch[1] : firstMeshName;
+
+          const partEntries = Array.from(result.meshes.entries())
+            .filter(([k]) => k === baseName || k.startsWith(`${baseName}_Primitive_`))
+            .sort((a, b) => {
+              const ma = /_Primitive_(\d+)$/.exec(a[0]);
+              const mb = /_Primitive_(\d+)$/.exec(b[0]);
+              const ia = ma ? parseInt(ma[1]) : 0;
+              const ib = mb ? parseInt(mb[1]) : 0;
+              return ia - ib;
+            });
+
+          if (partEntries.length <= 1) {
+            const firstMesh = firstEntry[1];
+            const matKey = result.meshMaterials?.get(firstMeshName);
+            scene.registerMesh(meshName, { type: 'gltf', mesh: firstMesh, material: nsMat(matKey || '__gltf_default__') });
+          } else {
+            const parts = partEntries.map(([k, mesh]) => ({
+              name: nsMesh(k),
+              mesh,
+              material: nsMat(result.meshMaterials?.get(k) || '__gltf_default__'),
+            }));
+            scene.registerMesh(meshName, { type: 'gltf-group', parts });
+          }
+        }
+
+        for (const [matName, mat] of result.materials.entries()) {
+          scene.registerMaterial(nsMat(matName), mat);
+          try { importMeta.materialKeys.push(nsMat(matName)); } catch {}
+          if (!scene.getMaterialDefinition(matName)) {
+            scene.registerMaterial(matName, mat);
+          }
+        }
+
+        return result;
+      } catch (err) {
+        console.error(`Failed to load GLTF ${gltfUrl}:`, err);
+        return null;
+      }
+    })();
+
+    renderer?.trackAssetPromise?.(loadPromise);
+    scene.registerMesh(meshName, { type: 'gltf', promise: loadPromise, url: gltfUrl });
+
+    // Spawn a MeshNode in front of the current 3D camera.
+    const cam3 = /** @type {any} */ (this._editorCamera3D || this._sceneCamera3D || null);
+    const px = Number(cam3?.position?.x) || 0;
+    const py = Number(cam3?.position?.y) || 0;
+    const pz = Number(cam3?.position?.z) || 0;
+
+    const tx = Number(cam3?.target?.x);
+    const ty = Number(cam3?.target?.y);
+    const tz = Number(cam3?.target?.z);
+
+    let fx = Number.isFinite(tx) ? (tx - px) : 0;
+    let fy = Number.isFinite(ty) ? (ty - py) : 0;
+    let fz = Number.isFinite(tz) ? (tz - pz) : -1;
+    let fl = Math.hypot(fx, fy, fz);
+    if (!Number.isFinite(fl) || fl <= 1e-6) { fx = 0; fy = 0; fz = -1; fl = 1; }
+    fx /= fl; fy /= fl; fz /= fl;
+
+    const spawnDist = 3;
+    const spawnX = px + fx * spawnDist;
+    const spawnY = py + fy * spawnDist;
+    const spawnZ = pz + fz * spawnDist;
+
+    const node = new MeshNode();
+    node.name = `${meshName}Node`;
+    node.setPosition(spawnX, spawnY, spawnZ);
+    node.setSource(meshName);
+    scene.add(node);
+
+    loadPromise.then(async () => {
+      try {
+        const def = scene.getMeshDefinition(meshName);
+        if (!def) return;
+
+        if (def.type === 'gltf' && def.mesh) {
+          node.setMeshDefinition(def);
+        } else if (def.type === 'gltf-group' && Array.isArray(def.parts)) {
+          await SceneLoader._expandGltfGroupMeshNode(node, def, scene);
+        }
+
         if (!node.material && node.meshDefinition && node.meshDefinition.type === 'gltf' && node.meshDefinition.material) {
           const hint = node.meshDefinition.material;
           const mdef = (typeof hint === 'string') ? scene.getMaterialDefinition(hint) : hint;

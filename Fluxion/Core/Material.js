@@ -52,6 +52,9 @@ export default class Material {
     /** @type {'OPAQUE'|'MASK'|'BLEND'} */
     this.alphaMode = 'OPAQUE';
     this.alphaCutoff = 0.5;
+    
+    /** @type {boolean} - Whether to render both sides of the mesh (disable backface culling) */
+    this.doubleSided = false;
 
     /** @type {WebGLTexture|null} */ this.baseColorTexture = null;
     /** @type {WebGLTexture|null} */ this.metallicTexture = null;

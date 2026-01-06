@@ -1,17 +1,34 @@
 /**
  * Minimal GPU mesh for the 3D pass.
  * PBR Layout: position (vec3) + normal (vec3) + uv (vec2) interleaved.
+ * Extended layout may include: tangent (vec4), color (vec4), joints (vec4), weights (vec4)
  */
 export default class Mesh {
   /**
    * @param {WebGLRenderingContext|WebGL2RenderingContext} gl
-   * @param {Float32Array} vertices interleaved [x,y,z,nx,ny,nz,u,v]...
+   * @param {Float32Array} vertices interleaved vertex data
    * @param {Uint16Array|Uint32Array|null} indices
+   * @param {Object} attributes - optional attribute metadata {tangent:bool, color:bool, joints:bool, weights:bool}
    */
-  constructor(gl, vertices, indices = null) {
+  constructor(gl, vertices, indices = null, attributes = {}) {
     this.gl = gl;
     this.vertices = vertices;
     this.indices = indices;
+    
+    // Vertex attribute configuration
+    this.attributes = {
+      tangent: !!attributes.tangent,
+      color: !!attributes.color,
+      joints: !!attributes.joints,
+      weights: !!attributes.weights
+    };
+
+    // Calculate vertex stride based on attributes
+    this.vertexStride = 8; // base: position (3) + normal (3) + uv (2)
+    if (this.attributes.tangent) this.vertexStride += 4;
+    if (this.attributes.color) this.vertexStride += 4;
+    if (this.attributes.joints) this.vertexStride += 4;
+    if (this.attributes.weights) this.vertexStride += 4;
 
     this.vbo = gl.createBuffer();
     this.ibo = indices ? gl.createBuffer() : null;
@@ -33,7 +50,7 @@ export default class Mesh {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bufferData(gl.ARRAY_BUFFER, this.vertices, gl.STATIC_DRAW);
 
-    this.vertexCount = (this.vertices.length / 8) | 0;
+    this.vertexCount = (this.vertices.length / this.vertexStride) | 0;
 
     if (this.indices && this.ibo) {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
@@ -53,12 +70,16 @@ export default class Mesh {
    * @param {number} positionLoc
    * @param {number} normalLoc
    * @param {number} uvLoc
+   * @param {number} tangentLoc - optional
+   * @param {number} colorLoc - optional
+   * @param {number} jointsLoc - optional
+   * @param {number} weightsLoc - optional
    */
-  bindLayout(positionLoc, normalLoc, uvLoc) {
+  bindLayout(positionLoc, normalLoc, uvLoc, tangentLoc = -1, colorLoc = -1, jointsLoc = -1, weightsLoc = -1) {
     const gl = this.gl;
 
     if (typeof gl.createVertexArray === 'function') {
-      const key = `${positionLoc},${normalLoc},${uvLoc}`;
+      const key = `${positionLoc},${normalLoc},${uvLoc},${tangentLoc},${colorLoc},${jointsLoc},${weightsLoc}`;
       const cachedVao = this._vaoByKey.get(key) || null;
       if (cachedVao) {
         this.vao = cachedVao;
@@ -75,25 +96,57 @@ export default class Mesh {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
       if (this.ibo) gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
 
-      const stride = 8 * 4;
+      const strideBytes = this.vertexStride * 4;
+      let offset = 0;
 
-      // position (vec3)
+      // position (vec3) - always at offset 0
       if (positionLoc >= 0) {
         gl.enableVertexAttribArray(positionLoc);
-        gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, stride, 0);
+        gl.vertexAttribPointer(positionLoc, 3, gl.FLOAT, false, strideBytes, offset);
       }
+      offset += 12; // 3 floats * 4 bytes
 
-      // normal (vec3)
+      // normal (vec3) - at offset 12
       if (normalLoc >= 0) {
         gl.enableVertexAttribArray(normalLoc);
-        gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, stride, 12);
+        gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, strideBytes, offset);
       }
+      offset += 12; // 3 floats * 4 bytes
 
-      // uv (vec2)
+      // uv (vec2) - at offset 24
       if (uvLoc >= 0) {
         gl.enableVertexAttribArray(uvLoc);
-        gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, stride, 24);
+        gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, strideBytes, offset);
       }
+      offset += 8; // 2 floats * 4 bytes
+
+      // tangent (vec4) - if present
+      if (this.attributes.tangent && tangentLoc >= 0) {
+        gl.enableVertexAttribArray(tangentLoc);
+        gl.vertexAttribPointer(tangentLoc, 4, gl.FLOAT, false, strideBytes, offset);
+      }
+      if (this.attributes.tangent) offset += 16; // 4 floats * 4 bytes
+
+      // color (vec4) - if present
+      if (this.attributes.color && colorLoc >= 0) {
+        gl.enableVertexAttribArray(colorLoc);
+        gl.vertexAttribPointer(colorLoc, 4, gl.FLOAT, false, strideBytes, offset);
+      }
+      if (this.attributes.color) offset += 16; // 4 floats * 4 bytes
+
+      // joints (vec4) - if present
+      if (this.attributes.joints && jointsLoc >= 0) {
+        gl.enableVertexAttribArray(jointsLoc);
+        gl.vertexAttribPointer(jointsLoc, 4, gl.FLOAT, false, strideBytes, offset);
+      }
+      if (this.attributes.joints) offset += 16; // 4 floats * 4 bytes
+
+      // weights (vec4) - if present
+      if (this.attributes.weights && weightsLoc >= 0) {
+        gl.enableVertexAttribArray(weightsLoc);
+        gl.vertexAttribPointer(weightsLoc, 4, gl.FLOAT, false, strideBytes, offset);
+      }
+      if (this.attributes.weights) offset += 16; // 4 floats * 4 bytes
 
       gl.bindVertexArray(null);
     }
