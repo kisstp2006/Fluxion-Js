@@ -123,7 +123,7 @@ body {
 .editor-main {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 250px 1fr 300px;
     gap: 1px;
     background-color: var(--border-primary);
     overflow: hidden;
@@ -235,6 +235,48 @@ body {
 /* Inspector Panel */
 .inspector-panel .panel-content {
     padding: var(--spacing-md);
+}
+
+/* Hierarchy Panel */
+.hierarchy-panel .panel-content {
+    padding: var(--spacing-xs);
+}
+
+.hierarchy-tree {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.hierarchy-item {
+    padding: 6px var(--spacing-sm);
+    cursor: pointer;
+    border-radius: 2px;
+    color: var(--text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    transition: background-color 0.1s;
+}
+
+.hierarchy-item:hover {
+    background-color: var(--button-hover);
+}
+
+.hierarchy-item.selected {
+    background-color: var(--accent-blue);
+    color: var(--text-active);
+}
+
+.hierarchy-item-icon {
+    width: 16px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.hierarchy-item.selected .hierarchy-item-icon {
+    color: var(--text-active);
 }
 
 .no-selection {

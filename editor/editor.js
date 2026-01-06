@@ -10,6 +10,124 @@ import { Engine, SceneLoader } from "../Fluxion/index.js";
  * Modern dark-themed game engine editor with docking capabilities
  */
 
+class HierarchyPanel {
+    constructor() {
+        this.contentEl = document.getElementById('hierarchy-content');
+        this.selectedItem = null;
+        /** @type {Scene | null} */
+        this.currentScene = null;
+    }
+
+    /**
+     * Update hierarchy tree with scene objects
+     * @param {Scene | null} scene - The current scene
+     */
+    updateHierarchy(scene) {
+        if (!scene || !this.contentEl) {
+            this.showNoScene();
+            return;
+        }
+
+        this.currentScene = scene;
+        this.contentEl.innerHTML = '';
+
+        const tree = document.createElement('ul');
+        tree.className = 'hierarchy-tree';
+
+        // Add scene root
+        const sceneItem = this.createHierarchyItem('Scene', '🎬', scene);
+        tree.appendChild(sceneItem);
+
+        // Add scene children
+        if (scene.children && scene.children.length > 0) {
+            scene.children.forEach((child) => {
+                const childItem = this.createHierarchyItem(
+                    child.name || 'Unnamed',
+                    this.getIconForType(child.type || 'Unknown'),
+                    child
+                );
+                tree.appendChild(childItem);
+            });
+        }
+
+        this.contentEl.appendChild(tree);
+    }
+
+    /**
+     * Create a hierarchy item element
+     * @param {string} name - Object name
+     * @param {string} icon - Icon character
+     * @param {any} object - The object reference
+     * @returns {HTMLElement}
+     */
+    createHierarchyItem(name, icon, object) {
+        const item = document.createElement('li');
+        item.className = 'hierarchy-item';
+
+        const iconEl = document.createElement('span');
+        iconEl.className = 'hierarchy-item-icon';
+        iconEl.textContent = icon;
+
+        const nameEl = document.createElement('span');
+        nameEl.textContent = name;
+
+        item.appendChild(iconEl);
+        item.appendChild(nameEl);
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.selectItem(item, object);
+        });
+
+        return item;
+    }
+
+    /**
+     * Select an item in the hierarchy
+     * @param {HTMLElement} item - The item element
+     * @param {any} object - The object reference
+     */
+    selectItem(item, object) {
+        // Deselect previous item
+        if (this.selectedItem) {
+            this.selectedItem.classList.remove('selected');
+        }
+
+        // Select new item
+        item.classList.add('selected');
+        this.selectedItem = item;
+
+        // Notify inspector
+        if (window.editorInspector) {
+            window.editorInspector.updateInspector(object);
+        }
+    }
+
+    /**
+     * Get icon for object type
+     * @param {string} type - Object type
+     * @returns {string}
+     */
+    getIconForType(type) {
+        const icons = {
+            'Sprite': '🖼️',
+            'Text': '📝',
+            'ClickableArea': '👆',
+            'AnimatedSprite': '🎞️',
+            'Camera': '📷',
+            'Scene': '🎬',
+            'Unknown': '❓'
+        };
+        return icons[type] || icons['Unknown'];
+    }
+
+    showNoScene() {
+        if (this.contentEl) {
+            this.contentEl.innerHTML = '<p class="no-selection">No scene loaded</p>';
+        }
+    }
+}
+
 class EditorState {
     constructor() {
         /** @type {Scene | null} */
@@ -202,6 +320,7 @@ class InspectorPanel {
  * @type {{
  *   currentScene: Scene | null,
  *   inspector: InspectorPanel,
+ *   hierarchy: HierarchyPanel,
  *   init(renderer: Renderer): Promise<void>,
  *   update(dt: number): void,
  *   draw(renderer: Renderer): void,
@@ -210,6 +329,7 @@ class InspectorPanel {
 const game = {
     currentScene: null,
     inspector: new InspectorPanel(),
+    hierarchy: new HierarchyPanel(),
 
     /** @param {Renderer} renderer */
     async init(renderer) {
@@ -217,6 +337,9 @@ const game = {
         
         // Setup title bar controls
         setupTitleBar();
+
+        // Make inspector available globally for hierarchy panel
+        window.editorInspector = this.inspector;
 
         // Load a default scene if available
         try {
@@ -233,8 +356,12 @@ const game = {
                 renderer.targetAspectRatio = cam.width / cam.height;
                 renderer.resizeCanvas();
             }
+
+            // Update hierarchy with loaded scene
+            this.hierarchy.updateHierarchy(scene);
         } catch (error) {
             console.warn('No default scene loaded:', error);
+            this.hierarchy.showNoScene();
         }
 
         // Show initial inspector state
