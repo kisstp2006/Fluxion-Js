@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fluxion - Basic Editor</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="docking.css" />
   <script type="importmap">
   {
     "imports": {
@@ -72,10 +73,12 @@
     </header>
 
     <div class="app">
-      <aside class="panel" id="leftPanel">
-      <div class="panelHeader">
-        <div class="title">Basic Editor</div>
-        <div class="subtitle">Scene tree + inspector</div>
+      <aside class="panel dock-panel" id="leftPanel" data-dock-id="hierarchy" data-dock-side="left">
+      <div class="panelHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Hierarchy</div>
+        <div class="dock-header-buttons">
+          <button class="dock-btn" id="hierarchyMenuBtn" title="Window menu">⋯</button>
+        </div>
       </div>
 
       <div class="section">
@@ -127,10 +130,12 @@
         </div>
       </main>
 
-      <aside class="panel" id="rightPanel">
-      <div class="panelHeader">
-        <div class="title">Inspector</div>
-        <div class="subtitle" id="inspectorSubtitle">No selection</div>
+      <aside class="panel dock-panel" id="rightPanel" data-dock-id="inspector" data-dock-side="right">
+      <div class="panelHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Inspector</div>
+        <div class="dock-header-buttons">
+          <button class="dock-btn" id="inspectorMenuBtn" title="Window menu">⋯</button>
+        </div>
       </div>
 
       <div class="panelBody" id="rightPanelBody">
@@ -161,9 +166,10 @@
       </aside>
     </div>
 
-    <footer class="assetBrowser" aria-label="Bottom Panel">
-      <div class="assetHeader">
-        <div class="assetTabs" role="tablist" aria-label="Bottom Panel Tabs">
+    <footer class="assetBrowser dock-panel" id="bottomPanel" data-dock-id="project" data-dock-side="bottom" aria-label="Bottom Panel">
+      <div class="assetHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Project</div>
+        <div class="assetTabs" role="tablist" aria-label="Bottom Panel Tabs" style="margin-left: auto;">
           <button id="assetTabAssetsBtn" class="assetTabBtn active" type="button" role="tab" aria-selected="true">Assets</button>
           <button id="assetTabConsoleBtn" class="assetTabBtn" type="button" role="tab" aria-selected="false">Console</button>
         </div>
@@ -176,6 +182,8 @@
         </div>
 
         <div id="assetHeaderConsoleTools" class="assetHeaderTools" hidden></div>
+
+        <button class="dock-btn" id="projectMenuBtn" title="Window menu" style="margin-left: 10px;">⋯</button>
       </div>
 
       <div id="assetPanelAssets" class="assetBody" aria-label="Asset Browser">

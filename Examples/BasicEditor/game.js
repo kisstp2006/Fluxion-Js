@@ -32,6 +32,7 @@ import {
 } from "./editorSettings.js";
 import { wireAboutUI, openAbout, closeAbout } from "./aboutDialog.js";
 import { wireAddNodeUI, openAddNode, closeAddNode, renderAddNodeDialog } from "./addNodeDialog.js";
+import { dockingSystem } from "./dockingSystem.js";
 import {
   isEditingInspector,
   blockInspectorAutoRefresh,
@@ -654,6 +655,73 @@ const game = {
       getFluxionInstallPath: () => String(this._editorSettings?.general?.fluxionInstallPath || ''),
     });
     this._createProjectDialog.init();
+
+    // Initialize docking system
+    const leftPanel = /** @type {HTMLElement|null} */ (document.getElementById('leftPanel'));
+    const rightPanel = /** @type {HTMLElement|null} */ (document.getElementById('rightPanel'));
+    const bottomPanel = /** @type {HTMLElement|null} */ (document.getElementById('bottomPanel'));
+    const viewportView = /** @type {HTMLElement|null} */ (document.getElementById('viewportView'));
+
+    if (leftPanel) dockingSystem.registerWindow('hierarchy', leftPanel, 'Hierarchy', 'left');
+    if (rightPanel) dockingSystem.registerWindow('inspector', rightPanel, 'Inspector', 'right');
+    if (bottomPanel) dockingSystem.registerWindow('project', bottomPanel, 'Project', 'bottom');
+    if (viewportView) dockingSystem.registerWindow('viewport', viewportView, 'Viewport', 'center');
+
+    // Load persisted layout (if available)
+    try {
+      dockingSystem.loadLayout();
+    } catch {}
+
+    // Wire up dock menu buttons for each panel
+    const setupDockMenu = (panelId, panelElement) => {
+      const header = panelElement?.querySelector('.dock-header');
+      const menuBtn = header?.querySelector('.dock-header-buttons button');
+      if (!menuBtn) return;
+
+      menuBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const rect = menuBtn.getBoundingClientRect();
+        const menu = document.createElement('div');
+        menu.className = 'dock-context-menu';
+        menu.style.position = 'fixed';
+        menu.style.top = rect.bottom + 'px';
+        menu.style.left = rect.left + 'px';
+        menu.style.zIndex = '10000';
+
+        const items = [
+          { label: 'Float', action: () => dockingSystem.floatWindow(panelId, rect.left, rect.top, 300, 400) },
+          { label: 'Dock Left', action: () => dockingSystem.dockWindow(panelId, 'left', 300) },
+          { label: 'Dock Right', action: () => dockingSystem.dockWindow(panelId, 'right', 300) },
+          { label: 'Dock Top', action: () => dockingSystem.dockWindow(panelId, 'top', 300) },
+          { label: 'Dock Bottom', action: () => dockingSystem.dockWindow(panelId, 'bottom', 300) },
+          { label: 'Reset Layout', action: () => { dockingSystem.resetLayout(); location.reload(); } },
+        ];
+
+        for (const item of items) {
+          const btn = document.createElement('button');
+          btn.className = 'dock-menu-item';
+          btn.textContent = item.label;
+          btn.addEventListener('click', () => {
+            item.action();
+            menu.remove();
+          });
+          menu.appendChild(btn);
+        }
+
+        document.body.appendChild(menu);
+
+        const closeMenu = () => {
+          menu.remove();
+          document.removeEventListener('click', closeMenu);
+        };
+        setTimeout(() => document.addEventListener('click', closeMenu), 0);
+      });
+    };
+
+    if (leftPanel) setupDockMenu('hierarchy', leftPanel);
+    if (rightPanel) setupDockMenu('inspector', rightPanel);
+    if (bottomPanel) setupDockMenu('project', bottomPanel);
+    if (viewportView) setupDockMenu('viewport', viewportView);
 
     ui.mode2dBtn?.addEventListener('click', () => {
       this.setMode('2d');
