@@ -1,0 +1,348 @@
+/* Modern Dark Game Engine Editor Style */
+/* Color Palette - Unified across the editor */
+:root {
+    /* Primary Colors */
+    --bg-primary: #1e1e1e;
+    --bg-secondary: #252526;
+    --bg-tertiary: #2d2d30;
+    --bg-elevated: #333337;
+    
+    /* Border Colors */
+    --border-primary: #3e3e42;
+    --border-secondary: #454545;
+    --border-active: #007acc;
+    
+    /* Text Colors */
+    --text-primary: #cccccc;
+    --text-secondary: #969696;
+    --text-active: #ffffff;
+    
+    /* Accent Colors */
+    --accent-blue: #007acc;
+    --accent-blue-hover: #1e8ad6;
+    --accent-green: #4ec9b0;
+    --accent-orange: #ce9178;
+    --accent-red: #f48771;
+    
+    /* UI Element Colors */
+    --button-hover: #3e3e42;
+    --scrollbar-bg: #1e1e1e;
+    --scrollbar-thumb: #424242;
+    --scrollbar-thumb-hover: #4e4e4e;
+    
+    /* Spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    
+    /* Panel */
+    --panel-header-height: 32px;
+    --title-bar-height: 32px;
+}
+
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+    font-size: 13px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+    user-select: none;
+}
+
+/* Editor Container */
+#editor-container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Custom Title Bar */
+.title-bar {
+    height: var(--title-bar-height);
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-primary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 var(--spacing-sm);
+    -webkit-app-region: drag;
+}
+
+.title-bar-left {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.title-bar-icon {
+    color: var(--accent-blue);
+    font-size: 18px;
+}
+
+.title-bar-text {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.title-bar-right {
+    display: flex;
+    gap: 2px;
+    -webkit-app-region: no-drag;
+}
+
+.title-bar-btn {
+    width: 46px;
+    height: 32px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.title-bar-btn:hover {
+    background-color: var(--button-hover);
+}
+
+.title-bar-btn.close-btn:hover {
+    background-color: #e81123;
+    color: white;
+}
+
+/* Main Editor Area */
+.editor-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 1px;
+    background-color: var(--border-primary);
+    overflow: hidden;
+}
+
+/* Panel Styles */
+.panel {
+    background-color: var(--bg-secondary);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.panel-header {
+    height: var(--panel-header-height);
+    background-color: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-primary);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 var(--spacing-md);
+}
+
+.panel-title {
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.panel-controls {
+    display: flex;
+    gap: var(--spacing-xs);
+}
+
+.panel-btn {
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+.panel-btn:hover {
+    background-color: var(--button-hover);
+    color: var(--text-primary);
+}
+
+.panel-content {
+    flex: 1;
+    overflow: auto;
+    position: relative;
+}
+
+/* Viewport Panel */
+.viewport-panel {
+    position: relative;
+}
+
+.viewport-panel .panel-content {
+    background-color: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#gameCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.viewport-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.viewport-help-text {
+    background-color: rgba(30, 30, 30, 0.85);
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    padding: var(--spacing-md);
+    margin: var(--spacing-md);
+    color: var(--text-secondary);
+    font-size: 12px;
+    backdrop-filter: blur(4px);
+}
+
+.viewport-help-text p {
+    color: var(--text-primary);
+    font-weight: 500;
+    margin-bottom: var(--spacing-xs);
+}
+
+.viewport-help-text ul {
+    list-style: none;
+    padding-left: var(--spacing-sm);
+}
+
+.viewport-help-text li {
+    margin-bottom: 2px;
+}
+
+/* Inspector Panel */
+.inspector-panel .panel-content {
+    padding: var(--spacing-md);
+}
+
+.no-selection {
+    color: var(--text-secondary);
+    text-align: center;
+    padding: var(--spacing-lg);
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 0;
+    border: 3px solid var(--scrollbar-bg);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-corner {
+    background: var(--scrollbar-bg);
+}
+
+/* Field Editors */
+.field-group {
+    margin-bottom: var(--spacing-md);
+}
+
+.field-label {
+    color: var(--text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: var(--spacing-xs);
+    display: block;
+}
+
+.field-input {
+    width: 100%;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-secondary);
+    color: var(--text-primary);
+    padding: 6px var(--spacing-sm);
+    border-radius: 2px;
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.field-input:focus {
+    outline: none;
+    border-color: var(--accent-blue);
+}
+
+.field-input:hover {
+    border-color: var(--border-active);
+}
+
+/* Vector Field */
+.vector-field {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-xs);
+}
+
+.vector-input {
+    position: relative;
+}
+
+.vector-input input {
+    padding-left: 20px;
+}
+
+.vector-input::before {
+    content: attr(data-axis);
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 600;
+    pointer-events: none;
+}
+
+/* Color Field */
+.color-field {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.color-preview {
+    width: 32px;
+    height: 24px;
+    border: 1px solid var(--border-secondary);
+    border-radius: 2px;
+    cursor: pointer;
+}
+
+.color-preview:hover {
+    border-color: var(--border-active);
+}

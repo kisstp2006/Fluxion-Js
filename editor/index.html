@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fluxion Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="editor-container">
+        <!-- Custom Title Bar -->
+        <div class="title-bar">
+            <div class="title-bar-left">
+                <span class="title-bar-icon">⬢</span>
+                <span class="title-bar-text">Fluxion Editor</span>
+            </div>
+            <div class="title-bar-right">
+                <button class="title-bar-btn" id="minimize-btn">─</button>
+                <button class="title-bar-btn" id="maximize-btn">□</button>
+                <button class="title-bar-btn close-btn" id="close-btn">×</button>
+            </div>
+        </div>
+
+        <!-- Main Editor Area -->
+        <div class="editor-main">
+            <!-- Viewport Panel -->
+            <div class="panel viewport-panel">
+                <div class="panel-header">
+                    <span class="panel-title">Viewport</span>
+                    <div class="panel-controls">
+                        <button class="panel-btn" title="Settings">⚙</button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <canvas id="gameCanvas"></canvas>
+                    <div class="viewport-overlay">
+                        <div class="viewport-help-text">
+                            <p>Controls:</p>
+                            <ul>
+                                <li>W/A/S/D - Move camera</li>
+                                <li>Mouse wheel - Zoom</li>
+                                <li>Right click - Pan</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inspector Panel -->
+            <div class="panel inspector-panel">
+                <div class="panel-header">
+                    <span class="panel-title">Inspector</span>
+                    <div class="panel-controls">
+                        <button class="panel-btn" title="Menu">⋮</button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div id="inspector-content">
+                        <p class="no-selection">No object selected</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="editor.js"></script>
+</body>
+</html>
