@@ -597,6 +597,20 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
         const texCoordAccessor = primitive.attributes.TEXCOORD_0 || primitive.attributes.TEXCOORD;
         const jointsAccessor = primitive.attributes.JOINTS_0 || primitive.attributes.JOINTS;
         const weightsAccessor = primitive.attributes.WEIGHTS_0 || primitive.attributes.WEIGHTS;
+        
+        // Log missing required attributes (NORMAL, TEXCOORD_0 are required by PBR shader)
+        const missingAttribs = [];
+        if (!normalAccessor) missingAttribs.push('NORMAL');
+        if (!texCoordAccessor) missingAttribs.push('TEXCOORD_0');
+        if (missingAttribs.length > 0) {
+            console.warn(`GLTF primitive missing required attributes: [${missingAttribs.join(', ')}]. Safe defaults will be injected.`, {
+                mesh: gltfMesh.name,
+                defaults: {
+                    NORMAL: '[0,1,0] (up vector)',
+                    TEXCOORD_0: '[0,0] (origin)'
+                }
+            });
+        }
         // minimal-gltf-loader keeps `primitive.indices` as an accessor ID (number)
         // and only hooks up attributes to accessor objects.
         const indicesRef = primitive.indices;
@@ -627,14 +641,31 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
         const jointsData = jointsAccessor ? _extractAccessorData(jointsAccessor) : null;
         const weightsData = weightsAccessor ? _extractAccessorData(weightsAccessor) : null;
         const indicesData = indicesAccessor ? _extractAccessorData(indicesAccessor) : null;
-
-        // Convert to interleaved format: [x,y,z, nx,ny,nz, tx,ty,tz,tw, u,v, r,g,b,a, j0,j1,j2,j3, w0,w1,w2,w3]
-        // Fluxion Mesh expects: [x,y,z, nx,ny,nz, u,v] (8 floats per vertex)
-        // Extended with optional: tangent (4), color (4), joints (4), weights (4)
+        
+        // Get vertex count to document fallbacks
         const vertexCount = positionAccessor.count;
         
+        // Document attribute extraction status
+        if (!normalData) {
+            console.log(`GLTF: NORMAL attribute missing, using default [0,1,0] for ${vertexCount} vertices`);
+        }
+        if (!texCoordData) {
+            console.log(`GLTF: TEXCOORD_0 attribute missing, using default [0,0] for ${vertexCount} vertices`);
+        }
+
+        // Convert to interleaved format: [x,y,z, nx,ny,nz, u,v, <optional attributes>]
+        // Base layout (ALWAYS present, required by PBR shader):
+        //   - position (3 floats): vec3 at location 0
+        //   - normal   (3 floats): vec3 at location 1 - defaults to [0,1,0] if missing
+        //   - uv       (2 floats): vec2 at location 2 - defaults to [0,0] if missing
+        // Optional extended attributes (included only if present in GLTF):
+        //   - tangent  (4 floats): vec4 at location 3
+        //   - color    (4 floats): vec4 at location 4
+        //   - joints   (4 floats): vec4 at location 5
+        //   - weights  (4 floats): vec4 at location 6
+        
         // Determine vertex stride based on what's available
-        let vertexStride = 8; // base: position (3) + normal (3) + uv (2)
+        let vertexStride = 8; // base: position (3) + normal (3) + uv (2) - ALWAYS present
         if (tangentData) vertexStride += 4;
         if (colorData) vertexStride += 4;
         if (jointsData) vertexStride += 4;
@@ -658,29 +689,35 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
             vertices[vertIdx + 2] = positionData[posIdx + 2] || 0;
             vertIdx += 3;
 
-            // Normal (default to [0,1,0] if missing)
+            // Normal (REQUIRED by shader, default to [0,1,0] up vector if missing)
+            // Safe default: vertical normal prevents lighting issues
             if (normalData && normalData.length > normIdx + 2) {
                 vertices[vertIdx + 0] = normalData[normIdx + 0] || 0;
                 vertices[vertIdx + 1] = normalData[normIdx + 1] || 1;
                 vertices[vertIdx + 2] = normalData[normIdx + 2] || 0;
             } else {
+                // FALLBACK: No NORMAL data in GLTF
                 vertices[vertIdx + 0] = 0;
                 vertices[vertIdx + 1] = 1;
                 vertices[vertIdx + 2] = 0;
             }
             vertIdx += 3;
 
-            // UV (default to [0,0] if missing)
+            // UV/TexCoord (REQUIRED by shader, default to [0,0] origin if missing)
+            // Safe default: origin coordinates prevent texture sampling errors
             if (texCoordData && texCoordData.length > uvIdx + 1) {
                 vertices[vertIdx + 0] = texCoordData[uvIdx + 0] || 0;
                 vertices[vertIdx + 1] = texCoordData[uvIdx + 1] || 0;
             } else {
+                // FALLBACK: No TEXCOORD_0 data in GLTF
                 vertices[vertIdx + 0] = 0;
                 vertices[vertIdx + 1] = 0;
             }
             vertIdx += 2;
 
-            // Tangent (default to [1,0,0,1] if missing but requested)
+            // Tangent (OPTIONAL, only included if GLTF provides it)
+            // NOTE: TANGENT is currently not used by the shader (normal mapping uses screen-space derivatives)
+            // If TANGENT is present in GLTF, we include it in the vertex buffer for future shader support
             if (tangentData) {
                 if (tangentData.length > tanIdx + 3) {
                     vertices[vertIdx + 0] = tangentData[tanIdx + 0] || 1;
@@ -688,10 +725,11 @@ function convertGLTFMesh(gltfMesh, glTF, gl) {
                     vertices[vertIdx + 2] = tangentData[tanIdx + 2] || 0;
                     vertices[vertIdx + 3] = tangentData[tanIdx + 3] || 1; // tangent.w indicates handedness
                 } else {
-                    vertices[vertIdx + 0] = 1;
+                    // FALLBACK: TANGENT accessor exists but data is incomplete
+                    vertices[vertIdx + 0] = 1;  // X-axis tangent
                     vertices[vertIdx + 1] = 0;
                     vertices[vertIdx + 2] = 0;
-                    vertices[vertIdx + 3] = 1;
+                    vertices[vertIdx + 3] = 1;  // right-handed
                 }
                 vertIdx += 4;
             }
