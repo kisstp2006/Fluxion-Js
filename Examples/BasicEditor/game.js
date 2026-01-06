@@ -143,6 +143,11 @@ const game = {
   /** @type {any | null} */
   selected: null,
 
+  /** @type {WeakMap<any, HTMLDivElement> | null} */
+  _treeDomByObj: null,
+  /** @type {HTMLDivElement | null} */
+  _treeSelectedEl: null,
+
   // Inspector rebuild optimization - track last state to avoid unnecessary rebuilds
   _inspectorLastSelected: null,
   _inspectorLastSceneObjectCount: 0,
@@ -4839,10 +4844,71 @@ const game = {
     return this.mode === '3d' ? is3DPass : !is3DPass;
   },
 
+  /**
+   * Set current selection and update dependent UI.
+   * @param {any | null} obj
+   * @param {{
+   *  tree?: 'sync' | 'rebuild' | 'none',
+   *  inspector?: 'rebuild' | 'dirty' | 'none',
+   *  viewportSync?: boolean,
+   * }} [opts]
+   */
+  setSelectedEntity(obj, opts) {
+    const prev = this.selected;
+    if (prev === obj) return;
+
+    this.selected = obj;
+
+    const o = opts || {};
+    const treeMode = o.tree || 'sync';
+    const inspMode = o.inspector || 'rebuild';
+
+    if (treeMode === 'rebuild') {
+      this.rebuildTree();
+    } else if (treeMode === 'sync') {
+      this._syncTreeSelection(prev, obj);
+    }
+
+    if (inspMode === 'rebuild') {
+      this.rebuildInspector();
+    } else if (inspMode === 'dirty') {
+      this._markInspectorDirty();
+    }
+
+    if (o.viewportSync !== false) {
+      if (this._renderer) this._requestViewportSync(this._renderer);
+    }
+  },
+
+  /**
+   * Toggle hierarchy highlight to match selection without rebuilding the full tree.
+   * @param {any | null} prev
+   * @param {any | null} next
+   */
+  _syncTreeSelection(prev, next) {
+    // Clear previous highlighted element.
+    if (this._treeSelectedEl) {
+      this._treeSelectedEl.classList.remove('selected');
+      this._treeSelectedEl = null;
+    }
+
+    const map = this._treeDomByObj;
+    if (!map || !next || (typeof next !== 'object' && typeof next !== 'function')) return;
+
+    const el = map.get(next) || null;
+    if (el) {
+      el.classList.add('selected');
+      this._treeSelectedEl = el;
+    }
+  },
+
   rebuildTree() {
     if (!ui.tree) return;
     const tree = ui.tree;
     tree.innerHTML = "";
+
+    this._treeDomByObj = new WeakMap();
+    this._treeSelectedEl = null;
 
     const scene = this.currentScene;
     if (!scene) return;
@@ -4950,11 +5016,14 @@ const game = {
       div.textContent = e.label;
       div.style.paddingLeft = `${10 + Math.max(0, e.depth) * 14}px`;
       div.addEventListener('click', () => {
-        this.selected = e.obj;
-        this.rebuildTree();
-        this.rebuildInspector();
-        if (this._renderer) this._requestViewportSync(this._renderer);
+        this.setSelectedEntity(e.obj, { tree: 'sync' });
       });
+
+      try {
+        this._treeDomByObj?.set(e.obj, div);
+        if (e.obj === this.selected) this._treeSelectedEl = div;
+      } catch {}
+
       tree.appendChild(div);
     }
   },
