@@ -4,6 +4,7 @@ import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSp
 import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
+import { preserveUiStateDuring } from "./uiStatePreservation.js";
 import {
   wireProjectSelectionUI,
   openProjectSelect,
@@ -5040,6 +5041,14 @@ const game = {
   },
 
   rebuildTree() {
+    if (!ui.tree) return;
+
+    preserveUiStateDuring(ui.tree, () => {
+      this._rebuildTreeCore();
+    });
+  },
+
+  _rebuildTreeCore() {
     if (!ui.tree) return;
     const tree = ui.tree;
     tree.innerHTML = "";

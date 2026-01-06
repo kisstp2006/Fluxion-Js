@@ -7,6 +7,7 @@
 import * as InspectorFields from "./inspectorFields.js";
 import * as InspectorWidgets from "./inspectorWidgets.js";
 import { SceneLoader, Skybox, Material, loadGLTF } from "../../Fluxion/index.js";
+import { preserveUiStateDuring } from "./uiStatePreservation.js";
 
 // Cache last-applied values for Skybox stubs so inspector rebuilds don't
 // constantly recreate skyboxes (which can flash black while textures upload).
@@ -472,6 +473,20 @@ export function rebuildInspectorXmlStub(host, ui, stub) {
 
 /** @param {any} host @param {InspectorUI} ui */
 export function rebuildInspector(host, ui) {
+  const rightPanelBody = document.getElementById('rightPanelBody');
+  if (!rightPanelBody) {
+    // Fallback to direct rebuild if container not found
+    _rebuildInspectorCore(host, ui);
+    return;
+  }
+
+  preserveUiStateDuring(rightPanelBody, () => {
+    _rebuildInspectorCore(host, ui);
+  });
+}
+
+/** @param {any} host @param {InspectorUI} ui */
+function _rebuildInspectorCore(host, ui) {
   /**
    * @param {string} title
    * @param {boolean=} open
