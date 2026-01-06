@@ -6,6 +6,41 @@ import { Engine, SceneLoader } from "../Fluxion/index.js";
 /** @typedef {import("../Fluxion/Core/Scene.js").default} Scene */
 
 /**
+ * Event system for editor components
+ */
+class EditorEventBus {
+    constructor() {
+        this.listeners = new Map();
+    }
+
+    /**
+     * Subscribe to an event
+     * @param {string} event - Event name
+     * @param {Function} callback - Callback function
+     */
+    on(event, callback) {
+        if (!this.listeners.has(event)) {
+            this.listeners.set(event, []);
+        }
+        this.listeners.get(event).push(callback);
+    }
+
+    /**
+     * Emit an event
+     * @param {string} event - Event name
+     * @param {any} data - Event data
+     */
+    emit(event, data) {
+        const callbacks = this.listeners.get(event);
+        if (callbacks) {
+            callbacks.forEach(callback => callback(data));
+        }
+    }
+}
+
+const editorEvents = new EditorEventBus();
+
+/**
  * Fluxion Editor
  * Modern dark-themed game engine editor with docking capabilities
  */
@@ -97,10 +132,8 @@ class HierarchyPanel {
         item.classList.add('selected');
         this.selectedItem = item;
 
-        // Notify inspector
-        if (window.editorInspector) {
-            window.editorInspector.updateInspector(object);
-        }
+        // Emit selection event
+        editorEvents.emit('objectSelected', object);
     }
 
     /**
@@ -321,6 +354,7 @@ class InspectorPanel {
  *   currentScene: Scene | null,
  *   inspector: InspectorPanel,
  *   hierarchy: HierarchyPanel,
+ *   config: { defaultScenePath: string | null },
  *   init(renderer: Renderer): Promise<void>,
  *   update(dt: number): void,
  *   draw(renderer: Renderer): void,
@@ -330,6 +364,10 @@ const game = {
     currentScene: null,
     inspector: new InspectorPanel(),
     hierarchy: new HierarchyPanel(),
+    config: {
+        // Set to null to start with empty editor, or specify a scene path
+        defaultScenePath: "../Examples/TextTest/scene.xml"
+    },
 
     /** @param {Renderer} renderer */
     async init(renderer) {
@@ -338,29 +376,35 @@ const game = {
         // Setup title bar controls
         setupTitleBar();
 
-        // Make inspector available globally for hierarchy panel
-        window.editorInspector = this.inspector;
+        // Setup event listeners
+        editorEvents.on('objectSelected', (object) => {
+            this.inspector.updateInspector(object);
+        });
 
-        // Load a default scene if available
-        try {
-            const scene = await SceneLoader.load("../Examples/TextTest/scene.xml", renderer);
-            this.currentScene = scene;
-            console.log("Scene loaded:", scene);
+        // Load default scene if configured
+        if (this.config.defaultScenePath) {
+            try {
+                const scene = await SceneLoader.load(this.config.defaultScenePath, renderer);
+                this.currentScene = scene;
+                console.log("Scene loaded:", scene);
 
-            // Apply scene camera resolution if defined
-            const cam = scene.camera;
-            if (cam && cam.width > 0 && cam.height > 0) {
-                console.log(`Setting resolution from scene: ${cam.width}x${cam.height}`);
-                renderer.targetWidth = cam.width;
-                renderer.targetHeight = cam.height;
-                renderer.targetAspectRatio = cam.width / cam.height;
-                renderer.resizeCanvas();
+                // Apply scene camera resolution if defined
+                const cam = scene.camera;
+                if (cam && cam.width > 0 && cam.height > 0) {
+                    console.log(`Setting resolution from scene: ${cam.width}x${cam.height}`);
+                    renderer.targetWidth = cam.width;
+                    renderer.targetHeight = cam.height;
+                    renderer.targetAspectRatio = cam.width / cam.height;
+                    renderer.resizeCanvas();
+                }
+
+                // Update hierarchy with loaded scene
+                this.hierarchy.updateHierarchy(scene);
+            } catch (error) {
+                console.warn('Failed to load default scene:', error);
+                this.hierarchy.showNoScene();
             }
-
-            // Update hierarchy with loaded scene
-            this.hierarchy.updateHierarchy(scene);
-        } catch (error) {
-            console.warn('No default scene loaded:', error);
+        } else {
             this.hierarchy.showNoScene();
         }
 
