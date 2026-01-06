@@ -142,7 +142,6 @@ const game = {
             // console.log(elevatorprogress); 
         }
     },
-    },
 
     draw(renderer) {
         // Draw the game elements
