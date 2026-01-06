@@ -1446,6 +1446,68 @@ export function rebuildInspector(host, ui) {
     
     if (matStub) {
       addSubSection('Overrides');
+
+      // Distinguish shared material (scene-level stub) vs per-instance override on node.
+      /** @param {any} stub */
+      const cloneStubToOverride = (stub) => {
+        /** @type {any} */
+        const o = {
+          name: String(stub?.name || ''),
+          source: String(stub?.source || ''),
+          baseColorFactor: String(stub?.baseColorFactor || ''),
+          metallicFactor: String(stub?.metallicFactor || ''),
+          roughnessFactor: String(stub?.roughnessFactor || ''),
+          normalScale: String(stub?.normalScale || ''),
+          aoStrength: String(stub?.aoStrength || ''),
+          emissiveFactor: String(stub?.emissiveFactor || ''),
+          alphaMode: String(stub?.alphaMode || ''),
+          alphaCutoff: String(stub?.alphaCutoff || ''),
+          baseColorTexture: String(stub?.baseColorTexture || ''),
+          metallicTexture: String(stub?.metallicTexture || ''),
+          roughnessTexture: String(stub?.roughnessTexture || ''),
+          metallicRoughnessPacked: !!stub?.metallicRoughnessPacked,
+          normalTexture: String(stub?.normalTexture || ''),
+          aoTexture: String(stub?.aoTexture || ''),
+          emissiveTexture: String(stub?.emissiveTexture || ''),
+          alphaTexture: String(stub?.alphaTexture || ''),
+          uvScale: Array.isArray(stub?.uvScale) && stub.uvScale.length >= 2 ? [Number(stub.uvScale[0])||1, Number(stub.uvScale[1])||1] : [1,1],
+        };
+        return o;
+      };
+
+      // Status + controls
+      const modeRow = document.createElement('div');
+      modeRow.className = 'row rowCenter';
+      const statusBox = document.createElement('div');
+      statusBox.className = 'readonlyBox';
+      statusBox.style.flex = '1 1 auto';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn';
+      btn.style.flex = '0 0 auto';
+      const overrideEnabled = !!obj._materialOverrideEnabled;
+      statusBox.textContent = overrideEnabled ? 'Material Mode: Instance Override' : 'Material Mode: Shared Asset';
+      btn.textContent = overrideEnabled ? 'Disable Override' : 'Enable Override';
+      btn.addEventListener('click', () => {
+        if (obj._materialOverrideEnabled) {
+          obj._materialOverrideEnabled = false;
+          // keep override object, but stop using it
+        } else {
+          obj._materialOverrideEnabled = true;
+          if (!obj._materialOverride) obj._materialOverride = cloneStubToOverride(matStub);
+          // Ensure name/source are in sync
+          obj._materialOverride.name = String(matStub?.name || obj.materialName || '');
+          obj._materialOverride.source = String(matStub?.source || obj.materialFile || '');
+        }
+        try { host.rebuildInspector?.(); } catch {}
+      });
+      modeRow.appendChild(statusBox);
+      modeRow.appendChild(btn);
+      InspectorFields.addField(ui.common, 'Material Mode', modeRow);
+
+      // Choose active target object for UI bindings (override or shared stub).
+      /** @type {any} */
+      let activeOverrides = obj._materialOverrideEnabled ? (obj._materialOverride || (obj._materialOverride = cloneStubToOverride(matStub))) : matStub;
       if (!('baseColorFactor' in matStub)) matStub.baseColorFactor = '';
       if (!('metallicFactor' in matStub)) matStub.metallicFactor = '';
       if (!('roughnessFactor' in matStub)) matStub.roughnessFactor = '';
@@ -1465,7 +1527,7 @@ export function rebuildInspector(host, ui) {
       if (!('uvScale' in matStub)) matStub.uvScale = [1, 1];
       if (!Array.isArray(matStub.uvScale) || matStub.uvScale.length < 2) matStub.uvScale = [1, 1];
 
-      const apply = () => applyLiveMaterialFromStub(matStub);
+      const apply = () => applyLiveMaterialFromStub(activeOverrides);
 
       // Groups matching standalone material UI
       const gAlbedo = addGroup('Albedo', true);
@@ -1477,24 +1539,37 @@ export function rebuildInspector(host, ui) {
       const gUv = addGroup('Uv', false);
 
       // Albedo
-      InspectorFields.addAutoWith(gAlbedo, 'Color', matStub, 'baseColorFactor', apply);
+      InspectorFields.addAutoWith(gAlbedo, 'Color', activeOverrides, 'baseColorFactor', apply);
       const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
-      InspectorFields.addStringWithDrop(gAlbedo, 'Texture', matStub, 'baseColorTexture', apply, texOpts);
+      const texPreviewOpts = (labelHint) => ({
+        ...texOpts,
+        preview: true,
+        hintText: labelHint,
+        previewResolve: (rel) => {
+          try {
+            const baseUrl = getSceneBaseUrl();
+            return SceneLoader._resolveSceneResourceUrl(rel, baseUrl);
+          } catch {
+            return String(rel || '');
+          }
+        },
+      });
+      InspectorFields.addStringWithDrop(gAlbedo, 'Texture', activeOverrides, 'baseColorTexture', apply, texPreviewOpts('Albedo RGB texture')); 
 
       // ORM
-      InspectorFields.addAutoWith(gOrm, 'Metallic', matStub, 'metallicFactor', apply);
-      InspectorFields.addAutoWith(gOrm, 'Roughness', matStub, 'roughnessFactor', apply);
-      InspectorFields.addAutoWith(gOrm, 'Packed MR', matStub, 'metallicRoughnessPacked', apply);
-      InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture', matStub, 'metallicTexture', apply, texOpts);
-      InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture', matStub, 'roughnessTexture', apply, texOpts);
+      InspectorFields.addAutoWith(gOrm, 'Metallic', activeOverrides, 'metallicFactor', apply);
+      InspectorFields.addAutoWith(gOrm, 'Roughness', activeOverrides, 'roughnessFactor', apply);
+      InspectorFields.addAutoWith(gOrm, 'Packed MR', activeOverrides, 'metallicRoughnessPacked', apply);
+      InspectorFields.addStringWithDrop(gOrm, 'Metallic Texture', activeOverrides, 'metallicTexture', apply, texPreviewOpts('Metallic in R channel (packed)'));
+      InspectorFields.addStringWithDrop(gOrm, 'Roughness Texture', activeOverrides, 'roughnessTexture', apply, texPreviewOpts('Roughness in G channel (packed)'));
 
       // Normal Map
-      InspectorFields.addAutoWith(gNormal, 'Scale', matStub, 'normalScale', apply);
-      InspectorFields.addStringWithDrop(gNormal, 'Texture', matStub, 'normalTexture', apply, texOpts);
+      InspectorFields.addAutoWith(gNormal, 'Scale', activeOverrides, 'normalScale', apply);
+      InspectorFields.addStringWithDrop(gNormal, 'Texture', activeOverrides, 'normalTexture', apply, texPreviewOpts('Normal map RGB (tangent-space)'));
 
       // Ambient Occlusion
-      InspectorFields.addAutoWith(gAo, 'Strength', matStub, 'aoStrength', apply);
-      InspectorFields.addStringWithDrop(gAo, 'Texture', matStub, 'aoTexture', apply, texOpts);
+      InspectorFields.addAutoWith(gAo, 'Strength', activeOverrides, 'aoStrength', apply);
+      InspectorFields.addStringWithDrop(gAo, 'Texture', activeOverrides, 'aoTexture', apply, texPreviewOpts('Ambient occlusion in R channel'));
 
       // Emission
       /**
@@ -1532,13 +1607,13 @@ export function rebuildInspector(host, ui) {
         wrap.appendChild(make(2));
         InspectorFields.addField(container, label, wrap);
       };
-      InspectorFields.addAutoWith(gEmission, 'Color', matStub, 'emissiveFactor', apply);
-      InspectorFields.addStringWithDrop(gEmission, 'Texture', matStub, 'emissiveTexture', apply, texOpts);
+      InspectorFields.addAutoWith(gEmission, 'Color', activeOverrides, 'emissiveFactor', apply);
+      InspectorFields.addStringWithDrop(gEmission, 'Texture', activeOverrides, 'emissiveTexture', apply, texPreviewOpts('Emission RGB texture'));
 
       // Transparency
-      InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', matStub, 'alphaMode', apply);
-      InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', matStub, 'alphaCutoff', apply);
-      InspectorFields.addStringWithDrop(gTransparency, 'Alpha Texture', matStub, 'alphaTexture', apply, texOpts);
+      InspectorFields.addAutoWith(gTransparency, 'Alpha Mode', activeOverrides, 'alphaMode', apply);
+      InspectorFields.addAutoWith(gTransparency, 'Alpha Cutoff', activeOverrides, 'alphaCutoff', apply);
+      InspectorFields.addStringWithDrop(gTransparency, 'Alpha Texture', activeOverrides, 'alphaTexture', apply, texPreviewOpts('Alpha in A channel (or grayscale)'));
 
       // UV
       /**
@@ -1575,7 +1650,7 @@ export function rebuildInspector(host, ui) {
         wrap.appendChild(make(1));
         InspectorFields.addField(container, label, wrap);
       };
-      addVec2ArrayWith(gUv, 'UV Scale', matStub, 'uvScale');
+      addVec2ArrayWith(gUv, 'UV Scale', activeOverrides, 'uvScale');
     }
 
     // Primitive params when meshDefinition is inline

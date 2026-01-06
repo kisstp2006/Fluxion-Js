@@ -990,9 +990,17 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		}, debounceMs);
 	};
 
-	const accept = Array.isArray(opts.acceptExtensions)
+		const accept = Array.isArray(opts.acceptExtensions)
 		? opts.acceptExtensions.map((s) => String(s || '').toLowerCase()).filter(Boolean)
 		: null;
+
+		// Optional inline preview for image-like inputs.
+		const showPreview = !!(opts && /** @type {any} */(opts).preview);
+		/** @type {(rel:string)=>string} */
+		const previewResolve = typeof /** @type {any} */(opts).previewResolve === 'function'
+			? /** @type {any} */(opts).previewResolve
+			: (rel) => String(rel || '');
+		const hintText = String((/** @type {any} */(opts)).hintText || '').trim();
 
 	/** @param {string} v */
 	const acceptValue = (v) => {
@@ -1008,25 +1016,79 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		runChanged(!!immediate);
 	};
 
-	input.addEventListener('input', () => apply(false));
+	input.addEventListener('input', () => {
+		apply(false);
+		updatePreview();
+	});
 	input.addEventListener('change', () => {
 		apply(true);
 		const after = _captureProp(obj, key);
 		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
 		editBefore = null;
+		updatePreview(true);
 	});
 
 	input.addEventListener('dragover', (e) => {
-		// Allow drop.
+		// Allow drop and show visual feedback depending on accept rules.
 		e.preventDefault();
+		const dt = e.dataTransfer || null;
+		let ok = false;
 		try {
-			if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+			if (dt && dt.items && dt.items.length > 0) {
+				// Prefer item types; fallback to files list
+				const first = dt.items[0];
+				if (first.kind === 'file' && first.type) {
+					const name = (dt.files && dt.files[0] && dt.files[0].name) ? String(dt.files[0].name) : '';
+					ok = !accept || accept.length === 0 || accept.some(ext => name.toLowerCase().endsWith(ext));
+				} else {
+					let text = '';
+					try { text = String(dt.getData('text/plain') || '').trim(); } catch {}
+					if (!text) { try { text = String(dt.getData('text/uri-list') || '').trim(); } catch {} }
+					if (!text && dt.files && dt.files.length > 0) {
+						try { text = String(dt.files[0]?.name || '').trim(); } catch {}
+					}
+					ok = !!text && (!accept || accept.length === 0 || accept.some(ext => text.toLowerCase().endsWith(ext)));
+				}
+			}
 		} catch {}
+		try { if (dt) dt.dropEffect = ok ? 'copy' : 'none'; } catch {}
+		input.classList.add('drop-target');
+		input.classList.toggle('drop-okay', !!ok);
+		input.classList.toggle('drop-nope', !ok);
 	});
+
+	input.addEventListener('dragenter', (e) => {
+		// Mirror dragover logic for immediate feedback on enter.
+		const dt = e.dataTransfer || null;
+		let ok = false;
+		try {
+			if (dt && dt.items && dt.items.length > 0) {
+				const first = dt.items[0];
+				if (first.kind === 'file') {
+					const name = (dt.files && dt.files[0] && dt.files[0].name) ? String(dt.files[0].name) : '';
+					ok = !accept || accept.length === 0 || accept.some(ext => name.toLowerCase().endsWith(ext));
+				}
+			}
+		} catch {}
+		input.classList.add('drop-target');
+		input.classList.toggle('drop-okay', !!ok);
+		input.classList.toggle('drop-nope', !ok);
+	});
+
+	const clearDropClasses = () => {
+		try {
+			input.classList.remove('drop-target');
+			input.classList.remove('drop-okay');
+			input.classList.remove('drop-nope');
+		} catch {}
+	};
+
+	input.addEventListener('dragleave', () => clearDropClasses());
 
 	input.addEventListener('drop', (e) => {
 		e.preventDefault();
 		e.stopPropagation();
+		clearDropClasses();
 		const dt = e.dataTransfer;
 		if (!dt) return;
 
@@ -1094,6 +1156,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		const after = _captureProp(obj, key);
 		if (editBefore) _pushUndoProp(obj, key, editBefore, after, label);
 		editBefore = null;
+		updatePreview(true);
 	});
 
 	// Optional asset picker button (shows project files matching acceptExtensions).
@@ -1274,7 +1337,8 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			});
 	};
 
-	if (!canPick) {
+	// Render row with optional preview and picker button.
+	if (!canPick && !showPreview && !hintText) {
 		addField(container, label, input);
 		return;
 	}
@@ -1293,9 +1357,89 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 
 	const row = document.createElement('div');
 	row.className = 'rowTight rowCenter';
+	/** @type {HTMLDivElement|null} */
+	let previewBox = null;
+	if (showPreview) {
+		previewBox = document.createElement('div');
+		previewBox.className = 'texturePreview empty';
+		previewBox.title = 'Click to preview';
+		// Open modal preview on click.
+		previewBox.addEventListener('click', () => {
+			const v = String(input.value || '').trim();
+			if (!v) return;
+			let url = '';
+			try { url = previewResolve(v) || ''; } catch { url = v; }
+			if (!url) return;
+			try {
+				const backdrop = document.createElement('div');
+				backdrop.className = 'modalBackdrop';
+				const box = document.createElement('div');
+				box.className = 'imageModalBox';
+				const img = document.createElement('img');
+				img.src = url;
+				const closeBtn = document.createElement('button');
+				closeBtn.type = 'button';
+				closeBtn.className = 'imageModalClose';
+				closeBtn.textContent = 'Close';
+				const close = () => { try { backdrop.remove(); } catch {} };
+				closeBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(); });
+				backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+				document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc, true); } }, true);
+				box.appendChild(img);
+				box.appendChild(closeBtn);
+				backdrop.appendChild(box);
+				document.body.appendChild(backdrop);
+			} catch {}
+		});
+		row.appendChild(previewBox);
+	}
 	row.appendChild(input);
-	row.appendChild(pickBtn);
-	addField(container, label, row);
+	if (canPick) row.appendChild(pickBtn);
+	// Add Clear button to quickly remove assignment
+	const clearBtn = document.createElement('button');
+	clearBtn.type = 'button';
+	clearBtn.className = 'btn btnSmall';
+	clearBtn.textContent = 'Clear';
+	clearBtn.style.flex = '0 0 auto';
+	clearBtn.addEventListener('click', (e) => {
+		e.preventDefault();
+		e.stopPropagation();
+		input.value = '';
+		apply(true);
+		updatePreview(true);
+	});
+	row.appendChild(clearBtn);
+	const field = addField(container, label, row);
+	if (hintText) {
+		const hint = document.createElement('div');
+		hint.className = 'fieldHint show';
+		hint.textContent = hintText;
+		field.appendChild(hint);
+	}
+
+	// Update preview based on current input value.
+	function updatePreview(immediate = false) {
+		if (!previewBox) return;
+		const v = String(input.value || '').trim();
+		if (!v) {
+			previewBox.classList.add('empty');
+			previewBox.classList.remove('error');
+			previewBox.style.backgroundImage = '';
+			return;
+		}
+		let url = '';
+		try { url = previewResolve(v) || ''; } catch { url = v; }
+		if (!url) {
+			previewBox.classList.add('empty');
+			previewBox.classList.add('error');
+			previewBox.style.backgroundImage = '';
+			return;
+		}
+		previewBox.classList.remove('empty');
+		previewBox.classList.remove('error');
+		previewBox.style.backgroundImage = `url("${url}")`;
+	}
+	updatePreview(true);
 }
 
 /**

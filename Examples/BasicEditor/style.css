@@ -109,6 +109,45 @@ body {
   transform: translateY(-1px);
 }
 
+/* Drag-and-drop visual feedback for asset fields */
+.drop-target {
+  outline: 2px dashed rgba(108,210,255,0.35);
+  outline-offset: 2px;
+}
+.drop-okay {
+  box-shadow: inset 0 0 0 2px rgba(108,210,255,0.6);
+  background: rgba(108,210,255,0.08);
+}
+.drop-nope {
+  box-shadow: inset 0 0 0 2px rgba(255,80,80,0.55);
+  background: rgba(255,80,80,0.06);
+  cursor: not-allowed;
+}
+
+/* Texture preview next to asset inputs */
+.texturePreview {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.03);
+  background-size: cover;
+  background-position: center center;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.texturePreview.empty {
+  background-image: linear-gradient(135deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+                    linear-gradient(225deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+                    linear-gradient(45deg, rgba(255,255,255,0.04) 25%, transparent 25%),
+                    linear-gradient(315deg, rgba(255,255,255,0.04) 25%, transparent 25%);
+  background-position: 8px 0, 8px 0, 0 0, 0 0;
+  background-size: 8px 8px;
+}
+.texturePreview.error {
+  border-color: rgba(255,80,80,0.55);
+  z-index: 10002;
+
 .menuSep {
   height: 1px;
   background: var(--border);
@@ -137,6 +176,37 @@ body {
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow-lg);
+}
+
+/* Modal content for image previews */
+.imageModalBox {
+  max-width: min(90vw, 1024px);
+  max-height: min(85vh, 768px);
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--panel2);
+  box-shadow: var(--shadow-xl);
+  border: 1px solid rgba(255,255,255,0.08);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.imageModalBox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+}
+.imageModalClose {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(0,0,0,0.35);
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
 }
 
 .modal.modalWide {
