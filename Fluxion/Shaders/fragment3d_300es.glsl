@@ -34,6 +34,7 @@ uniform vec2 u_uvScale;            // UV tiling multiplier
 uniform float u_metallicFactor;    // 0..1
 uniform float u_roughnessFactor;   // 0..1
 uniform float u_normalScale;       // >=0
+uniform float u_normalFlipY;       // 1.0 = flip Y (DirectX), -1.0 = don't flip (OpenGL/GLTF)
 uniform float u_aoStrength;        // 0..1
 uniform vec3 u_emissiveFactor;     // linear RGB
 uniform float u_exposure;          // HDR exposure multiplier (linear)
@@ -347,6 +348,7 @@ void main() {
   // Shading normal: starts as geometric, then modified by normal map
   vec3 N = Ng;
   vec3 nTex = texture(u_normalMap, uv).xyz * 2.0 - 1.0;
+  nTex.y *= u_normalFlipY;  // Flip Y if DirectX-style normal map (some authoring tools)
   nTex.xy *= max(u_normalScale, 0.0);
   nTex = normalize(nTex);
   mat3 TBN = computeTBN(N, v_worldPos, uv);

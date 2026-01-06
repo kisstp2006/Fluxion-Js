@@ -846,11 +846,19 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
     const mat = new Material();
     const ns = _getGLTFTextureCacheNamespace(glTF);
 
-    // PBR Metallic-Roughness workflow
+    // ========================================================================
+    // PBR Metallic-Roughness Workflow (GLTF 2.0 Core)
+    // ========================================================================
+    // All GLTF materials have pbrMetallicRoughness (minimal-gltf-loader provides defaults).
+    // GLTF spec defaults:
+    //   - baseColorFactor: [1,1,1,1] (white, opaque)
+    //   - metallicFactor: 1.0 (fully metallic)
+    //   - roughnessFactor: 1.0 (fully rough)
+    // These are applied by minimal-gltf-loader if not present in the file.
     if (gltfMat.pbrMetallicRoughness) {
         const pbr = gltfMat.pbrMetallicRoughness;
 
-        // Base color
+        // Base Color Factor (linear RGBA, spec default: [1,1,1,1])
         if (pbr.baseColorFactor) {
             mat.baseColorFactor = [
                 Number(pbr.baseColorFactor[0] ?? 1),
@@ -860,17 +868,19 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
             ];
         }
 
-        // Metallic/Roughness
+        // Metallic Factor (0.0 = dielectric, 1.0 = metal, spec default: 1.0)
         if (pbr.metallicFactor !== undefined) {
             const mf = Number(pbr.metallicFactor);
             if (Number.isFinite(mf)) mat.metallicFactor = Math.max(0.0, Math.min(1.0, mf));
         }
+        
+        // Roughness Factor (0.0 = smooth/glossy, 1.0 = rough/matte, spec default: 1.0)
         if (pbr.roughnessFactor !== undefined) {
             const rf = Number(pbr.roughnessFactor);
             if (Number.isFinite(rf)) mat.roughnessFactor = Math.max(0.0, Math.min(1.0, rf));
         }
 
-        // Textures
+        // Base Color Texture (sRGB, multiplied with baseColorFactor)
         const baseColorTexInfo = pbr.baseColorTexture;
         if (baseColorTexInfo && glTF.textures && glTF.textures[baseColorTexInfo.index]) {
             const t = glTF.textures[baseColorTexInfo.index];
@@ -879,6 +889,9 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
             if (tex) mat.baseColorTexture = tex;
         }
 
+        // Metallic-Roughness Texture (linear, packed)
+        // GLTF spec: G channel = roughness, B channel = metallic, R/A unused
+        // Multiplied with metallicFactor and roughnessFactor respectively
         const mrTexInfo = pbr.metallicRoughnessTexture;
         if (mrTexInfo && glTF.textures && glTF.textures[mrTexInfo.index]) {
             const t = glTF.textures[mrTexInfo.index];
@@ -887,37 +900,56 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
             if (tex) {
                 mat.metallicTexture = tex;
                 mat.roughnessTexture = tex;
-                mat.metallicRoughnessPacked = true;
+                mat.metallicRoughnessPacked = true; // Signal shader to read G=roughness, B=metallic
             }
         }
     }
-    // Normal
+    // ========================================================================
+    // Normal Mapping (tangent-space, OpenGL convention: +Y up)
+    // ========================================================================
+    // GLTF spec: RGB channels encode tangent-space normal (OpenGL +Y up), scale defaults to 1.0
     if (gltfMat.normalTexture && glTF.textures && glTF.textures[gltfMat.normalTexture.index]) {
         const t = glTF.textures[gltfMat.normalTexture.index];
         const img = t?.source;
         const tex = _createGLTFTexture(renderer, img, `${ns}:normal:${gltfMat.normalTexture.index}`, t?.sampler);
-        if (tex) mat.normalTexture = tex;
+        if (tex) {
+            mat.normalTexture = tex;
+            console.log(`[GLTF] Normal map loaded for material "${gltfMat.name || 'unnamed'}":`, {
+                textureIndex: gltfMat.normalTexture.index,
+                imageIndex: t?.source,
+                scale: gltfMat.normalTexture.scale ?? 1.0,
+                note: 'GLTF uses OpenGL convention (+Y up in tangent space). Shader uses screen-space derivatives (Mikkelsen method) for TBN.'
+            });
+        }
+        // Normal scale: intensity of normal map effect (spec default: 1.0)
         if (typeof gltfMat.normalTexture.scale === 'number') mat.normalScale = gltfMat.normalTexture.scale;
     }
 
-    // Occlusion
+    // ========================================================================
+    // Ambient Occlusion (baked indirect shadowing)
+    // ========================================================================
+    // GLTF spec: R channel = AO factor, strength defaults to 1.0
+    // Note: AO only affects indirect/ambient lighting, not direct lights
     if (gltfMat.occlusionTexture && glTF.textures && glTF.textures[gltfMat.occlusionTexture.index]) {
         const t = glTF.textures[gltfMat.occlusionTexture.index];
         const img = t?.source;
         const tex = _createGLTFTexture(renderer, img, `${ns}:occlusion:${gltfMat.occlusionTexture.index}`, t?.sampler);
         if (tex) mat.aoTexture = tex;
+        // AO strength: intensity of occlusion effect (spec default: 1.0)
         if (typeof gltfMat.occlusionTexture.strength === 'number') mat.aoStrength = gltfMat.occlusionTexture.strength;
     }
 
-    // Emissive
+    // ========================================================================
+    // Emissive (self-illumination, added to final color)
+    // ========================================================================
+    // GLTF spec: emissiveFactor defaults to [0,0,0] (no emission)
     if (gltfMat.emissiveTexture && glTF.textures && glTF.textures[gltfMat.emissiveTexture.index]) {
         const t = glTF.textures[gltfMat.emissiveTexture.index];
         const img = t?.source;
         const tex = _createGLTFTexture(renderer, img, `${ns}:emissive:${gltfMat.emissiveTexture.index}`, t?.sampler);
         if (tex) mat.emissiveTexture = tex;
     }
-
-    // Emissive
+    // Emissive Factor (linear RGB, multiplied with emissiveTexture)
     if (gltfMat.emissiveFactor) {
         mat.emissiveFactor = [
             Number(gltfMat.emissiveFactor[0] ?? 0),
@@ -926,7 +958,11 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
         ];
     }
 
-    // Alpha mode
+    // ========================================================================
+    // Alpha / Transparency
+    // ========================================================================
+    // GLTF spec: alphaMode = "OPAQUE" | "MASK" | "BLEND" (default: "OPAQUE")
+    //            alphaCutoff = threshold for MASK mode (default: 0.5)
     if (gltfMat.alphaMode) {
         mat.alphaMode = gltfMat.alphaMode.toUpperCase();
     }
@@ -934,7 +970,10 @@ function convertGLTFMaterial(glTF, gltfMat, renderer) {
         mat.alphaCutoff = gltfMat.alphaCutoff;
     }
 
-    // Double-sided / culling
+    // ========================================================================
+    // Backface Culling
+    // ========================================================================
+    // GLTF spec: doubleSided defaults to false (cull backfaces)
     if (gltfMat.doubleSided !== undefined) {
         mat.doubleSided = !!gltfMat.doubleSided;
     }

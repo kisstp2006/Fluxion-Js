@@ -1,53 +1,24 @@
-/**
- * Physically Based Rendering (PBR) material (metallic–roughness workflow).
- *
- * Supported texture maps:
- * - BaseColor / Albedo (sRGB)
- * - Metallic (linear grayscale, R)
- * - Roughness (linear grayscale, R)
- * - Normal (tangent-space, OpenGL +Y)
- * - Ambient Occlusion (linear grayscale, R; indirect only)
- * - Emissive (sRGB)
- * - Alpha (linear grayscale, R) + baseColor alpha
- *
- * Alpha modes:
- * - OPAQUE: fully opaque
- * - MASK: cutout using alphaCutoff
- * - BLEND: alpha blending (no guaranteed sorting)
- *
- * .mat files are JSON. Preferred keys:
- * - baseColorFactor: "#RRGGBB[AA]" | "r,g,b[,a]" | [r,g,b,a] (0..1 or 0..255)
- * - baseColorTexture: "path.png"
- * - metallicFactor: number (0..1)
- * - metallicTexture: "path.png"
- * - roughnessFactor: number (0..1)
- * - roughnessTexture: "path.png"
- * - normalTexture: "path.png"
- * - normalScale: number
- * - aoTexture: "path.png"
- * - aoStrength: number
- * - emissiveFactor: "#RRGGBB" | "r,g,b" | [r,g,b] (0..1 or 0..255)
- * - emissiveTexture: "path.png"
- * - alphaTexture: "path.png"
- * - alphaMode: "OPAQUE" | "MASK" | "BLEND"
- * - alphaCutoff: number (0..1)
- *
- * Backward-compatible keys:
- * - albedoColor -> baseColorFactor
- * - albedoTexture -> baseColorTexture
- */
+
 export default class Material {
   constructor() {
     /** @type {[number,number,number,number]} linear RGBA */
     this.baseColorFactor = [1, 1, 1, 1];
     /** @type {[number,number]} UV tiling multiplier (1,1 = default) */
     this.uvScale = [1, 1];
-    this.metallicFactor = 0.0;
-    this.roughnessFactor = 1.0;
+    this.metallicFactor = 1.0;  // GLTF spec default: 1.0 (fully metallic)
+    this.roughnessFactor = 1.0; // GLTF spec default: 1.0 (fully rough)
     this.normalScale = 1.0;
     this.aoStrength = 1.0;
     /** @type {[number,number,number]} linear RGB */
     this.emissiveFactor = [0, 0, 0];
+
+    /**
+     * Flip normal map Y channel (green). Use this if normal maps appear inverted.
+     * - false (default): OpenGL convention (+Y up in tangent space) - GLTF standard
+     * - true: DirectX convention (+Y down in tangent space) - some authoring tools
+     * @type {boolean}
+     */
+    this.normalFlipY = false;
 
     /** @type {'OPAQUE'|'MASK'|'BLEND'} */
     this.alphaMode = 'OPAQUE';

@@ -1232,6 +1232,7 @@ export default class Renderer {
               metallicFactor: this.gl.getUniformLocation(this.program3D, 'u_metallicFactor'),
               roughnessFactor: this.gl.getUniformLocation(this.program3D, 'u_roughnessFactor'),
               normalScale: this.gl.getUniformLocation(this.program3D, 'u_normalScale'),
+              normalFlipY: this.gl.getUniformLocation(this.program3D, 'u_normalFlipY'),
               aoStrength: this.gl.getUniformLocation(this.program3D, 'u_aoStrength'),
               emissiveFactor: this.gl.getUniformLocation(this.program3D, 'u_emissiveFactor'),
               exposure: this.gl.getUniformLocation(this.program3D, 'u_exposure'),
@@ -2737,6 +2738,10 @@ export default class Renderer {
 
     const normalScale = Number.isFinite(m.normalScale) ? m.normalScale : 1.0;
     if (u?.normalScale) gl.uniform1f(u.normalScale, normalScale);
+
+    // Normal map Y-flip: -1.0 = no flip (OpenGL/GLTF standard), 1.0 = flip (DirectX)
+    const normalFlipY = m.normalFlipY ? 1.0 : -1.0;
+    if (u?.normalFlipY) gl.uniform1f(u.normalFlipY, normalFlipY);
 
     const aoStrength = Number.isFinite(m.aoStrength) ? m.aoStrength : 1.0;
     if (u?.aoStrength) gl.uniform1f(u.aoStrength, aoStrength);
