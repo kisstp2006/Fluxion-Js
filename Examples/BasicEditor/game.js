@@ -6279,16 +6279,10 @@ const game = {
       this._markInspectorDirty();
     }
 
-    // Rebuild inspector if marked dirty (selection/component changes)
+    // Rebuild inspector ONLY if marked dirty (selection/component changes)
+    // Do NOT auto-sync values - inspector fields are bound and update as the user edits them
     if (this._inspectorNeedsRebuild) {
       this.rebuildInspector();
-    } else if (this.selected && !this._isEditingInspector() && this._inspectorRefreshBlockT <= 0) {
-      // Just sync values (no DOM rebuild) every 0.2s when values might change
-      this._inspectorAutoRefreshT += dt;
-      if (this._inspectorAutoRefreshT >= 0.2) {
-        this._inspectorAutoRefreshT = 0;
-        this.syncInspector();
-      }
     }
   },
 

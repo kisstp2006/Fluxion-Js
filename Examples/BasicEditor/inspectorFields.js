@@ -142,6 +142,12 @@ function _bindField(el, obj, key, kind) {
 	try {
 		if (!el || !obj || !key) return;
 		_boundFields.set(el, { obj, key: String(key), kind });
+		// Mark element as actively edited to prevent external sync from clobbering user input.
+		// Use capture so we catch focus changes on inputs reliably.
+		try {
+			el.addEventListener('focus', () => { try { /** @type {HTMLElement} */(el).dataset.editing = '1'; } catch {} }, true);
+			el.addEventListener('blur', () => { try { delete /** @type {HTMLElement} */(el).dataset.editing; } catch {} }, true);
+		} catch {}
 	} catch {}
 }
 
@@ -189,6 +195,8 @@ export function syncBoundFields(root) {
 	const nodes = Array.from(root.querySelectorAll('input, select, textarea'));
 	for (const el of nodes) {
 		if (!(el instanceof HTMLElement)) continue;
+		// Skip elements currently being edited or containing the active element.
+		try { if (el.dataset && el.dataset.editing) continue; } catch {}
 		if (active && (el === active || el.contains(active))) continue;
 
 		const b = _boundFields.get(el);
@@ -1391,7 +1399,12 @@ export function addVec3Array(container, label, arr, opts = {}) {
 			input.classList.remove('invalid');
 			if (!editBefore) editBefore = [Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0];
 			arr[i] = v;
+		};
 
+		input.addEventListener('input', apply);
+		input.addEventListener('change', () => {
+			apply();
+			// Apply normalization on commit to avoid twitching while typing.
 			if (normalize) {
 				const x = Number(arr[0]) || 0;
 				const y = Number(arr[1]) || 0;
@@ -1406,11 +1419,6 @@ export function addVec3Array(container, label, arr, opts = {}) {
 					inputs[2].value = String(arr[2]);
 				}
 			}
-		};
-
-		input.addEventListener('input', apply);
-		input.addEventListener('change', () => {
-			apply();
 			if (!editBefore) return;
 			const beforeCopy = [Number(editBefore[0]) || 0, Number(editBefore[1]) || 0, Number(editBefore[2]) || 0];
 			const afterCopy = [Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0];
