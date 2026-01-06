@@ -143,6 +143,11 @@ const game = {
   /** @type {any | null} */
   selected: null,
 
+  // Inspector rebuild optimization - track last state to avoid unnecessary rebuilds
+  _inspectorLastSelected: null,
+  _inspectorLastSceneObjectCount: 0,
+  _inspectorNeedsRebuild: false,
+
   /** @type {'2d' | '3d'} */
   mode: '2d',
 
@@ -3224,7 +3229,6 @@ const game = {
 
     this.selected = sceneAny._skyboxXml;
     this.rebuildTree();
-    this.rebuildInspector();
     if (this._renderer) this._requestViewportSync(this._renderer);
 
     this._closeAddNode();
@@ -5134,7 +5138,6 @@ const game = {
 
     // Refresh editor UI.
     this.rebuildTree();
-    this.rebuildInspector();
     if (this._renderer) this._requestViewportSync(this._renderer);
 
     return true;
@@ -5153,8 +5156,36 @@ const game = {
     setupInspectorInteractionGuards(this);
   },
 
+  /**
+   * Mark inspector as needing a full rebuild (selection changed, components added/removed, etc.)
+   */
+  _markInspectorDirty() {
+    this._inspectorNeedsRebuild = true;
+  },
+
+  /**
+   * Count scene objects to detect component list changes.
+   * @returns {number}
+   */
+  _getSceneObjectCount() {
+    if (!this.currentScene) return 0;
+    let count = 0;
+    if (Array.isArray(this.currentScene.objects)) count += this.currentScene.objects.length;
+    if (Array.isArray(this.currentScene.lights)) count += this.currentScene.lights.length;
+    // Count XML assets
+    const sceneAny = /** @type {any} */ (this.currentScene);
+    if (Array.isArray(sceneAny._fontXml)) count += sceneAny._fontXml.length;
+    if (Array.isArray(sceneAny._meshXml)) count += sceneAny._meshXml.length;
+    if (Array.isArray(sceneAny._materialXml)) count += sceneAny._materialXml.length;
+    if (sceneAny._skyboxXml) count += 1;
+    return count;
+  },
+
   rebuildInspector() {
     rebuildInspectorPanel(this, /** @type {any} */ (ui));
+    this._inspectorNeedsRebuild = false;
+    this._inspectorLastSelected = this.selected;
+    this._inspectorLastSceneObjectCount = this._getSceneObjectCount();
   },
 
   syncInspector() {
@@ -5163,7 +5194,6 @@ const game = {
 
   _afterUndoRedo() {
     try { this.rebuildTree(); } catch {}
-    try { this.rebuildInspector(); } catch {}
     try { if (this._renderer) this._requestViewportSync(this._renderer); } catch {}
   },
 
@@ -6103,11 +6133,23 @@ const game = {
       this._lastSceneSaveOkT = Math.max(0, this._lastSceneSaveOkT - dt);
     }
 
-    if (this.selected && !this._isEditingInspector() && this._inspectorRefreshBlockT <= 0) {
+    // Inspector optimization: detect when rebuild is needed
+    const selectionChanged = this.selected !== this._inspectorLastSelected;
+    const objectCountChanged = this._getSceneObjectCount() !== this._inspectorLastSceneObjectCount;
+    
+    if (selectionChanged || objectCountChanged) {
+      // Selection or component list changed - trigger full rebuild
+      this._markInspectorDirty();
+    }
+
+    // Rebuild inspector if marked dirty (selection/component changes)
+    if (this._inspectorNeedsRebuild) {
+      this.rebuildInspector();
+    } else if (this.selected && !this._isEditingInspector() && this._inspectorRefreshBlockT <= 0) {
+      // Just sync values (no DOM rebuild) every 0.2s when values might change
       this._inspectorAutoRefreshT += dt;
       if (this._inspectorAutoRefreshT >= 0.2) {
         this._inspectorAutoRefreshT = 0;
-        // Avoid full DOM rebuilds (can steal focus / scroll). Just sync values.
         this.syncInspector();
       }
     }
