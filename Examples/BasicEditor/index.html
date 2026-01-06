@@ -115,6 +115,61 @@
           <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
           <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
         </div>
+        <div class="viewportToolbar" id="viewportToolbar" aria-label="Viewport Toolbar">
+          <div class="toolbarGroup" role="tablist" aria-label="Mode">
+            <button id="vpMode2DBtn" class="vpSegBtn active" type="button" role="tab" aria-selected="true" title="2D Mode" aria-label="2D Mode">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="3" y1="15" x2="21" y2="15"></line>
+              </svg>
+            </button>
+            <button id="vpMode3DBtn" class="vpSegBtn" type="button" role="tab" aria-selected="false" title="3D Mode" aria-label="3D Mode">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="10" height="10" rx="1"></rect>
+                <rect x="9" y="3" width="10" height="10" rx="1"></rect>
+                <line x1="6" y1="6" x2="9" y2="3"></line>
+                <line x1="16" y1="6" x2="19" y2="3"></line>
+                <line x1="6" y1="16" x2="9" y2="13"></line>
+                <line x1="16" y1="16" x2="19" y2="13"></line>
+              </svg>
+            </button>
+          </div>
+          <div class="toolbarGroup" role="tablist" aria-label="Gizmo">
+            <button id="vpGizmoTranslateBtn" class="vpSegBtn active" type="button" role="tab" aria-selected="true" title="Translate (T)" aria-label="Translate">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4 L12 20"></path>
+                <path d="M4 12 L20 12"></path>
+                <path d="M12 4 L9 7"></path>
+                <path d="M12 4 L15 7"></path>
+                <path d="M12 20 L9 17"></path>
+                <path d="M12 20 L15 17"></path>
+                <path d="M4 12 L7 9"></path>
+                <path d="M4 12 L7 15"></path>
+                <path d="M20 12 L17 9"></path>
+                <path d="M20 12 L17 15"></path>
+              </svg>
+            </button>
+            <button id="vpGizmoRotateBtn" class="vpSegBtn" type="button" role="tab" aria-selected="false" title="Rotate (R)" aria-label="Rotate">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="7"></circle>
+                <path d="M12 5 L15 5"></path>
+                <path d="M15 5 L14 2"></path>
+              </svg>
+            </button>
+          </div>
+          <button id="vpFocusBtn" class="vpBtn" type="button" title="Focus selection (F)" aria-label="Focus Selection">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 2 L12 6"></path>
+              <path d="M12 18 L12 22"></path>
+              <path d="M2 12 L6 12"></path>
+              <path d="M18 12 L22 12"></path>
+            </svg>
+          </button>
+        </div>
         </div>
 
         <div id="scriptView" class="scriptView" aria-label="Script Editor" hidden>

@@ -146,7 +146,7 @@ body {
 }
 .texturePreview.error {
   border-color: rgba(255,80,80,0.55);
-  z-index: 10002;
+}
 
 .menuSep {
   height: 1px;
@@ -161,7 +161,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 80;
+  z-index: 10003;
   backdrop-filter: blur(4px);
 }
 
@@ -1340,6 +1340,68 @@ body {
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.06);
   margin-right: 6px;
+}
+
+/* Floating viewport toolbar */
+.viewportToolbar {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(0,0,0,0.32);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  box-shadow: var(--shadow-sm);
+  z-index: 10000; /* under topbar menus (10001), over canvas */
+  pointer-events: none; /* don’t block canvas except for buttons */
+}
+.viewportToolbar .toolbarGroup { display: flex; gap: 6px; }
+.viewportToolbar .vpBtn,
+.viewportToolbar .vpSegBtn {
+  pointer-events: auto;
+  border: 1px solid rgba(255,255,255,0.10);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.viewportToolbar .vpSegBtn.active,
+.viewportToolbar .vpBtn.active {
+  background: rgba(108,210,255,0.18);
+  border-color: rgba(108,210,255,0.32);
+}
+.viewportToolbar .vpBtn:hover,
+.viewportToolbar .vpSegBtn:hover {
+  background: rgba(108,210,255,0.12);
+  border-color: rgba(108,210,255,0.28);
+  transform: translateY(-1px);
+}
+
+/* Icon line style + subtle visibility behavior */
+.viewportToolbar .icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+  stroke: var(--text);
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.55; /* subtle by default */
+  transition: opacity 120ms ease;
+}
+.viewportToolbar:hover .icon,
+.viewportToolbar .vpBtn:hover .icon,
+.viewportToolbar .vpSegBtn:hover .icon,
+.viewportToolbar .vpBtn.active .icon,
+.viewportToolbar .vpSegBtn.active .icon {
+  opacity: 0.95; /* brighter on hover or active */
 }
 
 .form {

@@ -120,6 +120,11 @@ const ui = {
   scriptEditorText: /** @type {HTMLTextAreaElement|null} */ (null),
   mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
   mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
+  vpMode2DBtn: /** @type {HTMLButtonElement|null} */ (null),
+  vpMode3DBtn: /** @type {HTMLButtonElement|null} */ (null),
+  vpGizmoTranslateBtn: /** @type {HTMLButtonElement|null} */ (null),
+  vpGizmoRotateBtn: /** @type {HTMLButtonElement|null} */ (null),
+  vpFocusBtn: /** @type {HTMLButtonElement|null} */ (null),
   tree: /** @type {HTMLDivElement|null} */ (null),
   inspectorSubtitle: /** @type {HTMLDivElement|null} */ (null),
   common: /** @type {HTMLDivElement|null} */ (null),
@@ -268,6 +273,10 @@ const game = {
     startAxisT: 0,
     startPlaneHit: /** @type {{x:number,y:number,z:number}|null} */ (null),
   },
+
+  // Cache last-applied toolbar state to avoid per-frame DOM churn
+  _lastToolbarMode: /** @type {'2d'|'3d'} */ ('2d'),
+  _lastToolbarGizmo: /** @type {'translate'|'rotate'} */ ('translate'),
 
   _helpVisible: true,
 
@@ -489,6 +498,11 @@ const game = {
     this._setupAssetBrowser();
     ui.mode2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode2dBtn"));
     ui.mode3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode3dBtn"));
+    ui.vpMode2DBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpMode2DBtn'));
+    ui.vpMode3DBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpMode3DBtn'));
+    ui.vpGizmoTranslateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpGizmoTranslateBtn'));
+    ui.vpGizmoRotateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpGizmoRotateBtn'));
+    ui.vpFocusBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpFocusBtn'));
     ui.tree = /** @type {HTMLDivElement} */ (document.getElementById("sceneTree"));
     ui.inspectorSubtitle = /** @type {HTMLDivElement} */ (document.getElementById("inspectorSubtitle"));
     ui.inspectorFilterInput = /** @type {HTMLInputElement} */ (document.getElementById('inspectorFilterInput'));
@@ -673,6 +687,7 @@ const game = {
     } catch {}
 
     // Wire up dock menu buttons for each panel
+    /** @param {string} panelId @param {HTMLElement} panelElement */
     const setupDockMenu = (panelId, panelElement) => {
       const header = panelElement?.querySelector('.dock-header');
       const menuBtn = header?.querySelector('.dock-header-buttons button');
@@ -729,6 +744,19 @@ const game = {
     ui.mode3dBtn?.addEventListener('click', () => {
       this.setMode('3d');
     });
+
+    // Viewport toolbar wiring
+    ui.vpMode2DBtn?.addEventListener('click', () => this.setMode('2d'));
+    ui.vpMode3DBtn?.addEventListener('click', () => this.setMode('3d'));
+    ui.vpGizmoTranslateBtn?.addEventListener('click', () => {
+      this._gizmo.mode = 'translate';
+      this._syncViewportToolbarUI();
+    });
+    ui.vpGizmoRotateBtn?.addEventListener('click', () => {
+      this._gizmo.mode = 'rotate';
+      this._syncViewportToolbarUI();
+    });
+    ui.vpFocusBtn?.addEventListener('click', () => this.focusSelection());
 
     window.addEventListener("keydown", (e) => {
       // Ctrl+S / Cmd+S should work even while typing.
@@ -4514,10 +4542,51 @@ const game = {
       ui.mode3dBtn.setAttribute('aria-selected', mode === '3d' ? 'true' : 'false');
     }
 
-    // Pick a default selection that matches the mode.
-    this.selected = this._pickDefaultSelectionForMode();
-    this.rebuildTree();
-    this.rebuildInspector();
+    // Sync viewport toolbar mode buttons
+    if (ui.vpMode2DBtn && ui.vpMode3DBtn) {
+      ui.vpMode2DBtn.classList.toggle('active', mode === '2d');
+      ui.vpMode3DBtn.classList.toggle('active', mode === '3d');
+      ui.vpMode2DBtn.setAttribute('aria-selected', mode === '2d' ? 'true' : 'false');
+      ui.vpMode3DBtn.setAttribute('aria-selected', mode === '3d' ? 'true' : 'false');
+    }
+
+    // Pick a default selection that matches the mode, update UI incrementally.
+    const nextSel = this._pickDefaultSelectionForMode();
+    if (nextSel !== this.selected) {
+      this.setSelectedEntity(nextSel, { tree: 'rebuild', inspector: 'dirty' });
+    } else {
+      // Mode can affect tree camera entries; rebuild tree but only mark inspector dirty.
+      this.rebuildTree();
+      this._markInspectorDirty();
+    }
+
+    // Refresh toolbar UI after mode change
+    this._syncViewportToolbarUI();
+  },
+
+  /** Sync viewport toolbar button active states */
+  _syncViewportToolbarUI() {
+    const m = this.mode;
+    const g = this._gizmo?.mode || 'translate';
+
+    // Early exit if toolbar already reflects this state
+    if (this._lastToolbarMode === m && this._lastToolbarGizmo === g) return;
+    if (ui.vpMode2DBtn && ui.vpMode3DBtn) {
+      ui.vpMode2DBtn.classList.toggle('active', m === '2d');
+      ui.vpMode3DBtn.classList.toggle('active', m === '3d');
+      ui.vpMode2DBtn.setAttribute('aria-selected', m === '2d' ? 'true' : 'false');
+      ui.vpMode3DBtn.setAttribute('aria-selected', m === '3d' ? 'true' : 'false');
+    }
+    if (ui.vpGizmoTranslateBtn && ui.vpGizmoRotateBtn) {
+      ui.vpGizmoTranslateBtn.classList.toggle('active', g === 'translate');
+      ui.vpGizmoRotateBtn.classList.toggle('active', g === 'rotate');
+      ui.vpGizmoTranslateBtn.setAttribute('aria-selected', g === 'translate' ? 'true' : 'false');
+      ui.vpGizmoRotateBtn.setAttribute('aria-selected', g === 'rotate' ? 'true' : 'false');
+    }
+
+    // Update caches
+    this._lastToolbarMode = m;
+    this._lastToolbarGizmo = g;
   },
 
   /** @param {Renderer} renderer */
@@ -6226,6 +6295,13 @@ const game = {
     if (this._input && !this._isEditingInspector()) {
       if (this._input.getKeyDown('r') || this._input.getKeyDown('R')) this._gizmo.mode = 'rotate';
       if (this._input.getKeyDown('t') || this._input.getKeyDown('T')) this._gizmo.mode = 'translate';
+    }
+
+    // Keep viewport toolbar UI in sync only when state changes
+    const g = this._gizmo?.mode || 'translate';
+    const m = this.mode;
+    if (g !== this._lastToolbarGizmo || m !== this._lastToolbarMode) {
+      this._syncViewportToolbarUI();
     }
 
     // Editor camera navigation (fallback cameras, plus 2D pan/zoom).

@@ -1541,10 +1541,12 @@ export function rebuildInspector(host, ui) {
       // Albedo
       InspectorFields.addAutoWith(gAlbedo, 'Color', activeOverrides, 'baseColorFactor', apply);
       const texOpts = { acceptExtensions: ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.tga'], importToWorkspaceUrl: true };
+      /** @param {string} labelHint */
       const texPreviewOpts = (labelHint) => ({
         ...texOpts,
         preview: true,
         hintText: labelHint,
+        /** @param {string} rel */
         previewResolve: (rel) => {
           try {
             const baseUrl = getSceneBaseUrl();

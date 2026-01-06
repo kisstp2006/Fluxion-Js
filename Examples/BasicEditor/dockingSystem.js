@@ -40,6 +40,16 @@ export class DockingSystem {
     this.isPersistenceEnabled = true;
     this.lastSaveTime = 0;
     this.pendingSave = false;
+    // Batch floating style updates per frame
+    this._dirtyFloating = new Set();
+    this._rafPending = false;
+    // Bound handler refs for proper removeEventListener
+    this._bound = {
+      dragMove: this._onDragMove.bind(this),
+      dragEnd: this._onDragEnd.bind(this),
+      resizeMove: this._onResizeMove.bind(this),
+      resizeEnd: this._onResizeEnd.bind(this),
+    };
     
     // Auto-save layout before unload
     window.addEventListener('beforeunload', () => this._flushPendingSaves());
@@ -263,8 +273,10 @@ export class DockingSystem {
       currentY: window.y || 0,
     };
 
-    document.addEventListener('mousemove', this._onDragMove.bind(this));
-    document.addEventListener('mouseup', this._onDragEnd.bind(this));
+    try { window.element?.classList.add('dragging'); } catch {}
+
+    document.addEventListener('mousemove', this._bound.dragMove);
+    document.addEventListener('mouseup', this._bound.dragEnd);
 
     event.preventDefault();
   }
@@ -285,7 +297,7 @@ export class DockingSystem {
     if (window.state === 'floating') {
       window.x = this.draggingWindow.currentX + dx;
       window.y = this.draggingWindow.currentY + dy;
-      this._applyFloatingStyle(window);
+      this._scheduleFloatingStyle(window.id);
     } else if (window.state === 'docked') {
       // Convert to floating when dragged
       window.state = 'floating';
@@ -306,10 +318,11 @@ export class DockingSystem {
     if (window) {
       this._snapToGrid(window);
       this._debouncedSaveLayout(); // Debounce to avoid excessive writes
+      try { window.element?.classList.remove('dragging'); } catch {}
     }
 
-    document.removeEventListener('mousemove', this._onDragMove.bind(this));
-    document.removeEventListener('mouseup', this._onDragEnd.bind(this));
+    document.removeEventListener('mousemove', this._bound.dragMove);
+    document.removeEventListener('mouseup', this._bound.dragEnd);
 
     this.draggingWindow = null;
   }
@@ -370,8 +383,8 @@ export class DockingSystem {
       startHeight: window.height || 480,
     };
 
-    document.addEventListener('mousemove', this._onResizeMove.bind(this));
-    document.addEventListener('mouseup', this._onResizeEnd.bind(this));
+    document.addEventListener('mousemove', this._bound.resizeMove);
+    document.addEventListener('mouseup', this._bound.resizeEnd);
 
     event.preventDefault();
   }
@@ -392,7 +405,7 @@ export class DockingSystem {
     window.width = Math.max(this.minSize.width, this.resizingPanel.startWidth + dx);
     window.height = Math.max(this.minSize.height, this.resizingPanel.startHeight + dy);
 
-    this._applyFloatingStyle(window);
+    this._scheduleFloatingStyle(window.id);
   }
 
   /**
@@ -407,8 +420,8 @@ export class DockingSystem {
       this._debouncedSaveLayout(); // Debounce to avoid excessive writes
     }
 
-    document.removeEventListener('mousemove', this._onResizeMove.bind(this));
-    document.removeEventListener('mouseup', this._onResizeEnd.bind(this));
+    document.removeEventListener('mousemove', this._bound.resizeMove);
+    document.removeEventListener('mouseup', this._bound.resizeEnd);
 
     this.resizingPanel = null;
   }
@@ -419,22 +432,47 @@ export class DockingSystem {
    */
   _applyFloatingStyle(window) {
     if (!window.element) return;
+    const el = window.element;
+    // Initialize static floating styles once
+    el.classList.add('dock-panel', 'floating');
+    el.style.position = 'fixed';
+    el.style.zIndex = '100';
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
+    el.style.overflow = 'hidden';
+    // Apply size immediately
+    el.style.width = `${Math.max(this.minSize.width, window.width || 0) | 0}px`;
+    el.style.height = `${Math.max(this.minSize.height, window.height || 0) | 0}px`;
+    // Use GPU-accelerated transform for position
+    el.style.transform = `translate3d(${(window.x || 0) | 0}px, ${(window.y || 0) | 0}px, 0)`;
+  }
 
-    window.element.style.cssText = `
-      position: fixed;
-      left: ${window.x}px;
-      top: ${window.y}px;
-      width: ${window.width}px;
-      height: ${window.height}px;
-      z-index: 100;
-      box-shadow: 0 18px 44px rgba(0,0,0,0.45);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)) var(--panel);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    `;
+  /**
+   * Queue floating style updates on next animation frame
+   * @private
+   * @param {string} windowId
+   */
+  _scheduleFloatingStyle(windowId) {
+    if (!windowId) return;
+    this._dirtyFloating.add(windowId);
+    if (this._rafPending) return;
+    this._rafPending = true;
+    requestAnimationFrame(() => {
+      try {
+        for (const id of Array.from(this._dirtyFloating)) {
+          const w = this.windows.get(id);
+          if (!w || !w.element) continue;
+          const el = w.element;
+          // Update transform and size only, avoid resetting entire style string
+          el.style.transform = `translate3d(${(w.x || 0) | 0}px, ${(w.y || 0) | 0}px, 0)`;
+          el.style.width = `${Math.max(this.minSize.width, w.width || 0) | 0}px`;
+          el.style.height = `${Math.max(this.minSize.height, w.height || 0) | 0}px`;
+        }
+      } finally {
+        this._dirtyFloating.clear();
+        this._rafPending = false;
+      }
+    });
   }
 
   /**

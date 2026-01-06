@@ -1414,7 +1414,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		const hint = document.createElement('div');
 		hint.className = 'fieldHint show';
 		hint.textContent = hintText;
-		field.appendChild(hint);
+		if (field) field.appendChild(hint);
 	}
 
 	// Update preview based on current input value.
