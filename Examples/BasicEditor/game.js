@@ -415,6 +415,33 @@ const game = {
     ui.sceneMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("sceneMenuBtn"));
     ui.helpMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("helpMenuBtn"));
     ui.debugMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("debugMenuBtn"));
+
+    // Wire window controls
+    const minimizeBtn = document.querySelector('.minimizeBtn');
+    const maximizeBtn = document.querySelector('.maximizeBtn');
+    const closeBtn = document.querySelector('.closeBtn');
+    
+    minimizeBtn?.addEventListener('click', () => {
+      const electronAPI = /** @type {any} */ (window).electronAPI;
+      if (electronAPI && typeof electronAPI.minimize === 'function') {
+        electronAPI.minimize();
+      }
+    });
+
+    maximizeBtn?.addEventListener('click', () => {
+      const electronAPI = /** @type {any} */ (window).electronAPI;
+      if (electronAPI && typeof electronAPI.maximize === 'function') {
+        electronAPI.maximize();
+      }
+    });
+
+    closeBtn?.addEventListener('click', () => {
+      const electronAPI = /** @type {any} */ (window).electronAPI;
+      if (electronAPI && typeof electronAPI.close === 'function') {
+        electronAPI.close();
+      }
+    });
+
     ui.aboutModal = /** @type {HTMLDivElement} */ (document.getElementById("aboutModal"));
     ui.aboutCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById("aboutCloseBtn"));
     ui.aboutVersionsText = /** @type {HTMLTextAreaElement} */ (document.getElementById('aboutVersionsText'));

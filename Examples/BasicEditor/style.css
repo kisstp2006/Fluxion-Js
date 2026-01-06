@@ -36,6 +36,86 @@ body {
   background: linear-gradient(145deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
 }
 
+.titlebar {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.12)), var(--panel3);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  user-select: none;
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 10002;
+}
+
+.titlebarContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  padding: 0 12px;
+}
+
+.titlebarIcon {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+  opacity: 0.8;
+  -webkit-app-region: no-drag;
+}
+
+.titlebarTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+.titlebarSpacer {
+  flex: 1;
+}
+
+.windowControls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 100%;
+  margin: 0 -12px 0 0;
+}
+
+.windowBtn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.windowBtn:hover {
+  background: rgba(255,255,255,0.08);
+}
+
+.windowBtn:active {
+  background: rgba(255,255,255,0.12);
+}
+
+.windowBtn.closeBtn:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+.windowBtn.closeBtn:active {
+  background: #bf0f1d;
+}
+
 .topbar {
   height: 38px;
   display: flex;
@@ -1321,7 +1401,7 @@ body {
 .viewportOverlay {
   position: absolute;
   left: 12px;
-  top: 12px;
+  top: 60px;
   padding: 10px 12px;
   background: rgba(0,0,0,0.45);
   border: 1px solid rgba(255,255,255,0.08);
@@ -1346,7 +1426,7 @@ body {
 .viewportToolbar {
   position: absolute;
   right: 12px;
-  top: 12px;
+  top: 50px;
   display: flex;
   align-items: center;
   gap: 8px;

@@ -193,6 +193,7 @@ if (!gotTheLock) {
       icon: iconPath,
       width: 1280,
       height: 720,
+      frame: false,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,

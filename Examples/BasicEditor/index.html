@@ -16,6 +16,28 @@
 </head>
 <body>
   <div class="shell">
+    <div class="titlebar" role="banner" aria-label="Window Title Bar">
+      <div class="titlebarContent">
+        <div class="titlebarIcon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <div class="titlebarTitle">Fluxion Editor</div>
+        <div class="titlebarSpacer"></div>
+        <div class="windowControls">
+          <button class="windowBtn minimizeBtn" type="button" aria-label="Minimize" title="Minimize">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M 2 6 L 10 6" stroke="currentColor" stroke-width="1"></path></svg>
+          </button>
+          <button class="windowBtn maximizeBtn" type="button" aria-label="Maximize" title="Maximize">
+            <svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" stroke="currentColor" stroke-width="1" fill="none"></rect></svg>
+          </button>
+          <button class="windowBtn closeBtn" type="button" aria-label="Close" title="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M 2 2 L 10 10 M 10 2 L 2 10" stroke="currentColor" stroke-width="1"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
     <header class="topbar" role="menubar" aria-label="Editor Menu">
       <div class="menuRoot">
         <button id="fileMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">File</button>
