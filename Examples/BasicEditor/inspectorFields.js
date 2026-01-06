@@ -760,6 +760,7 @@ export function addColorVec3With(container, label, obj, key, onChanged) {
 
 	const max = Math.max(Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0);
 	const use255 = max > 1.001;
+	/** @param {any} n */
 	const to01 = (n) => {
 		const x = Number(n) || 0;
 		return use255 ? (x / 255) : x;
@@ -814,6 +815,7 @@ export function addColorVec4With(container, label, obj, key, onChanged) {
 
 	const max = Math.max(Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0, Number(arr[3]) || 0);
 	const use255 = max > 1.001;
+	/** @param {any} n */
 	const to01 = (n) => {
 		const x = Number(n) || 0;
 		return use255 ? (x / 255) : x;
@@ -832,6 +834,7 @@ export function addColorVec4With(container, label, obj, key, onChanged) {
 	alpha.value = String(use255 ? (Number(arr[3]) || 255) : Math.max(0, Math.min(1, Number(arr[3]) || 1)));
 	alpha.title = 'Alpha';
 
+	/** @param {boolean} immediate */
 	const applyAlpha = (immediate) => {
 		const raw = String(alpha.value ?? '').trim();
 		if (!raw) return;
