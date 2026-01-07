@@ -10,6 +10,11 @@ export default class ClickableArea {
      * @param {Object} renderer - The renderer instance.
      */
     constructor(renderer) {
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'input';
+
         this.renderer = renderer;
         this.parent = null;
         this.name = "ClickableArea";
@@ -20,6 +25,9 @@ export default class ClickableArea {
         this.y = 0;
         this.width = null;
         this.height = null;
+
+        // Radians. Currently not used for hit-testing.
+        this.rotation = 0;
         
         this.isHovered = false;
         this.isPressed = false;

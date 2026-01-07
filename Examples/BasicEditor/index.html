@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fluxion - Basic Editor</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="docking.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "gl-matrix": "../../node_modules/gl-matrix/esm/index.js"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div class="shell">
+    <div class="titlebar" role="banner" aria-label="Window Title Bar">
+      <div class="titlebarContent">
+        <div class="titlebarIcon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+        </div>
+        <div class="titlebarTitle">Fluxion Editor</div>
+        <div class="titlebarSpacer"></div>
+        <div class="windowControls">
+          <button class="windowBtn minimizeBtn" type="button" aria-label="Minimize" title="Minimize">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M 2 6 L 10 6" stroke="currentColor" stroke-width="1"></path></svg>
+          </button>
+          <button class="windowBtn maximizeBtn" type="button" aria-label="Maximize" title="Maximize">
+            <svg width="12" height="12" viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" stroke="currentColor" stroke-width="1" fill="none"></rect></svg>
+          </button>
+          <button class="windowBtn closeBtn" type="button" aria-label="Close" title="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M 2 2 L 10 10 M 10 2 L 2 10" stroke="currentColor" stroke-width="1"></path></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+    <header class="topbar" role="menubar" aria-label="Editor Menu">
+      <div class="menuRoot">
+        <button id="fileMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">File</button>
+        <div id="fileMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="file.createProject">Create Project...</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="file.openProject">Open Project...</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="file.openFolder">Open Folder...</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.settings">Editor Settings...</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="file.saveScene">Save Scene (Ctrl+S)</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="viewMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">View</button>
+        <div id="viewMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="view.mode2d">Mode: 2D</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="view.mode3d">Mode: 3D</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="sceneMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Scene</button>
+        <div id="sceneMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="scene.focusSelection">Focus Selection (F)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="scene.addNode">Add Node...</button>
+        </div>
+      </div>
+
+      <div class="menuRoot">
+        <button id="helpMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Help</button>
+        <div id="helpMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
+          <div class="menuSep" role="separator" aria-hidden="true"></div>
+          <button class="menuItem" type="button" role="menuitem" data-action="help.about">About</button>
+        </div>
+      </div>
+
+      <div class="topbarSpacer" aria-hidden="true"></div>
+
+      <div class="menuRoot">
+        <button id="debugMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Debug</button>
+        <div id="debugMenu" class="menu" role="menu">
+          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
+          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
+        </div>
+      </div>
+
+      <button id="topReloadBtn" class="menuBtn" type="button">Reload (Ctrl+R)</button>
+    </header>
+
+    <div class="app">
+      <aside class="panel dock-panel" id="leftPanel" data-dock-id="hierarchy" data-dock-side="left">
+      <div class="panelHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Hierarchy</div>
+        <div class="dock-header-buttons">
+          <button class="dock-btn" id="hierarchyMenuBtn" title="Window menu">⋯</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Mode</div>
+        <div class="segmented" role="tablist" aria-label="Editor Mode">
+          <button id="mode2dBtn" class="segBtn active" role="tab" aria-selected="true">2D</button>
+          <button id="mode3dBtn" class="segBtn" role="tab" aria-selected="false">3D</button>
+        </div>
+      </div>
+
+      <div class="section grow">
+        <div class="sectionTitle">Objects</div>
+        <div id="sceneTree" class="tree" role="list"></div>
+      </div>
+
+      <div class="section">
+        <div class="sectionTitle">Tips</div>
+        <div class="hint">
+          - Click an object to inspect/edit.<br />
+          - WASD/QE + mouse to fly (from the loaded scene’s game logic, if present).
+        </div>
+      </div>
+      </aside>
+
+      <main class="viewport">
+        <div class="mainTabs" role="tablist" aria-label="Main Tabs">
+          <button id="mainTabViewportBtn" class="mainTabBtn active" type="button" role="tab" aria-selected="true">Viewport</button>
+          <div id="mainTabsDynamic" class="mainTabsDynamic" aria-hidden="false"></div>
+        </div>
+
+        <div id="viewportView" class="viewportView" aria-label="Viewport View">
+        <canvas id="gameCanvas"></canvas>
+        <div class="viewportOverlay" id="overlay">
+          <div class="overlayLine"><span class="badge">F1</span> Toggle editor help</div>
+          <div class="overlayLine"><span class="badge">F</span> Focus selection</div>
+        </div>
+        <div class="viewportToolbar" id="viewportToolbar" aria-label="Viewport Toolbar">
+          <div class="toolbarGroup" role="tablist" aria-label="Mode">
+            <button id="vpMode2DBtn" class="vpSegBtn active" type="button" role="tab" aria-selected="true" title="2D Mode" aria-label="2D Mode">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="3" y1="15" x2="21" y2="15"></line>
+              </svg>
+            </button>
+            <button id="vpMode3DBtn" class="vpSegBtn" type="button" role="tab" aria-selected="false" title="3D Mode" aria-label="3D Mode">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="6" y="6" width="10" height="10" rx="1"></rect>
+                <rect x="9" y="3" width="10" height="10" rx="1"></rect>
+                <line x1="6" y1="6" x2="9" y2="3"></line>
+                <line x1="16" y1="6" x2="19" y2="3"></line>
+                <line x1="6" y1="16" x2="9" y2="13"></line>
+                <line x1="16" y1="16" x2="19" y2="13"></line>
+              </svg>
+            </button>
+          </div>
+          <div class="toolbarGroup" role="tablist" aria-label="Gizmo">
+            <button id="vpGizmoTranslateBtn" class="vpSegBtn active" type="button" role="tab" aria-selected="true" title="Translate (T)" aria-label="Translate">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4 L12 20"></path>
+                <path d="M4 12 L20 12"></path>
+                <path d="M12 4 L9 7"></path>
+                <path d="M12 4 L15 7"></path>
+                <path d="M12 20 L9 17"></path>
+                <path d="M12 20 L15 17"></path>
+                <path d="M4 12 L7 9"></path>
+                <path d="M4 12 L7 15"></path>
+                <path d="M20 12 L17 9"></path>
+                <path d="M20 12 L17 15"></path>
+              </svg>
+            </button>
+            <button id="vpGizmoRotateBtn" class="vpSegBtn" type="button" role="tab" aria-selected="false" title="Rotate (R)" aria-label="Rotate">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="7"></circle>
+                <path d="M12 5 L15 5"></path>
+                <path d="M15 5 L14 2"></path>
+              </svg>
+            </button>
+          </div>
+          <button id="vpFocusBtn" class="vpBtn" type="button" title="Focus selection (F)" aria-label="Focus Selection">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M12 2 L12 6"></path>
+              <path d="M12 18 L12 22"></path>
+              <path d="M2 12 L6 12"></path>
+              <path d="M18 12 L22 12"></path>
+            </svg>
+          </button>
+        </div>
+        </div>
+
+        <div id="scriptView" class="scriptView" aria-label="Script Editor" hidden>
+          <div class="scriptHeader">
+            <div id="scriptPath" class="scriptPath">No script opened</div>
+            <div class="scriptHeaderSpacer" aria-hidden="true"></div>
+            <button id="scriptSaveBtn" class="assetToolBtn" type="button">Save (Ctrl+S)</button>
+          </div>
+          <div id="scriptEditorWrap" class="scriptEditorWrap">
+            <pre id="scriptHighlight" class="scriptHighlight" aria-hidden="true"></pre>
+            <textarea id="scriptEditorText" class="scriptEditorText" spellcheck="false"></textarea>
+          </div>
+        </div>
+      </main>
+
+      <aside class="panel dock-panel" id="rightPanel" data-dock-id="inspector" data-dock-side="right">
+      <div class="panelHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Inspector</div>
+        <div class="dock-header-buttons">
+          <button class="dock-btn" id="inspectorMenuBtn" title="Window menu">⋯</button>
+        </div>
+      </div>
+
+      <div class="panelBody" id="rightPanelBody">
+        <div class="section">
+          <div class="settingsFilterRow">
+            <div class="settingsFilterLabel">Filter</div>
+            <input id="inspectorFilterInput" class="input" type="text" placeholder="Filter properties" />
+          </div>
+        </div>
+
+        <div class="section">
+          <div class="sectionTitle">Selection</div>
+          <div class="form" id="inspectorCommon"></div>
+        </div>
+
+        <div class="section">
+          <div class="sectionTitle">Transform</div>
+          <div class="form" id="inspectorTransform"></div>
+        </div>
+
+        <div class="section">
+          <div class="sectionTitle">Debug</div>
+          <label class="checkRow"><input type="checkbox" id="dbgShowAxes" checked /> Show axes</label>
+          <label class="checkRow"><input type="checkbox" id="dbgShowAabb" checked /> Show AABB (approx)</label>
+          <label class="checkRow"><input type="checkbox" id="dbgDepthTest" checked /> Depth-test debug</label>
+        </div>
+      </div>
+      </aside>
+    </div>
+
+    <footer class="assetBrowser dock-panel" id="bottomPanel" data-dock-id="project" data-dock-side="bottom" aria-label="Bottom Panel">
+      <div class="assetHeader dock-header" data-dock-header>
+        <div class="dock-header-title">Project</div>
+        <div class="assetTabs" role="tablist" aria-label="Bottom Panel Tabs" style="margin-left: auto;">
+          <button id="assetTabAssetsBtn" class="assetTabBtn active" type="button" role="tab" aria-selected="true">Assets</button>
+          <button id="assetTabConsoleBtn" class="assetTabBtn" type="button" role="tab" aria-selected="false">Console</button>
+        </div>
+
+        <div class="assetHeaderSpacer" aria-hidden="true"></div>
+
+        <div id="assetHeaderAssetsTools" class="assetHeaderTools">
+          <button id="assetUpBtn" class="assetToolBtn" type="button">Up</button>
+          <div id="assetPath" class="assetPath">.</div>
+        </div>
+
+        <div id="assetHeaderConsoleTools" class="assetHeaderTools" hidden></div>
+
+        <button class="dock-btn" id="projectMenuBtn" title="Window menu" style="margin-left: 10px;">⋯</button>
+      </div>
+
+      <div id="assetPanelAssets" class="assetBody" aria-label="Asset Browser">
+        <div id="assetFolders" class="assetFolders" aria-label="Asset Folders"></div>
+        <div id="assetGrid" class="assetGrid" aria-label="Asset Items"></div>
+      </div>
+
+      <div id="assetPanelConsole" class="consoleBody" aria-label="Console" hidden>
+        <div id="consoleOutput" class="consoleOutput" aria-label="Console Output"></div>
+      </div>
+    </footer>
+  </div>
+
+  <div id="projectSelectModal" class="modalBackdrop" hidden>
+    <div class="modal modalProject" role="dialog" aria-modal="true" aria-labelledby="projectSelectTitle">
+      <div class="modalHeader">
+        <div id="projectSelectTitle" class="modalTitle">Select Project</div>
+      </div>
+      <div class="modalBody">
+        <div class="aboutName">Fluxion</div>
+        <div class="aboutMeta">Select or create a project to continue.</div>
+
+        <div class="sectionTitle" style="margin-top: 14px;">Recent Projects</div>
+        <div id="projectSelectRecentList" class="recentProjects" aria-label="Recent Projects"></div>
+
+        <div class="row" style="margin-top: 14px;">
+          <button id="projectSelectCreateBtn" class="btn" type="button">Create Project...</button>
+          <button id="projectSelectOpenBtn" class="btn" type="button">Open Project...</button>
+          <button id="projectSelectOpenLegacyBtn" class="btn" type="button">Open Legacy Project...</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="aboutModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <div class="modalHeader">
+        <div id="aboutTitle" class="modalTitle">About</div>
+        <button id="aboutCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="aboutName">Fluxion - Basic Editor</div>
+        <div class="aboutMeta">Debug build</div>
+
+        <div class="sectionTitle" style="margin-top: 12px;">Versions</div>
+        <textarea id="aboutVersionsText" class="input" rows="7" readonly spellcheck="false" style="resize: vertical;"></textarea>
+        <div class="row" style="margin-top: 8px;">
+          <button id="aboutCopyBtn" class="btn" type="button">Copy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="renameAssetModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="renameAssetTitle">
+      <div class="modalHeader">
+        <div id="renameAssetTitle" class="modalTitle">Rename</div>
+        <button id="renameAssetCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="aboutMeta" id="renameAssetSubtitle">No selection</div>
+
+        <div class="sectionTitle" style="margin-top: 12px;">New name</div>
+        <input id="renameAssetInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+
+        <div class="row" style="margin-top: 12px;">
+          <button id="renameAssetOkBtn" class="btn" type="button">Rename</button>
+          <button id="renameAssetCancelBtn" class="btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="editorSettingsModal" class="modalBackdrop" hidden>
+    <div class="modal modalSettings" role="dialog" aria-modal="true" aria-labelledby="editorSettingsTitle">
+      <div class="modalHeader">
+        <div id="editorSettingsTitle" class="modalTitle">Editor Settings</div>
+        <button id="editorSettingsCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody modalBodySettings">
+        <div class="settingsTop">
+          <div class="settingsFilterRow" aria-label="Filter Settings">
+            <div class="settingsFilterLabel">Filter Settings</div>
+            <input id="editorSettingsFilterInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+          </div>
+        </div>
+
+        <div class="settingsMain">
+          <div id="editorSettingsNav" class="settingsNav" role="listbox" aria-label="Settings Categories">
+            <button id="editorSettingsCatGeneral" class="settingsNavItem active" type="button" data-cat="general" aria-selected="true">General</button>
+            <button id="editorSettingsCatGrid2D" class="settingsNavItem" type="button" data-cat="grid2d" aria-selected="false">2D Grid</button>
+            <button id="editorSettingsCatGrid3D" class="settingsNavItem" type="button" data-cat="grid3d" aria-selected="false">3D Grid</button>
+          </div>
+
+          <div class="settingsPanel" aria-label="Settings Panel">
+            <div id="editorSettingsSectionTitle" class="sectionTitle">General</div>
+            <div id="editorSettingsForm" class="form"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="animSpriteModal" class="modalBackdrop" hidden>
+    <div class="modal modalWide" role="dialog" aria-modal="true" aria-labelledby="animSpriteTitle">
+      <div class="modalHeader">
+        <div>
+          <div id="animSpriteTitle" class="modalTitle">Animated Sprite</div>
+          <div id="animSpriteSubtitle" class="aboutMeta">No selection</div>
+        </div>
+        <button id="animSpriteCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="animEditor">
+          <div class="animPane">
+            <div class="sectionTitle">Animations</div>
+            <div id="animSpriteAnimList" class="animList" role="list"></div>
+          </div>
+
+          <div class="animPane">
+            <div class="sectionTitle">Selected</div>
+            <div class="row" style="align-items:center;">
+              <input id="animSpriteNameInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Animation name" />
+              <button id="animSpriteApplyBtn" class="btn" type="button">Apply</button>
+            </div>
+
+            <div class="sectionTitle" style="margin-top: 12px;">Preview</div>
+            <div id="animSpritePreviewWrap" class="framePreviewWrap" aria-label="Current Frame Preview">
+              <div id="animSpriteFrameLabel" class="framePreviewLabel">No frame</div>
+              <div class="framePreviewBox">
+                <img id="animSpriteFramePreview" class="framePreviewImg" alt="Frame preview" />
+              </div>
+            </div>
+
+            <div class="sectionTitle" style="margin-top: 12px;">Frames</div>
+            <div id="animSpriteFramesStrip" class="framesStrip" aria-label="Frames"></div>
+            <div id="animSpriteError" class="animError" aria-live="polite"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="createProjectModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createProjectTitle">
+      <div class="modalHeader">
+        <div id="createProjectTitle" class="modalTitle">Create Project</div>
+        <button id="createProjectCancelBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="sectionTitle">Project Name</div>
+        <input id="createProjectNameInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+
+        <div class="sectionTitle" style="margin-top: 12px;">Template</div>
+        <select id="createProjectTemplateSelect" class="input" aria-label="Project Template">
+          <option value="empty" selected>Empty</option>
+        </select>
+
+        <div class="sectionTitle" style="margin-top: 12px;">Location</div>
+        <div class="row">
+          <input id="createProjectPathInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="Choose a folder..." />
+          <button id="createProjectBrowseBtn" class="btn" type="button">Browse...</button>
+        </div>
+      </div>
+      <div class="modalFooter">
+        <button id="createProjectOkBtn" class="btn" type="button">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addNodeModal" class="modalBackdrop" hidden>
+    <div class="modal modalNode" role="dialog" aria-modal="true" aria-labelledby="addNodeTitle">
+      <div class="modalHeader">
+        <div id="addNodeTitle" class="modalTitle">Create New Node</div>
+        <button id="addNodeCloseBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody" style="padding: 12px;">
+        <div class="nodeDialog" aria-label="Create Node Dialog">
+          <div class="nodeSearchRow">
+            <div class="nodeLabel">Search:</div>
+            <input id="addNodeSearchInput" class="input" type="text" autocomplete="off" spellcheck="false" />
+          </div>
+
+          <div class="nodeMain">
+            <div class="nodeSide" aria-label="Sidebar">
+              <div class="nodeSideSection">
+                <div class="nodeSideTitle">Favorites:</div>
+                <div id="addNodeFavorites" class="nodeSideList" role="list"></div>
+              </div>
+
+              <div class="nodeSideSection">
+                <div class="nodeSideTitle">Recent:</div>
+                <div id="addNodeRecent" class="nodeSideList" role="list"></div>
+              </div>
+            </div>
+
+            <div class="nodeMatchesPane" aria-label="Matches">
+              <div class="nodeMatchesTitle">Matches:</div>
+              <div id="addNodeMatches" class="nodeMatchesList" role="list"></div>
+            </div>
+          </div>
+
+          <div class="nodeDescTitle">Description:</div>
+          <div id="addNodeDescription" class="nodeDescription" aria-live="polite"></div>
+        </div>
+      </div>
+      <div class="modalFooter">
+        <button id="addNodeOkBtn" class="btn" type="button" disabled hidden>Add</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="game.js"></script>
+</body>
+</html>

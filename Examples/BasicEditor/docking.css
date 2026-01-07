@@ -1,0 +1,456 @@
+/* Docking System Styles */
+
+.dock-container {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.dock-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow 150ms ease;
+}
+
+.dock-panel.floating {
+  position: fixed;
+  z-index: 100;
+  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)) var(--panel);
+  will-change: transform, width, height;
+}
+
+.dock-panel.floating:hover {
+  box-shadow: 0 24px 52px rgba(0,0,0,0.55);
+}
+
+.dock-panel.dragging {
+  opacity: 0.9;
+  box-shadow: 0 28px 60px rgba(108,210,255,0.25);
+  border-color: rgba(108,210,255,0.32);
+  will-change: transform;
+}
+
+/* Panel headers with drag handles */
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.08)), var(--panel2);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.dock-header:active {
+  cursor: grabbing;
+}
+
+.dock-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dock-header-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.dock-btn {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 120ms ease, border-color 120ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-btn:hover {
+  background: rgba(108,210,255,0.10);
+  border-color: rgba(108,210,255,0.24);
+}
+
+.dock-btn:active {
+  background: rgba(108,210,255,0.14);
+}
+
+/* Tab bar for tabbed groups */
+.dock-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 8px 10px;
+  background: var(--panel2);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.dock-tab {
+  appearance: none;
+  padding: 7px 12px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.dock-tab:hover {
+  background: rgba(108,210,255,0.10);
+  border-color: rgba(108,210,255,0.24);
+}
+
+.dock-tab.active {
+  background: rgba(108,210,255,0.16);
+  border-color: rgba(108,210,255,0.32);
+  color: var(--text);
+}
+
+/* Resize handle */
+.dock-resize-handle {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  bottom: 0;
+  right: 0;
+  cursor: se-resize;
+  background: rgba(108,210,255,0.3);
+  z-index: 1000;
+  transition: background 120ms ease;
+  border-radius: 1px;
+}
+
+.dock-resize-handle:hover {
+  background: rgba(108,210,255,0.6);
+}
+
+.dock-resize-handle:active {
+  background: var(--accent);
+}
+
+/* Resize edges */
+.dock-edge-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: n-resize;
+}
+
+.dock-edge-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  cursor: s-resize;
+}
+
+.dock-edge-left {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: w-resize;
+}
+
+.dock-edge-right {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: e-resize;
+}
+
+/* Docking guides/snap targets */
+.dock-guide {
+  position: fixed;
+  pointer-events: none;
+  z-index: 99;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.dock-guide.visible {
+  opacity: 0.7;
+}
+
+.dock-guide.left {
+  left: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  border-right: 3px solid var(--accent);
+}
+
+.dock-guide.right {
+  right: 0;
+  top: 0;
+  width: 50%;
+  height: 100%;
+  border-left: 3px solid var(--accent);
+}
+
+.dock-guide.top {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  border-bottom: 3px solid var(--accent);
+}
+
+.dock-guide.bottom {
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  border-top: 3px solid var(--accent);
+}
+
+.dock-guide.center {
+  left: 25%;
+  top: 25%;
+  width: 50%;
+  height: 50%;
+  border: 3px solid var(--accent);
+  border-radius: 8px;
+}
+
+/* Dividers between docked panels */
+.dock-divider {
+  position: absolute;
+  background: rgba(108,210,255,0.1);
+  cursor: col-resize;
+  z-index: 50;
+  transition: background 150ms ease;
+}
+
+.dock-divider:hover {
+  background: rgba(108,210,255,0.3);
+}
+
+.dock-divider.horizontal {
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.dock-divider.vertical {
+  width: 100%;
+  height: 4px;
+  cursor: row-resize;
+}
+
+/* Floating window styles */
+.dock-floating-container {
+  position: fixed;
+  min-width: 300px;
+  min-height: 200px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)) var(--panel);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-floating-container.active {
+  border-color: rgba(108,210,255,0.24);
+  box-shadow: 0 18px 44px rgba(108,210,255,0.15);
+}
+
+/* Window menu for docking options */
+.dock-window-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: var(--panel3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 1001;
+  min-width: 160px;
+  box-shadow: var(--shadow-lg);
+}
+
+.dock-window-menu-item {
+  display: block;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.dock-window-menu-item:hover {
+  background: rgba(108,210,255,0.10);
+}
+
+.dock-window-menu-item:first-child {
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Context menu for window operations */
+.dock-context-menu {
+  position: fixed;
+  background: var(--panel3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  overflow: hidden;
+  z-index: 1001;
+  min-width: 180px;
+  box-shadow: var(--shadow-lg);
+}
+
+.dock-context-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 9px 12px;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.dock-context-item:hover {
+  background: rgba(108,210,255,0.10);
+}
+
+.dock-context-item:first-child {
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Splitter for resizing docked panels */
+.dock-splitter {
+  position: relative;
+  background: rgba(255,255,255,0.02);
+  cursor: col-resize;
+  transition: background 150ms ease;
+  width: 1px;
+}
+
+.dock-splitter:hover {
+  background: rgba(108,210,255,0.3);
+}
+
+.dock-splitter.active {
+  background: rgba(108,210,255,0.6);
+}
+
+.dock-splitter.horizontal {
+  width: 1px;
+  min-width: 1px;
+}
+
+.dock-splitter.vertical {
+  height: 1px;
+  min-height: 1px;
+}
+
+/* Compact mode for small screens */
+@media (max-width: 1024px) {
+  .dock-panel {
+    min-width: 200px !important;
+  }
+
+  .dock-tabs {
+    font-size: 11px;
+  }
+
+  .dock-tab {
+    padding: 6px 10px;
+  }
+
+  .dock-btn {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Focus indicator for keyboard navigation */
+.dock-panel:focus-within {
+  border-color: rgba(108,210,255,0.24);
+}
+/* Context menu for dock operations */
+.dock-context-menu {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  z-index: 10001;
+  min-width: 140px;
+  animation: dockMenuSlideIn 120ms ease;
+}
+
+@keyframes dockMenuSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.dock-context-menu .dock-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 100ms ease;
+}
+
+.dock-context-menu .dock-menu-item:hover {
+  background: rgba(108,210,255,0.12);
+  color: #9cd8ff;
+}
+
+.dock-context-menu .dock-menu-item:active {
+  background: rgba(108,210,255,0.24);
+  color: #6cd2ff;
+}

@@ -2,6 +2,7 @@ import Renderer from "./Renderer.js";
 import Camera from "./Camera.js";
 import Window from "./Window.js";
 import SplashScreen from "./SplashScreen.js";
+import Input from "./Input.js";
 
 /**
  * The main Engine class that manages the game loop, renderer, camera, and window.
@@ -15,10 +16,25 @@ export default class Engine {
      * @param {number} [targetHeight=1080] - The target height of the game resolution.
      * @param {boolean} [maintainAspectRatio=true] - Whether to maintain the aspect ratio.
      * @param {boolean} [enablePostProcessing=false] - Whether to enable post-processing.
+     * @param {{
+     *   renderer?: {
+     *     webglVersion?: 1|2|'webgl1'|'webgl2'|'auto',
+     *     allowFallback?: boolean,
+    *     contextAttributes?: WebGLContextAttributes,
+    *     renderTargets?: {
+    *       msaaSamples?: number
+    *     }
+    *     instancing2D?: boolean,
+    *     respectCssSize?: boolean
+     *   },
+     *   splashScreen?: any,
+     *   input?: any
+     * }=} options
      */
     constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
-        // Initialize Renderer with aspect ratio settings and post-processing
-        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing);
+        // Initialize Renderer with aspect ratio settings, post-processing, and WebGL version selection.
+        const rendererOptions = (options && typeof options === 'object') ? (options.renderer || {}) : {};
+        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing, rendererOptions);
         this.camera = new Camera();
         this.window = new Window();
         
@@ -60,13 +76,120 @@ export default class Engine {
                 this.showStats = !this.showStats;
                 console.log(`Performance stats ${this.showStats ? 'enabled' : 'disabled'}`);
             }
+            // Material debug visualization (3D PBR): cycle views with F10
+            if (e.key === 'F10') {
+                const r = this.renderer;
+                if (r && typeof r.setMaterialDebugView === 'function') {
+                    const modes = [
+                        { id: 0, name: 'OFF' },
+                        { id: 1, name: 'BaseColor' },
+                        { id: 2, name: 'Metallic' },
+                        { id: 3, name: 'Roughness' },
+                        { id: 4, name: 'Normal' },
+                        { id: 5, name: 'Ambient Occlusion' },
+                    ];
+                    const cur = (typeof r.getMaterialDebugView === 'function') ? (r.getMaterialDebugView() | 0) : (r.materialDebugView | 0);
+                    const idx = Math.max(0, modes.findIndex(m => m.id === cur));
+                    const next = modes[(idx + 1) % modes.length];
+                    r.setMaterialDebugView(next.id);
+                    console.log(`Material debug view: ${next.name}`);
+                } else {
+                    console.warn('Material debug view not available on this renderer.');
+                }
+            }
+            // Shadow filter toggle: F11 cycles PS2 (hard) -> PCF3 -> PCF5
+            if (e.key === 'F11') {
+                const r = this.renderer;
+                if (r && typeof r.setShadowFilter === 'function') {
+                    const cur = (r.shadowPcfKernel | 0) || 3;
+                    const next = (cur === 1) ? 3 : (cur === 3) ? 5 : 1;
+                    r.setShadowFilter(next);
+                    const name = (next === 1) ? 'PS2 (hard)' : (next === 5) ? 'PCF 5x5' : 'PCF 3x3';
+                    console.log(`Shadow filter: ${name}`);
+                }
+            }
+            // Indirect shadowing toggle: F12 switches whether shadows affect ambient+diffuse IBL too.
+            if (e.key === 'F12') {
+                const r = this.renderer;
+                if (r && typeof r.setShadowAffectsIndirect === 'function') {
+                    const next = !r.shadowAffectsIndirect;
+                    r.setShadowAffectsIndirect(next);
+                    console.log(`Shadows affect indirect diffuse: ${next ? 'ON' : 'OFF'}`);
+                }
+            }
+            // Shadow resolution toggle: Shift+F11 cycles 1024 <-> 2048
+            if (e.key === 'F11' && e.shiftKey) {
+                const r = this.renderer;
+                if (r && typeof r.setShadowMapResolution === 'function') {
+                    const cur = (r.shadowMapSize | 0) || 1024;
+                    const next = (cur >= 2048) ? 1024 : 2048;
+                    const ok = r.setShadowMapResolution(next);
+                    console.log(`Shadow map resolution: ${next} (${ok ? 'OK' : 'FAILED'})`);
+                }
+            }
         });
 
         // Boot sequence (async): load fonts/version, wait renderer ready, init game, wait assets, then start loop.
         this._startAsync(options).catch(error => {
             console.error("Engine initialization aborted due to critical error:", error);
         });
+
+        // Input auto-update (so getKeyDown/getMouseButtonDown work without manual ticking)
+        const inputCfg = options && typeof options === 'object' ? (options.input || {}) : {};
+        this._autoUpdateInput = inputCfg.autoUpdate !== false;
+        if (this._autoUpdateInput) {
+            // Ensure the singleton exists.
+            // Many examples do `new Input()` manually; this remains compatible.
+            new Input();
+        }
+
+        // Optional pointer lock (mouse lock) for FPS/free-fly cameras.
+        // Note: browsers require a user gesture (click) to enter pointer lock.
+        this._mouseLockEnabled = !!inputCfg.lockMouse;
+        this._pointerLocked = false;
+        if (this._mouseLockEnabled) {
+            try {
+                const canvas = this.renderer?.canvas;
+                if (canvas && typeof canvas.addEventListener === 'function') {
+                    canvas.addEventListener('click', () => {
+                        // Only request when not already locked.
+                        if (document.pointerLockElement !== canvas) {
+                            canvas.requestPointerLock?.();
+                        }
+                    });
+
+                    document.addEventListener('pointerlockchange', () => {
+                        this._pointerLocked = (document.pointerLockElement === canvas);
+                    });
+                }
+            } catch (e) {
+                console.warn('Pointer lock setup failed', e);
+            }
+        }
     } 
+
+    /** @returns {boolean} */
+    isMouseLocked() {
+        return !!this._pointerLocked;
+    }
+
+    /** Request pointer lock (must be called from a user gesture handler). */
+    lockMouse() {
+        try {
+            const canvas = this.renderer?.canvas;
+            if (canvas) canvas.requestPointerLock?.();
+        } catch {
+            // ignore
+        }
+    }
+
+    unlockMouse() {
+        try {
+            document.exitPointerLock?.();
+        } catch {
+            // ignore
+        }
+    }
 
     async _startAsync(options = {}) {
         await Promise.all([this.loadDefaultFont(), this.loadVersionInfo()]);
@@ -93,6 +216,40 @@ export default class Engine {
         }
 
         requestAnimationFrame(this.loop.bind(this));
+    }
+
+    /**
+     * Sets MSAA samples for the main offscreen render target.
+     *
+     * Notes:
+     * - Requires WebGL2.
+     * - Only applies when Engine was created with enablePostProcessing=true.
+     * - Use 0 to disable; 1-4 to enable.
+     *
+     * @param {number} samples
+     * @returns {boolean}
+     */
+    setMsaaSamples(samples) {
+        return !!this.renderer?.setMsaaSamples?.(samples);
+    }
+
+    /** @param {number} [samples=4] */
+    enableMsaa(samples = 4) {
+        return this.setMsaaSamples(samples);
+    }
+
+    disableMsaa() {
+        return this.setMsaaSamples(0);
+    }
+
+    /** @returns {number} */
+    getMsaaSamples() {
+        return (this.renderer?.getMsaaSamples?.() ?? 0) | 0;
+    }
+
+    /** @returns {number} */
+    getRequestedMsaaSamples() {
+        return (this.renderer?.getRequestedMsaaSamples?.() ?? 0) | 0;
     }
 
     /**
@@ -250,21 +407,31 @@ export default class Engine {
         const cappedDeltaTime = Math.min(deltaTime, 0.1);
 
         // Automatic scene audio management
-        if (this.game.currentScene && this.game.currentScene !== this.previousScene) {
+        const currentScene = this.game.currentScene;
+        if (currentScene && currentScene !== this.previousScene) {
             // Stop audio from previous scene
-            if (this.previousScene && this.previousScene.stopAudio) {
+            if (this.previousScene && typeof this.previousScene.stopAudio === 'function') {
                 this.previousScene.stopAudio();
             }
-            // Play audio for new scene
-            if (this.game.currentScene.playAutoplayAudio) {
-                this.game.currentScene.playAutoplayAudio();
+            // Optional: dispose previous scene resources (textures, etc.)
+            if (this.previousScene && this.previousScene.disposeOnSceneChange && typeof this.previousScene.dispose === 'function') {
+                this.previousScene.dispose();
             }
-            this.previousScene = this.game.currentScene;
+            // Play audio for new scene
+            if (typeof currentScene.playAutoplayAudio === 'function') {
+                currentScene.playAutoplayAudio();
+            }
+            this.previousScene = currentScene;
         }
         
         // Update the game logic
         if (this.game.update) {
             this.game.update(cappedDeltaTime);
+        }
+
+        // Tick input state once per frame (edge detection).
+        if (this._autoUpdateInput && Input.instance) {
+            Input.instance.update();
         }
         
         // FPS calculation
@@ -277,7 +444,13 @@ export default class Engine {
             
             if (this.showStats) {
                 const stats = this.renderer.getStats();
-                console.log(`FPS: ${this.fps} | Draw Calls: ${stats.drawCalls} | Textures: ${stats.texturesCached}`);
+                const inst = stats.instanced2DActive ? 'ON' : 'OFF';
+                const used = stats.instancedUsedLastFrame ? 'USED' : 'NOT_USED';
+                console.log(
+                    `FPS: ${this.fps} | Sprites: ${stats.spritesLastFrame} | Draw Calls: ${stats.drawCalls} ` +
+                    `| Instancing2D: ${inst} (${used}, instanced=${stats.instancedDrawCalls}, legacy=${stats.legacyDrawCalls}) ` +
+                    `| Textures: ${stats.texturesCached}`
+                );
             }
         }
         

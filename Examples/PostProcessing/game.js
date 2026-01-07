@@ -1,7 +1,9 @@
+// @ts-check
+
 import { Engine, Sprite, Input } from "../../Fluxion/index.js";
 
 const input = new Input();
-const LOGO = "../../Fluxion/Icon/Fluxion_icon.png";
+const LOGO = new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
 
 function setActiveEffectsText(text) {
     const el = document.getElementById("activeEffects");
@@ -56,7 +58,7 @@ const game = {
         }
 
         // Update previous input state AFTER we query getKeyDown.
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {
@@ -66,5 +68,13 @@ const game = {
 };
 
 window.addEventListener("load", () => {
-    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, true);
+    game.engine = new Engine("gameCanvas", game, 1920, 1080, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 });

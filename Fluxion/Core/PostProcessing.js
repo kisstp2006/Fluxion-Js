@@ -1,6 +1,7 @@
 export default class PostProcessing {
   constructor(gl) {
     this.gl = gl;
+    this.isWebGL2 = (typeof WebGL2RenderingContext !== 'undefined') && (gl instanceof WebGL2RenderingContext);
     this.effects = new Map();
     this.activeEffects = [];
     this.framebuffers = [];
@@ -32,7 +33,10 @@ export default class PostProcessing {
 
   async loadEffect(name, fragmentShaderPath, uniforms = {}, options = {}) {
     try {
-      const vertexSource = await this.loadShader('../../Fluxion/Shaders/PostProcessing/vertex.glsl');
+      const vertexPath = this.isWebGL2
+        ? '../../Fluxion/Shaders/PostProcessing/vertex_300es.glsl'
+        : '../../Fluxion/Shaders/PostProcessing/vertex.glsl';
+      const vertexSource = await this.loadShader(vertexPath);
       const fragmentSource = await this.loadShader(fragmentShaderPath);
       
       const program = this.createShaderProgram(vertexSource, fragmentSource);
@@ -78,18 +82,44 @@ export default class PostProcessing {
     }
   }
 
-  async init(width = 1, height = 1) {
+  /**
+   * @param {number} [width=1]
+   * @param {number} [height=1]
+   * @param {{ enableScreenSpaceShadows?: boolean }=} options
+   */
+  async init(width = 1, height = 1, options = {}) {
     // Load all available effects
+    const effect = (name) => this.isWebGL2
+      ? `../../Fluxion/Shaders/PostProcessing/${name}_300es.glsl`
+      : `../../Fluxion/Shaders/PostProcessing/${name}.glsl`;
+
+    const enableSSS = !!options?.enableScreenSpaceShadows;
+
     await Promise.all([
-      this.loadEffect('passthrough', '../../Fluxion/Shaders/PostProcessing/passthrough.glsl', {}, { priority: 0 }),
-      this.loadEffect('blur', '../../Fluxion/Shaders/PostProcessing/blur.glsl', {
+      this.loadEffect('passthrough', effect('passthrough'), {}, { priority: 0 }),
+      this.loadEffect('blur', effect('blur'), {
         resolution: { type: '2f', value: [width, height] }
       }, { priority: 10 }),
-      this.loadEffect('grayscale', '../../Fluxion/Shaders/PostProcessing/grayscale.glsl', {}, { priority: 20 }),
-      this.loadEffect('crt', '../../Fluxion/Shaders/PostProcessing/crt.glsl', {
+      // WebGL2-only: screen-space shadows (requires depth + normal buffers provided by Renderer)
+      ...(this.isWebGL2 && enableSSS ? [
+        this.loadEffect('ss_shadows', effect('screen_space_shadows'), {
+          depth: { type: 'tex2D', value: null, unit: 1 },
+          normals: { type: 'tex2D', value: null, unit: 2 },
+          proj: { type: 'mat4', value: new Float32Array(16) },
+          invProj: { type: 'mat4', value: new Float32Array(16) },
+          lightDir: { type: '3f', value: [0, 0, -1] },
+          strength: { type: '1f', value: 0.25 },
+          maxDistance: { type: '1f', value: 0.8 },
+          steps: { type: '1i', value: 16 },
+          thickness: { type: '1f', value: 0.002 },
+          edgeFade: { type: '1f', value: 0.06 },
+        }, { priority: 15 })
+      ] : []),
+      this.loadEffect('grayscale', effect('grayscale'), {}, { priority: 20 }),
+      this.loadEffect('crt', effect('crt'), {
         time: { type: '1f', value: 0 }
       }, { priority: 90 }),
-      this.loadEffect('contrast', '../../Fluxion/Shaders/PostProcessing/contrast.glsl', {
+      this.loadEffect('contrast', effect('contrast'), {
         intensity: { type: '1f', value: 1.5 }
       }, { priority: 100 })
     ]);
@@ -146,17 +176,22 @@ export default class PostProcessing {
       const texture = this.gl.createTexture();
 
       this.gl.bindTexture(this.gl.TEXTURE_2D, texture);
-      this.gl.texImage2D(
-        this.gl.TEXTURE_2D,
-        0,
-        this.gl.RGBA,
-        this.width,
-        this.height,
-        0,
-        this.gl.RGBA,
-        this.gl.UNSIGNED_BYTE,
-        null
-      );
+
+      if (this.isWebGL2 && typeof this.gl.texStorage2D === 'function') {
+        this.gl.texStorage2D(this.gl.TEXTURE_2D, 1, this.gl.RGBA8, this.width, this.height);
+      } else {
+        this.gl.texImage2D(
+          this.gl.TEXTURE_2D,
+          0,
+          this.gl.RGBA,
+          this.width,
+          this.height,
+          0,
+          this.gl.RGBA,
+          this.gl.UNSIGNED_BYTE,
+          null
+        );
+      }
 
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MIN_FILTER, this.gl.LINEAR);
       this.gl.texParameteri(this.gl.TEXTURE_2D, this.gl.TEXTURE_MAG_FILTER, this.gl.LINEAR);
@@ -341,6 +376,20 @@ export default class PostProcessing {
             this.gl.uniform1f(location, uniform.value);
           } else if (uniform.type === '2f') {
             this.gl.uniform2f(location, uniform.value[0], uniform.value[1]);
+          } else if (uniform.type === '3f') {
+            this.gl.uniform3f(location, uniform.value[0], uniform.value[1], uniform.value[2]);
+          } else if (uniform.type === '1i') {
+            this.gl.uniform1i(location, uniform.value | 0);
+          } else if (uniform.type === 'mat4') {
+            this.gl.uniformMatrix4fv(location, false, uniform.value);
+          } else if (uniform.type === 'tex2D') {
+            const unit = (uniform.unit !== undefined) ? (uniform.unit | 0)
+              : (uniform.value && uniform.value.unit !== undefined) ? (uniform.value.unit | 0)
+                : 1;
+            const tex = (uniform.value && uniform.value.texture) ? uniform.value.texture : uniform.value;
+            this.gl.activeTexture(this.gl.TEXTURE0 + unit);
+            this.gl.bindTexture(this.gl.TEXTURE_2D, tex);
+            this.gl.uniform1i(location, unit);
           }
         }
       }

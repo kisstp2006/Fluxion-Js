@@ -15,11 +15,18 @@ export default class Sprite {
      * @param {boolean} [useSpriteSheet=true] - Whether to treat the image as a sprite sheet.
      */
     constructor(renderer, imageSrc, x=1, y=1, width=1, height=1, frameWidth = 0, frameHeight = 0, useSpriteSheet = true) {
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'visual';
+
         this.renderer = renderer;
         this.x = x;
         this.y = y;
         this.width = width;
         this.height = height;
+        // Radians, rotates around the sprite's center.
+        this.rotation = 0;
         this.frameWidth = frameWidth;
         this.frameHeight = frameHeight;
         this.useSpriteSheet = useSpriteSheet;
@@ -41,6 +48,9 @@ export default class Sprite {
         this.active = true;
         this.layer = 0;
         this.children = [];
+
+        this._disposed = false;
+        this.textureKey = null;
         
         // Camera following properties
         this.followCamera = false;
@@ -164,17 +174,24 @@ export default class Sprite {
         if (typeof imageSrc === 'string' && imageSrc.trim() === '') return;
 
         if (this.useSpriteSheet) {
+            this.textureKey = typeof imageSrc === 'string' ? imageSrc : null;
+
             // Fast path: if already cached, avoid a network fetch.
             if (this.renderer?.hasCachedTexture?.(imageSrc)) {
-                this.texture = this.renderer.getCachedTexture(imageSrc);
+                // Refcount-aware acquire.
+                this.texture = this.renderer.acquireTexture?.(imageSrc) || this.renderer.getCachedTexture(imageSrc);
                 return;
             }
 
             const img = new Image();
             const loadPromise = new Promise((resolve) => {
                 img.onload = () => {
+                    if (this._disposed) {
+                        resolve(false);
+                        return;
+                    }
                     // Use texture cache with image source as key
-                    this.texture = this.renderer.createTexture(img, imageSrc);
+                    this.texture = this.renderer.createAndAcquireTexture?.(img, imageSrc) || this.renderer.createTexture(img, imageSrc);
                     resolve(true);
                 };
                 img.onerror = () => resolve(false);
@@ -200,6 +217,29 @@ export default class Sprite {
         }
     }
 
+    /**
+     * Releases GPU resources owned by this sprite.
+     * Safe to call multiple times.
+     */
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+
+        // Dispose children first.
+        if (this.children && this.children.length > 0) {
+            for (const child of this.children) {
+                if (child && typeof child.dispose === 'function') child.dispose();
+            }
+        }
+
+        if (this.textureKey && this.renderer?.releaseTexture) {
+            this.renderer.releaseTexture(this.textureKey);
+        }
+
+        this.texture = null;
+        this.images.length = 0;
+    }
+
     draw() {
         if (!this.active || !this.visible || !this.texture) return;
 
@@ -212,17 +252,36 @@ export default class Sprite {
                     this.currentFrame = (this.currentFrame + 1) % this.animation.frames.length;
                 }
                 const frame = this.animation.frames[this.currentFrame];
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height, this.color);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, frame.x, frame.y, frame.width, frame.height, this.color, this.rotation);
             } else {
-                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color);
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, 0, 0, this.frameWidth, this.frameHeight, this.color, this.rotation);
             }
         } else if (!this.useSpriteSheet) {
+            // Handle multi-image animations (AnimatedSprite with image array)
             if (this.images.length > 0 && this.isAnimating && currentTime - this.lastFrameTime > this.animationSpeed) {
                 this.lastFrameTime = currentTime;
                 this.currentFrame = (this.currentFrame + 1) % this.images.length;
             }
-            this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color);
-
+            
+            // If we have images array, use current frame image
+            if (this.images.length > 0) {
+                const currentImage = this.images[this.currentFrame];
+                if (currentImage && this.renderer) {
+                    // Create texture on-the-fly if needed, or use cached one
+                    let frameTexture = this.texture;
+                    if (!frameTexture && currentImage.complete) {
+                        // Image is loaded, create texture
+                        frameTexture = this.renderer.createTexture(currentImage);
+                        this.texture = frameTexture; // Cache for this frame
+                    }
+                    if (frameTexture) {
+                        this.renderer.drawQuad(frameTexture, this.x, this.y, this.width, this.height, this.color, this.rotation);
+                    }
+                }
+            } else if (this.texture) {
+                // Direct texture (used by Text class and other non-sprite-sheet sprites)
+                this.renderer.drawQuad(this.texture, this.x, this.y, this.width, this.height, this.color, this.rotation);
+            }
         }
 
         // Draw children - only sort if needed

@@ -9,6 +9,11 @@ class Audio {
    * Creates an instance of Audio.
    */
   constructor() {
+      /** @type {'2D'|'3D'} */
+      this.type = '2D';
+      /** @type {string} */
+      this.category = 'audio';
+
       if (!Audio.audioContext) {
           Audio.audioContext = new (window.AudioContext || window.webkitAudioContext)();
       }
@@ -95,11 +100,18 @@ class Audio {
    * Pause the audio
    */
   pause() {
-      if (!this.isPlaying) return;
+      if (!this.isPlaying || !this.sourceNode) return;
 
-      this.sourceNode.stop();
-      this.pauseTime = Audio.audioContext.currentTime - this.startTime;
-      this.isPlaying = false;
+      try {
+          this.sourceNode.stop();
+          this.pauseTime = Audio.audioContext.currentTime - this.startTime;
+          this.isPlaying = false;
+      } catch (error) {
+          // Source node may already be stopped or invalid
+          console.warn('Audio pause error (node may already be stopped):', error);
+          this.isPlaying = false;
+          this.pauseTime = 0;
+      }
   }
 
   /**
@@ -109,8 +121,14 @@ class Audio {
       if (!this.isPlaying && this.pauseTime === 0) return;
 
       if (this.sourceNode) {
-          this.sourceNode.stop();
-          this.sourceNode.disconnect();
+          try {
+              this.sourceNode.stop();
+              this.sourceNode.disconnect();
+          } catch (error) {
+              // Source node may already be stopped or invalid
+              console.warn('Audio stop error (node may already be stopped):', error);
+          }
+          this.sourceNode = null;
       }
 
       this.isPlaying = false;

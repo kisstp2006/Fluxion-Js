@@ -1,13 +1,18 @@
+// @ts-check
+
 import { Engine, SceneLoader, Input } from "../../Fluxion/index.js";
+
+const SCENE_URL = new URL('./scene.xaml', import.meta.url).toString();
 
 const input = new Input(); // Initialize input system
 
 const game = {
     currentScene: null,
+    _camera: null,
 
     async init(renderer) {
         // Load the scene from XAML
-        this.currentScene = await SceneLoader.load("scene.xaml", renderer);
+        this.currentScene = await SceneLoader.load(SCENE_URL, renderer);
         console.log("Scene loaded:", this.currentScene);
 
         // Setup interaction
@@ -41,6 +46,8 @@ const game = {
                 sprite.height /= 0.9;
             };
         }
+
+        this._camera = this.currentScene.getObjectByName("MainCamera");
     },
 
     update(dt) {
@@ -48,7 +55,7 @@ const game = {
             this.currentScene.update(dt);
             
             // Test Camera Movement
-            const cam = this.currentScene.getObjectByName("MainCamera");
+            const cam = this._camera;
             if (cam) {
                 // Move camera with arrow keys
                 const speed = 200 * dt;
@@ -58,7 +65,7 @@ const game = {
                 if (input.getKey("ArrowUp")) cam.y -= speed;
             }
         }
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {
@@ -69,5 +76,13 @@ const game = {
 };
 
 window.addEventListener("load", () => {
-    new Engine("gameCanvas", game, 1280, 720, true);
+    new Engine("gameCanvas", game, 1280, 720, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 });

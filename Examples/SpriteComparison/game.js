@@ -1,3 +1,5 @@
+// @ts-check
+
 import { Engine, Sprite, AnimatedSprite } from "../../Fluxion/index.js";
 
 // Helper to generate a simple spritesheet data URL
@@ -6,6 +8,7 @@ function createSpritesheet() {
     canvas.width = 128;
     canvas.height = 64;
     const ctx = canvas.getContext('2d');
+    if (!ctx) return canvas.toDataURL();
 
     // Frame 0: Red Circle
     ctx.fillStyle = '#444';
@@ -78,6 +81,14 @@ const game = {
 };
 
 window.addEventListener("load", () => {
-    // Start engine with post-processing disabled for this simple demo
-    new Engine("gameCanvas", game, 1280, 720, true, false);
+    // Start engine (post-processing enabled here so MSAA can be demonstrated)
+    new Engine("gameCanvas", game, 1280, 720, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 });

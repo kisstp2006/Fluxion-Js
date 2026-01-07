@@ -146,5 +146,13 @@ window.onload = () => {
     // Resume audio on first interaction
     window.addEventListener("click", resumeAudioContext, { once: true });
     
-    new Engine("gameCanvas", game, 1920, 1080, true);
+    new Engine("gameCanvas", game, 1920, 1080, true, true, {
+        renderer: {
+            webglVersion: 2,
+            allowFallback: true,
+            renderTargets: {
+                msaaSamples: 4,
+            },
+        },
+    });
 };

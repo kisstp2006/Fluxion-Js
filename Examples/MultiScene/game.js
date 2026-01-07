@@ -7,14 +7,25 @@ const game = {
     menuScene: null,
     gameScene: null,
     renderer: null,
+    _loadingGameScene: false,
+    _loadingMenuScene: false,
+    menuSceneUrl: "./menu.xml",
+    gameSceneUrl: "./game.xml",
 
     async init(renderer) {
         this.renderer = renderer;
+
+        // Set a practical cache budget so huge projects don't grow forever.
+        // Eviction only removes textures that are not referenced (refCount==0).
+        renderer.setTextureCacheLimits({
+            maxBytes: 256 * 1024 * 1024,
+            maxTextures: 4096
+        });
         
         console.log("Loading scenes...");
-        // Load both scenes
-        this.menuScene = await SceneLoader.load("./menu.xml", renderer);
-        this.gameScene = await SceneLoader.load("./game.xml", renderer);
+        // Load Menu scene up-front; both scenes are disposable and will be reloaded on demand.
+        this.menuScene = await SceneLoader.load(this.menuSceneUrl, renderer);
+        this.menuScene.disposeOnSceneChange = true;
         
         // Start with Menu
         this.switchScene(this.menuScene);
@@ -23,6 +34,53 @@ const game = {
         console.log("Controls:");
         console.log("  Menu: Click the Icon or Press ENTER to Start Game");
         console.log("  Game: WASD to move, ESC to return to Menu");
+    },
+
+    async ensureMenuSceneLoaded() {
+        if (this.menuScene) return true;
+        if (this._loadingMenuScene) return false;
+        this._loadingMenuScene = true;
+        try {
+            this.menuScene = await SceneLoader.load(this.menuSceneUrl, this.renderer);
+            this.menuScene.disposeOnSceneChange = true;
+            return true;
+        } finally {
+            this._loadingMenuScene = false;
+        }
+    },
+
+    async ensureGameSceneLoaded() {
+        if (this.gameScene) return true;
+        if (this._loadingGameScene) return false;
+        this._loadingGameScene = true;
+        try {
+            this.gameScene = await SceneLoader.load(this.gameSceneUrl, this.renderer);
+            // Dispose game resources when switching away from it.
+            this.gameScene.disposeOnSceneChange = true;
+            return true;
+        } finally {
+            this._loadingGameScene = false;
+        }
+    },
+
+    async startGame() {
+        const ready = await this.ensureGameSceneLoaded();
+        if (ready && this.gameScene) {
+            this.switchScene(this.gameScene);
+
+            // We just left the menu; it is disposable. Clear reference so it will reload next time.
+            this.menuScene = null;
+        }
+    },
+
+    async startMenu() {
+        const ready = await this.ensureMenuSceneLoaded();
+        if (ready && this.menuScene) {
+            this.switchScene(this.menuScene);
+
+            // We just left the game; it is disposable. Clear reference so it will reload next time.
+            this.gameScene = null;
+        }
     },
 
     switchScene(scene) {
@@ -55,7 +113,7 @@ const game = {
                     btnSprite.setColor(255, 255, 255); // Reset
                 };
                 btnHitbox.onClick = () => {
-                    this.switchScene(this.gameScene);
+                    this.startGame();
                     document.body.style.cursor = "default";
                 };
             }
@@ -68,10 +126,10 @@ const game = {
         if (!this.currentScene) return;
 
         // Scene switching logic
-        if (this.currentScene === this.menuScene) {
+        if (this.currentScene.name === "MenuScene") {
             // In Menu: Press Enter to start
             if (input.getKeyDown("Enter")) {
-                this.switchScene(this.gameScene);
+                this.startGame();
             }
             
             // Visual effect: Rotate the start button
@@ -79,10 +137,10 @@ const game = {
             if (btn) {
                 btn.rotation += 1 * deltaTime;
             }
-        } else if (this.currentScene === this.gameScene) {
+        } else if (this.currentScene.name === "GameScene") {
             // In Game: Press Escape to go back to menu
             if (input.getKeyDown("Escape")) {
-                this.switchScene(this.menuScene);
+                this.startMenu();
             }
             
             // Game logic: Move player
@@ -106,7 +164,7 @@ const game = {
         this.currentScene.update(deltaTime);
 
         // Update input state for next frame (required for getKeyDown/Up)
-        input.update();
+        // Input is updated by Engine each frame.
     },
 
     draw(renderer) {
@@ -117,4 +175,12 @@ const game = {
 };
 
 // Start the engine
-new Engine("gameCanvas", game);
+new Engine("gameCanvas", game, 1920, 1080, true, true, {
+    renderer: {
+        webglVersion: 2,
+        allowFallback: true,
+        renderTargets: {
+            msaaSamples: 4,
+        },
+    }
+});

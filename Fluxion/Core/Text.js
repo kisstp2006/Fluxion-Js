@@ -17,6 +17,12 @@ export default class Text extends Sprite {
      */
     constructor(renderer, text = "Text", x = 0, y = 0, fontSize = 16, fontFamily = "Inter", color = "white") {
         super(renderer, null, x, y, 1, 1, 0, 0, false);
+
+        // Metadata
+        /** @type {'2D'|'3D'} */
+        this.type = '2D';
+        /** @type {string} */
+        this.category = 'text';
         
         this.textContent = text; // Rename to avoid conflict if any
         this._fontSize = fontSize;
@@ -24,12 +30,27 @@ export default class Text extends Sprite {
         this._textColor = color;
         this.padding = 5;
         // In the engine's Godot-like coordinate system, 1 world unit = 1 pixel.
-        this.pixelsPerUnit = 1;
+        // This acts as a supersampling factor for the text texture.
+        this._pixelsPerUnit = 1;
         
         this.canvas = document.createElement('canvas');
         this.ctx = this.canvas.getContext('2d');
         
         this.updateTexture();
+    }
+
+    /**
+     * Pixels per world unit for the text texture.
+     * Higher values render sharper text when the camera zooms in.
+     */
+    get pixelsPerUnit() { return this._pixelsPerUnit; }
+    set pixelsPerUnit(v) {
+        const n = Number(v);
+        const next = Number.isFinite(n) ? Math.max(1, Math.min(8, n)) : 1;
+        if (next !== this._pixelsPerUnit) {
+            this._pixelsPerUnit = next;
+            this.updateTexture();
+        }
     }
 
     /**
@@ -89,17 +110,21 @@ export default class Text extends Sprite {
      * Updates the internal canvas and WebGL texture with the current text settings.
      */
     updateTexture() {
+        const ppu = Number.isFinite(this._pixelsPerUnit) ? this._pixelsPerUnit : 1;
+        const scaledFontSize = Math.max(1, Math.round((Number(this._fontSize) || 0) * ppu));
+        const scaledPadding = Math.max(0, Math.round((Number(this.padding) || 0) * ppu));
+
         // Measure text
-        const fontStr = `${this._fontSize}px ${this._fontFamily}`;
+        const fontStr = `${scaledFontSize}px ${this._fontFamily}`;
         this.ctx.font = fontStr;
         const metrics = this.ctx.measureText(this.textContent);
         const textWidth = Math.ceil(metrics.width);
-        const textHeight = Math.ceil(this._fontSize * 1.2); // Approximate height
+        const textHeight = Math.ceil(scaledFontSize * 1.2); // Approximate height
 
         // Resize canvas
         // Note: Changing canvas dimensions clears it
-        const newWidth = textWidth + this.padding * 2;
-        const newHeight = textHeight + this.padding * 2;
+        const newWidth = textWidth + scaledPadding * 2;
+        const newHeight = textHeight + scaledPadding * 2;
         
         if (this.canvas.width !== newWidth || this.canvas.height !== newHeight) {
             this.canvas.width = newWidth;
@@ -112,16 +137,59 @@ export default class Text extends Sprite {
         this.ctx.font = fontStr;
         this.ctx.fillStyle = this._textColor;
         this.ctx.textBaseline = 'top';
-        this.ctx.fillText(this.textContent, this.padding, this.padding);
+        this.ctx.fillText(this.textContent, scaledPadding, scaledPadding);
 
         // Update WebGL texture - don't use cache for text (dynamic content)
+        // Ensure canvas has valid dimensions before creating texture
+        if (this.canvas.width <= 0 || this.canvas.height <= 0) {
+            // Canvas has no size, create a minimal texture
+            this.canvas.width = 1;
+            this.canvas.height = 1;
+        }
+        
         if (this.texture) {
-            this.renderer.gl.deleteTexture(this.texture);
+            const gl = this.renderer.gl;
+            // Save active texture unit to avoid corrupting 3D shader state
+            const prevActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.deleteTexture(this.texture);
+            gl.activeTexture(prevActiveTexture);
+            // Clean up dimension entry (WeakMap will auto-cleanup, but explicit is better)
+            if (this.renderer._textureDimensions) {
+                // WeakMap doesn't have delete, but the texture is deleted so entry will be GC'd
+            }
         }
         this.texture = this.renderer.createTexture(this.canvas);
         
         // Update world dimensions
-        this.width = this.canvas.width / this.pixelsPerUnit;
-        this.height = this.canvas.height / this.pixelsPerUnit;
+        this.width = this.canvas.width / ppu;
+        this.height = this.canvas.height / ppu;
+    }
+
+    /**
+     * Releases the underlying GPU texture.
+     */
+    dispose() {
+        if (this._disposed) return;
+        this._disposed = true;
+
+        // Dispose children if any.
+        if (this.children && this.children.length > 0) {
+            for (const child of this.children) {
+                if (child && typeof child.dispose === 'function') child.dispose();
+            }
+        }
+
+        if (this.texture && this.renderer?.gl) {
+            const gl = this.renderer.gl;
+            // Save active texture unit to avoid corrupting 3D shader state
+            const prevActiveTexture = gl.getParameter(gl.ACTIVE_TEXTURE);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.deleteTexture(this.texture);
+            gl.activeTexture(prevActiveTexture);
+        }
+        this.texture = null;
     }
 }

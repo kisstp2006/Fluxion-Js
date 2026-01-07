@@ -1,0 +1,125 @@
+{
+  "type": "gltf-metadata",
+  "version": 1,
+  "sourceUrl": "file:///C:/Users/tibig/Documents/game%20engines/Fluxion-Js/Model/HalfGlowingCube.gltf",
+  "timestamp": "2026-01-03T16:32:53.331Z",
+  "gltf": {
+    "asset": null,
+    "sceneCount": 1,
+    "nodeCount": 1,
+    "meshCount": 1,
+    "materialCount": 2,
+    "imageCount": 0,
+    "textureCount": 0,
+    "bufferCount": 0,
+    "bufferViewCount": 8,
+    "accessorCount": 8
+  },
+  "fluxion": {
+    "meshEntries": 2,
+    "materialEntries": 3,
+    "nodeEntries": 0,
+    "totalVertices": 24,
+    "totalIndices": 36,
+    "meshes": [
+      {
+        "key": "Cube_Primitive_0",
+        "vertexCount": 12,
+        "indexCount": 18,
+        "indexed": true
+      },
+      {
+        "key": "Cube_Primitive_1",
+        "vertexCount": 12,
+        "indexCount": 18,
+        "indexed": true
+      }
+    ],
+    "materials": [
+      {
+        "key": "__gltf_default__",
+        "baseColorFactor": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 1,
+        "emissiveFactor": [
+          0,
+          0,
+          0
+        ],
+        "alphaMode": "OPAQUE",
+        "alphaCutoff": 0.5,
+        "metallicRoughnessPacked": false,
+        "textures": {
+          "baseColor": false,
+          "normal": false,
+          "metallic": false,
+          "roughness": false,
+          "ao": false,
+          "emissive": false,
+          "alpha": false
+        }
+      },
+      {
+        "key": "Material",
+        "baseColorFactor": [
+          0.0029233701061457396,
+          0.8001260757446289,
+          0,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.5,
+        "emissiveFactor": [
+          0.30103862285614014,
+          1,
+          0.0038045633118599653
+        ],
+        "alphaMode": "OPAQUE",
+        "alphaCutoff": 0.5,
+        "metallicRoughnessPacked": false,
+        "textures": {
+          "baseColor": false,
+          "normal": false,
+          "metallic": false,
+          "roughness": false,
+          "ao": false,
+          "emissive": false,
+          "alpha": false
+        }
+      },
+      {
+        "key": "Material.001",
+        "baseColorFactor": [
+          0.800000011920929,
+          0.800000011920929,
+          0.800000011920929,
+          1
+        ],
+        "metallicFactor": 0,
+        "roughnessFactor": 0.5,
+        "emissiveFactor": [
+          0,
+          0,
+          0
+        ],
+        "alphaMode": "OPAQUE",
+        "alphaCutoff": 0.5,
+        "metallicRoughnessPacked": false,
+        "textures": {
+          "baseColor": false,
+          "normal": false,
+          "metallic": false,
+          "roughness": false,
+          "ao": false,
+          "emissive": false,
+          "alpha": false
+        }
+      }
+    ]
+  }
+}
