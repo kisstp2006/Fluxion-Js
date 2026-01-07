@@ -23,6 +23,7 @@ if (!gotTheLock) {
       icon: iconPath,
       width: 1280,
       height: 720,
+      frame: false, // Frameless window for custom title bar
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -41,7 +42,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/TextTest/index.html");
+    mainWindow.loadFile("./editor/index.html");
   });
 
   // Window Management IPC Handlers
