@@ -39,59 +39,7 @@
       </div>
     </div>
     <header class="topbar" role="menubar" aria-label="Editor Menu">
-      <div class="menuRoot">
-        <button id="fileMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">File</button>
-        <div id="fileMenu" class="menu" role="menu">
-          <button class="menuItem" type="button" role="menuitem" data-action="file.createProject">Create Project...</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="file.openProject">Open Project...</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="file.openFolder">Open Folder...</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="app.settings">Editor Settings...</button>
-          <div class="menuSep" role="separator" aria-hidden="true"></div>
-          <button class="menuItem" type="button" role="menuitem" data-action="file.saveScene">Save Scene (Ctrl+S)</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
-        </div>
-      </div>
-
-      <div class="menuRoot">
-        <button id="viewMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">View</button>
-        <div id="viewMenu" class="menu" role="menu">
-          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
-          <div class="menuSep" role="separator" aria-hidden="true"></div>
-          <button class="menuItem" type="button" role="menuitem" data-action="view.mode2d">Mode: 2D</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="view.mode3d">Mode: 3D</button>
-        </div>
-      </div>
-
-      <div class="menuRoot">
-        <button id="sceneMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Scene</button>
-        <div id="sceneMenu" class="menu" role="menu">
-          <button class="menuItem" type="button" role="menuitem" data-action="scene.focusSelection">Focus Selection (F)</button>
-          <div class="menuSep" role="separator" aria-hidden="true"></div>
-          <button class="menuItem" type="button" role="menuitem" data-action="scene.addNode">Add Node...</button>
-        </div>
-      </div>
-
-      <div class="menuRoot">
-        <button id="helpMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Help</button>
-        <div id="helpMenu" class="menu" role="menu">
-          <button class="menuItem" type="button" role="menuitem" data-action="view.toggleHelp">Toggle Help Overlay (F1)</button>
-          <div class="menuSep" role="separator" aria-hidden="true"></div>
-          <button class="menuItem" type="button" role="menuitem" data-action="help.about">About</button>
-        </div>
-      </div>
-
-      <div class="topbarSpacer" aria-hidden="true"></div>
-
-      <div class="menuRoot">
-        <button id="debugMenuBtn" class="menuBtn" type="button" aria-haspopup="menu" aria-expanded="false">Debug</button>
-        <div id="debugMenu" class="menu" role="menu">
-          <button class="menuItem" type="button" role="menuitem" data-action="file.reloadScene">Reload Scene</button>
-          <button class="menuItem" type="button" role="menuitem" data-action="app.reload">Reload App (Ctrl+R)</button>
-        </div>
-      </div>
-
-      <button id="topReloadBtn" class="menuBtn" type="button">Reload (Ctrl+R)</button>
+      <!-- Menu bar will be populated dynamically by menuBar.js -->
     </header>
 
     <div class="app">

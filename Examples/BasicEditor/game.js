@@ -5,6 +5,7 @@ import Scene from "../../Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
+import MenuBar from "./menuBar.js";
 import {
   wireProjectSelectionUI,
   openProjectSelect,
@@ -48,12 +49,6 @@ import * as InspectorFields from "./inspectorFields.js";
 /** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
 
 const ui = {
-  topReloadBtn: /** @type {HTMLButtonElement|null} */ (null),
-  fileMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
-  viewMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
-  sceneMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
-  helpMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
-  debugMenuBtn: /** @type {HTMLButtonElement|null} */ (null),
   aboutModal: /** @type {HTMLDivElement|null} */ (null),
   aboutCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   aboutVersionsText: /** @type {HTMLTextAreaElement|null} */ (null),
@@ -281,7 +276,15 @@ const game = {
 
   _helpVisible: true,
 
-  _closeTopbarMenus: /** @type {() => void} */ (() => {}),
+  /** @type {MenuBar|null} */
+  menuBar: null,
+
+  /**
+   * Close topbar menus (compatibility method for other modules)
+   */
+  _closeTopbarMenus() {
+    if (this.menuBar) this.menuBar.closeMenus();
+  },
 
   _aboutOpen: false,
 
@@ -409,12 +412,6 @@ const game = {
     this._setupEditorCameraInput(renderer);
 
     // Wire DOM
-    ui.topReloadBtn = /** @type {HTMLButtonElement} */ (document.getElementById("topReloadBtn"));
-    ui.fileMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("fileMenuBtn"));
-    ui.viewMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("viewMenuBtn"));
-    ui.sceneMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("sceneMenuBtn"));
-    ui.helpMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("helpMenuBtn"));
-    ui.debugMenuBtn = /** @type {HTMLButtonElement} */ (document.getElementById("debugMenuBtn"));
 
     // Wire window controls
     const minimizeBtn = document.querySelector('.minimizeBtn');
@@ -658,10 +655,6 @@ const game = {
     // Capture logs into the Console tab
     this._installEditorConsoleCapture();
 
-    ui.topReloadBtn?.addEventListener("click", () => {
-      window.location.reload();
-    });
-
     this._setupTopbarMenus(renderer);
 
     // About modal behavior (extracted to module)
@@ -693,7 +686,7 @@ const game = {
     // Create Project dialog
     this._createProjectDialog = createProjectDialog({
       ui: /** @type {any} */ (ui),
-      closeMenus: () => this._closeTopbarMenus(),
+      closeMenus: () => { if (this.menuBar) this.menuBar.closeMenus(); },
       getFluxionInstallPath: () => String(this._editorSettings?.general?.fluxionInstallPath || ''),
     });
     this._createProjectDialog.init();
@@ -831,7 +824,7 @@ const game = {
         else if (this._addNodeOpen) this._closeAddNode();
         else if (this._editorSettingsOpen) this._closeEditorSettings();
         else if (this._aboutOpen) this._closeAbout();
-        else this._closeTopbarMenus();
+        else if (this.menuBar) this.menuBar.closeMenus();
       }
 
       // Delete selected node (viewport/tree selection) with confirmation.
@@ -2498,105 +2491,128 @@ const game = {
   },
 
   /** @param {Renderer} renderer */
+  /**
+   * Setup the modular menu bar system
+   * @param {Renderer} renderer
+   */
   _setupTopbarMenus(renderer) {
-    const roots = Array.from(document.querySelectorAll('.topbar .menuRoot'));
-    /** @type {HTMLElement|null} */
-    let openRoot = null;
+    // Create menu bar instance
+    this.menuBar = new MenuBar();
 
-    const closeAll = () => {
-      for (const r of roots) r.classList.remove('open');
-      for (const btn of [ui.fileMenuBtn, ui.viewMenuBtn, ui.sceneMenuBtn, ui.helpMenuBtn, ui.debugMenuBtn]) {
-        if (btn) btn.setAttribute('aria-expanded', 'false');
-      }
-      openRoot = null;
-    };
+    // Register menus in order
+    this.menuBar.registerMenu('file', 'File', 1);
+    this.menuBar.registerMenu('view', 'View', 2);
+    this.menuBar.registerMenu('scene', 'Scene', 3);
+    this.menuBar.registerMenu('help', 'Help', 4);
+    this.menuBar.registerMenu('debug', 'Debug', 100);
 
-    /** @param {HTMLElement} root */
-    const open = (root) => {
-      if (!root) return;
-      closeAll();
-      root.classList.add('open');
-      const btn = root.querySelector('button.menuBtn');
-      if (btn) btn.setAttribute('aria-expanded', 'true');
-      openRoot = root;
-    };
+    // Register File menu items
+    this.menuBar.addMenuItems('file', [
+      { type: 'item', label: 'Create Project...', action: 'file.createProject' },
+      { type: 'item', label: 'Open Project...', action: 'file.openProject' },
+      { type: 'item', label: 'Open Folder...', action: 'file.openFolder' },
+      { type: 'item', label: 'Editor Settings...', action: 'app.settings' },
+      { type: 'separator' },
+      { type: 'item', label: 'Save Scene (Ctrl+S)', action: 'file.saveScene' },
+      { type: 'item', label: 'Reload Scene', action: 'file.reloadScene' },
+      { type: 'item', label: 'Reload App (Ctrl+R)', action: 'app.reload' },
+    ]);
 
-    /** @param {HTMLButtonElement | null} btn */
-    const toggleForBtn = (btn) => {
-      const root = /** @type {HTMLElement|null} */ (btn?.closest('.menuRoot'));
-      if (!root) return;
-      if (openRoot === root) closeAll();
-      else open(root);
-    };
+    // Register View menu items
+    this.menuBar.addMenuItems('view', [
+      { type: 'item', label: 'Toggle Help Overlay (F1)', action: 'view.toggleHelp' },
+      { type: 'separator' },
+      { type: 'item', label: 'Mode: 2D', action: 'view.mode2d' },
+      { type: 'item', label: 'Mode: 3D', action: 'view.mode3d' },
+    ]);
 
-    ui.fileMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.fileMenuBtn); });
-    ui.viewMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.viewMenuBtn); });
-    ui.sceneMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.sceneMenuBtn); });
-    ui.helpMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.helpMenuBtn); });
-    ui.debugMenuBtn?.addEventListener('click', (e) => { e.preventDefault(); toggleForBtn(ui.debugMenuBtn); });
+    // Register Scene menu items
+    this.menuBar.addMenuItems('scene', [
+      { type: 'item', label: 'Focus Selection (F)', action: 'scene.focusSelection' },
+      { type: 'separator' },
+      { type: 'item', label: 'Add Node...', action: 'scene.addNode' },
+    ]);
 
-    // Close on outside click
-    document.addEventListener('mousedown', (e) => {
-      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
-      if (!t) return;
-      if (t.closest('.topbar .menuRoot')) return;
-      closeAll();
+    // Register Help menu items
+    this.menuBar.addMenuItems('help', [
+      { type: 'item', label: 'Toggle Help Overlay (F1)', action: 'view.toggleHelp' },
+      { type: 'separator' },
+      { type: 'item', label: 'About', action: 'help.about' },
+    ]);
+
+    // Register Debug menu items
+    this.menuBar.addMenuItems('debug', [
+      { type: 'item', label: 'Reload Scene', action: 'file.reloadScene' },
+      { type: 'item', label: 'Reload App (Ctrl+R)', action: 'app.reload' },
+    ]);
+
+    // Register all action handlers
+    this.menuBar.registerAction('file.createProject', () => {
+      this._createProjectDialog?.createProjectFromEditor().catch(console.error);
     });
 
-    // Execute menu actions
-    document.addEventListener('click', (e) => {
-      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
-      const action = t?.getAttribute('data-action');
-      if (!action) return;
-
-      closeAll();
-
-      switch (action) {
-        case 'file.createProject':
-          this._createProjectDialog?.createProjectFromEditor().catch(console.error);
-          break;
-        case 'file.openProject':
-          this._openProjectFolderStrict().catch(console.error);
-          break;
-        case 'file.openFolder':
-          this._openWorkspaceFolder().catch(console.error);
-          break;
-        case 'file.reloadScene':
-          this.loadSelectedScene(renderer).catch(console.error);
-          break;
-        case 'file.saveScene':
-          this.saveCurrentScene().catch(console.error);
-          break;
-        case 'app.reload':
-          window.location.reload();
-          break;
-        case 'app.settings':
-          this._openEditorSettings();
-          break;
-        case 'view.toggleHelp':
-          this._helpVisible = !this._helpVisible;
-          if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
-          break;
-        case 'scene.focusSelection':
-          this.focusSelection();
-          break;
-        case 'scene.addNode':
-          this._openAddNode();
-          break;
-        case 'view.mode2d':
-          this.setMode('2d');
-          break;
-        case 'view.mode3d':
-          this.setMode('3d');
-          break;
-        case 'help.about':
-          this._openAbout();
-          break;
-      }
+    this.menuBar.registerAction('file.openProject', () => {
+      this._openProjectFolderStrict().catch(console.error);
     });
 
-    // Expose close helper for Escape key
-    this._closeTopbarMenus = closeAll;
+    this.menuBar.registerAction('file.openFolder', () => {
+      this._openWorkspaceFolder().catch(console.error);
+    });
+
+    this.menuBar.registerAction('file.reloadScene', () => {
+      this.loadSelectedScene(renderer).catch(console.error);
+    });
+
+    this.menuBar.registerAction('file.saveScene', () => {
+      this.saveCurrentScene().catch(console.error);
+    });
+
+    this.menuBar.registerAction('app.reload', () => {
+      window.location.reload();
+    });
+
+    this.menuBar.registerAction('app.settings', () => {
+      this._openEditorSettings();
+    });
+
+    this.menuBar.registerAction('view.toggleHelp', () => {
+      this._helpVisible = !this._helpVisible;
+      if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
+    });
+
+    this.menuBar.registerAction('scene.focusSelection', () => {
+      this.focusSelection();
+    });
+
+    this.menuBar.registerAction('scene.addNode', () => {
+      this._openAddNode();
+    });
+
+    this.menuBar.registerAction('view.mode2d', () => {
+      this.setMode('2d');
+    });
+
+    this.menuBar.registerAction('view.mode3d', () => {
+      this.setMode('3d');
+    });
+
+    this.menuBar.registerAction('help.about', () => {
+      this._openAbout();
+    });
+
+    // Mount to the topbar container
+    const topbar = /** @type {HTMLElement|null} */ (document.querySelector('.topbar'));
+    if (topbar) {
+      this.menuBar.mount(topbar, this);
+    }
+
+    // Add a reload button at the end
+    const reloadBtn = document.createElement('button');
+    reloadBtn.className = 'menuBtn';
+    reloadBtn.type = 'button';
+    reloadBtn.textContent = 'Reload (Ctrl+R)';
+    reloadBtn.addEventListener('click', () => window.location.reload());
+    topbar?.appendChild(reloadBtn);
   },
 
   /**
@@ -3675,7 +3691,7 @@ const game = {
 
     ui.animSpriteModal.hidden = false;
     this._populateAnimSpriteEditor();
-    this._closeTopbarMenus();
+    if (this.menuBar) this.menuBar.closeMenus();
     ui.animSpriteCloseBtn?.focus();
   },
 
@@ -5984,17 +6000,7 @@ const game = {
 
   /** @param {any} dbg @param {number} cx @param {number} cy @param {number} r @param {number[]} color @param {number} width */
   _drawCircle2D(dbg, cx, cy, r, color, width) {
-    const segs = 48;
-    let px = cx + r;
-    let py = cy;
-    for (let i = 1; i <= segs; i++) {
-      const t = (i / segs) * Math.PI * 2;
-      const nx = cx + Math.cos(t) * r;
-      const ny = cy + Math.sin(t) * r;
-      dbg.drawLine(px, py, nx, ny, color, width);
-      px = nx;
-      py = ny;
-    }
+    dbg.drawCircle(cx, cy, r, color, width, false, 48);
   },
 
   /** @param {any} dbg @param {{x:number,y:number,z:number}} c @param {number} r @param {'x'|'y'|'z'} axis @param {number[]} color @param {number} width @param {any} depth */

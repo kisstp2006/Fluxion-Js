@@ -116,6 +116,8 @@ body {
   background: #bf0f1d;
 }
 
+/* ===== TOPBAR & MENU SYSTEM ===== */
+
 .topbar {
   height: 38px;
   display: flex;
@@ -127,66 +129,163 @@ body {
   box-shadow: var(--shadow-sm);
   user-select: none;
   backdrop-filter: blur(6px);
+  -webkit-app-region: no-drag;
+  position: relative;
+  z-index: 100;
 }
 
 .topbarSpacer {
   flex: 1;
 }
 
+/* Menu button styling */
+.menuBtn {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.menuBtn:hover {
+  background: rgba(108,210,255,0.10);
+  border-color: rgba(108,210,255,0.24);
+}
+
+.menuBtn:active {
+  background: rgba(108,210,255,0.14);
+  transform: translateY(1px);
+}
+
+.menuBtn:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(108,210,255,0.3);
+}
+
+/* Menu root container */
 .menuRoot {
+  position: relative;
+  display: inline-block;
+}
+
+/* Active state for menu button when dropdown is open */
+.menuRoot.open > .menuBtn {
+  background: rgba(108,210,255,0.12);
+  border-color: rgba(108,210,255,0.35);
+  color: var(--text);
+}
+
+/* Dropdown menu */
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-width: 320px;
+  padding: 6px;
+  background: var(--panel3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  box-shadow: 
+    0 8px 24px rgba(0,0,0,0.4),
+    0 2px 6px rgba(0,0,0,0.2),
+    inset 0 1px 0 rgba(255,255,255,0.05);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 0ms 120ms;
+  z-index: 10004;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+/* Show menu when open */
+.menuRoot.open > .menu {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  transition: opacity 120ms ease, transform 120ms ease, visibility 0ms;
+  pointer-events: auto;
+}
+
+/* Menu item */
+.menuItem {
+  width: 100%;
+  display: block;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 12px;
+  margin: 2px 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+  white-space: nowrap;
   position: relative;
 }
 
-.menuRoot.open > .menuBtn {
-  background: rgba(108,210,255,0.10);
-  border-color: rgba(108,210,255,0.25);
+.menuItem:hover:not(:disabled) {
+  background: rgba(108,210,255,0.12);
+  border-color: rgba(108,210,255,0.2);
+  color: #fff;
 }
 
-.menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  min-width: 220px;
-  padding: 8px;
-  background: var(--panel3);
-  border: 1px solid rgba(255,255,255,0.04);
-  border-radius: var(--radius);
-  display: none;
-  z-index: 10001;
-  box-shadow: var(--shadow-lg);
+.menuItem:active:not(:disabled) {
+  background: rgba(108,210,255,0.16);
+  transform: scale(0.98);
 }
 
-.menuRoot.open > .menu {
-  display: block;
+.menuItem:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
+.menuItem:focus {
+  outline: none;
+  border-color: rgba(108,210,255,0.4);
+}
+
+/* Menu separator */
+.menuSep {
+  height: 1px;
+  background: linear-gradient(90deg, 
+    transparent, 
+    rgba(255,255,255,0.08) 20%, 
+    rgba(255,255,255,0.08) 80%, 
+    transparent
+  );
+  margin: 6px 8px;
+  border: none;
+}
+
+/* Context menu (right-click menus) */
 .contextMenu {
   position: fixed;
+  min-width: 200px;
+  padding: 6px;
+  background: var(--panel3);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  box-shadow: 
+    0 8px 24px rgba(0,0,0,0.4),
+    0 2px 6px rgba(0,0,0,0.2);
   display: none;
-  z-index: 120;
+  z-index: 10005;
+  backdrop-filter: blur(12px);
 }
 
 .contextMenu.open {
   display: block;
-}
-
-.menuItem {
-  width: 100%;
-  text-align: left;
-  border: 1px solid rgba(255,255,255,0.03);
-  background: rgba(255,255,255,0.01);
-  color: var(--text);
-  font-size: 13px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
-}
-
-.menuItem:hover {
-  background: rgba(108,210,255,0.08);
-  border-color: rgba(108,210,255,0.24);
-  transform: translateY(-1px);
 }
 
 /* Drag-and-drop visual feedback for asset fields */
@@ -226,12 +325,6 @@ body {
 }
 .texturePreview.error {
   border-color: rgba(255,80,80,0.55);
-}
-
-.menuSep {
-  height: 1px;
-  background: var(--border);
-  margin: 6px 6px;
 }
 
 .modalBackdrop {
@@ -744,28 +837,6 @@ body {
   margin-top: 6px;
   font-size: 12px;
   color: var(--muted);
-}
-
-.menuBtn {
-  appearance: none;
-  border: 1px solid rgba(255,255,255,0.06);
-  background: rgba(255,255,255,0.02);
-  color: var(--text);
-  font-size: 13px;
-  padding: 7px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
-}
-
-.menuBtn:hover {
-  background: rgba(108,210,255,0.10);
-  border-color: rgba(108,210,255,0.24);
-}
-
-.menuBtn:active {
-  background: rgba(108,210,255,0.14);
-  transform: translateY(1px);
 }
 
 .app {
