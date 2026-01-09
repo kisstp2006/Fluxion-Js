@@ -24,6 +24,7 @@
  *  editorSettingsCatGeneral: HTMLButtonElement|null,
  *  editorSettingsCatGrid2D: HTMLButtonElement|null,
  *  editorSettingsCatGrid3D: HTMLButtonElement|null,
+ *  editorSettingsCatStyle: HTMLButtonElement|null,
  *  overlay: HTMLDivElement|null,
  *  _closeTopbarMenus?: (() => void) | null,
  * }} EditorSettingsUI
@@ -32,17 +33,19 @@
 /**
  * @typedef {{
  *  _editorSettingsOpen: boolean,
- *  _editorSettingsCategory: 'general'|'grid2d'|'grid3d',
+ *  _editorSettingsCategory: 'general'|'grid2d'|'grid3d'|'style',
  *  _editorSettingsFilter: string,
  *  _editorSettings: {
  *    general: { showHelpOverlay: boolean, fluxionInstallPath?: string },
  *    grid2d: { enabled: boolean, baseMinor: number, majorMultiplier: number, minGridPx: number, maxGridLines: number, showAxes: boolean },
- *    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean }
+ *    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean },
+ *    style: { theme: string, accent: string, font: string, radius: number, contrastBoost: number }
  *  },
  *  _helpVisible: boolean,
  *  _addToggleWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void) => void,
  *  _addNumberWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void, opts?: any) => void,
  *  _addStringWith: (container: HTMLElement|null, label: string, obj: any, key: string, onChanged: () => void, opts?: any) => void,
+ *  _applyStyleSettings: () => void,
  *  _closeTopbarMenus: () => void,
  * }} EditorSettingsHost
  */
@@ -78,6 +81,13 @@ export function loadEditorSettingsFromStorage(/** @type {EditorSettingsHost} */ 
       if (Number.isFinite(Number(p.grid3d.halfSpan))) cur.grid3d.halfSpan = Number(p.grid3d.halfSpan);
       if (typeof p.grid3d.showAxes === 'boolean') cur.grid3d.showAxes = p.grid3d.showAxes;
     }
+    if (p.style && typeof p.style === 'object') {
+      if (typeof p.style.theme === 'string') cur.style.theme = p.style.theme;
+      if (typeof p.style.accent === 'string') cur.style.accent = p.style.accent;
+      if (typeof p.style.font === 'string') cur.style.font = p.style.font;
+      if (Number.isFinite(Number(p.style.radius))) cur.style.radius = Number(p.style.radius);
+      if (Number.isFinite(Number(p.style.contrastBoost))) cur.style.contrastBoost = Number(p.style.contrastBoost);
+    }
   } catch {
     // ignore
   }
@@ -108,11 +118,11 @@ export function applyEditorSettingsFilter(/** @type {EditorSettingsHost} */ host
   }
 }
 
-/** @param {'general'|'grid2d'|'grid3d'} cat */
+/** @param {'general'|'grid2d'|'grid3d'|'style'} cat */
 export function setEditorSettingsCategory(/** @type {EditorSettingsHost} */ host, /** @type {EditorSettingsUI} */ ui, cat) {
   host._editorSettingsCategory = cat;
 
-  const items = [ui.editorSettingsCatGeneral, ui.editorSettingsCatGrid2D, ui.editorSettingsCatGrid3D];
+  const items = [ui.editorSettingsCatGeneral, ui.editorSettingsCatGrid2D, ui.editorSettingsCatGrid3D, ui.editorSettingsCatStyle];
   for (const b of items) {
     if (!b) continue;
     const bCat = b.getAttribute('data-cat');
@@ -128,7 +138,7 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
   setEditorSettingsCategory(host, ui, host._editorSettingsCategory);
 
   const cat = host._editorSettingsCategory;
-  ui.editorSettingsSectionTitle.textContent = (cat === 'general') ? 'General' : (cat === 'grid2d' ? '2D Grid' : '3D Grid');
+  ui.editorSettingsSectionTitle.textContent = (cat === 'general') ? 'General' : (cat === 'grid2d' ? '2D Grid' : (cat === 'grid3d' ? '3D Grid' : 'Style'));
   ui.editorSettingsForm.innerHTML = '';
 
   if (cat === 'general') {
@@ -215,7 +225,7 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
     host._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => saveEditorSettingsToStorage(host), { step: 1, min: 1 });
     host._addNumberWith(ui.editorSettingsForm, 'Min grid pixels', obj, 'minGridPx', () => saveEditorSettingsToStorage(host), { step: 1, min: 1 });
     host._addNumberWith(ui.editorSettingsForm, 'Max grid lines', obj, 'maxGridLines', () => saveEditorSettingsToStorage(host), { step: 1, min: 10 });
-  } else {
+  } else if (cat === 'grid3d') {
     const obj = host._editorSettings.grid3d;
     host._addToggleWith(ui.editorSettingsForm, 'Enabled', obj, 'enabled', () => saveEditorSettingsToStorage(host));
     host._addToggleWith(ui.editorSettingsForm, 'Auto scale', obj, 'autoScale', () => saveEditorSettingsToStorage(host));
@@ -223,6 +233,73 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
     host._addNumberWith(ui.editorSettingsForm, 'Minor spacing', obj, 'minor', () => saveEditorSettingsToStorage(host), { step: 0.1, min: 0.0001 });
     host._addNumberWith(ui.editorSettingsForm, 'Major multiplier', obj, 'majorMultiplier', () => saveEditorSettingsToStorage(host), { step: 1, min: 1 });
     host._addNumberWith(ui.editorSettingsForm, 'Half span', obj, 'halfSpan', () => saveEditorSettingsToStorage(host), { step: 1, min: 1 });
+  } else {
+    const obj = host._editorSettings.style;
+    const apply = () => {
+      if (typeof host._applyStyleSettings === 'function') host._applyStyleSettings();
+      saveEditorSettingsToStorage(host);
+    };
+
+    // Theme dropdown
+    {
+      const field = document.createElement('div');
+      field.className = 'field';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = 'Theme';
+      const value = document.createElement('div');
+      value.className = 'value';
+      const select = document.createElement('select');
+      select.className = 'input';
+      
+      const options = [['auto', 'Auto'], ['dark', 'Dark'], ['light', 'Light']];
+      for (const [val, text] of options) {
+        const opt = document.createElement('option');
+        opt.value = val;
+        opt.textContent = text;
+        if (String(obj.theme || '').toLowerCase() === val) opt.selected = true;
+        select.appendChild(opt);
+      }
+      
+      select.addEventListener('change', () => {
+        obj.theme = String(select.value || '');
+        apply();
+      });
+      
+      field.appendChild(label);
+      field.appendChild(value);
+      value.appendChild(select);
+      ui.editorSettingsForm.appendChild(field);
+    }
+
+    // Accent color picker
+    {
+      const field = document.createElement('div');
+      field.className = 'field';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = 'Accent color';
+      const value = document.createElement('div');
+      value.className = 'value';
+      const input = document.createElement('input');
+      input.type = 'color';
+      input.className = 'input';
+      input.value = String(obj.accent || '#6cd2ff');
+      
+      input.addEventListener('input', () => {
+        obj.accent = String(input.value || '');
+        apply();
+      });
+      
+      field.appendChild(label);
+      field.appendChild(value);
+      value.appendChild(input);
+      ui.editorSettingsForm.appendChild(field);
+    }
+
+    host._addStringWith(ui.editorSettingsForm, 'Font family', obj, 'font', apply, { placeholder: 'Inter, "Segoe UI", sans-serif' });
+    host._addNumberWith(ui.editorSettingsForm, 'Corner radius', obj, 'radius', apply, { step: 1, min: 0 });
+    host._addNumberWith(ui.editorSettingsForm, 'Contrast boost', obj, 'contrastBoost', apply, { step: 0.05, min: 0, max: 1 });
   }
 
   if (ui.editorSettingsFilterInput) {
@@ -259,7 +336,7 @@ export function wireEditorSettingsUI(/** @type {EditorSettingsHost} */ host, /**
     const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
     const btn = /** @type {HTMLButtonElement|null} */ (t?.closest('button[data-cat]') || null);
     const cat = /** @type {any} */ (btn?.getAttribute('data-cat'));
-    if (cat !== 'general' && cat !== 'grid2d' && cat !== 'grid3d') return;
+    if (cat !== 'general' && cat !== 'grid2d' && cat !== 'grid3d' && cat !== 'style') return;
     host._editorSettingsCategory = cat;
     rebuildEditorSettingsUI(host, ui);
   });

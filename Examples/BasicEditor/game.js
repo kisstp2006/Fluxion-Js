@@ -6,6 +6,7 @@ import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
 import MenuBar from "./menuBar.js";
+import { Logger } from "./log.js";
 import {
   wireProjectSelectionUI,
   openProjectSelect,
@@ -62,6 +63,7 @@ const ui = {
   editorSettingsCatGeneral: /** @type {HTMLButtonElement|null} */ (null),
   editorSettingsCatGrid2D: /** @type {HTMLButtonElement|null} */ (null),
   editorSettingsCatGrid3D: /** @type {HTMLButtonElement|null} */ (null),
+  editorSettingsCatStyle: /** @type {HTMLButtonElement|null} */ (null),
   animSpriteModal: /** @type {HTMLDivElement|null} */ (null),
   animSpriteCloseBtn: /** @type {HTMLButtonElement|null} */ (null),
   animSpriteSubtitle: /** @type {HTMLDivElement|null} */ (null),
@@ -290,17 +292,19 @@ const game = {
 
   _editorSettingsOpen: false,
 
-  _editorSettingsCategory: /** @type {'general'|'grid2d'|'grid3d'} */ ('general'),
+  _editorSettingsCategory: /** @type {'general'|'grid2d'|'grid3d'|'style'} */ ('general'),
   _editorSettingsFilter: '',
 
   _editorSettings: /** @type {{
     general: { showHelpOverlay: boolean, fluxionInstallPath: string },
     grid2d: { enabled: boolean, baseMinor: number, majorMultiplier: number, minGridPx: number, maxGridLines: number, showAxes: boolean },
-    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean }
+    grid3d: { enabled: boolean, autoScale: boolean, minor: number, majorMultiplier: number, halfSpan: number, showAxes: boolean },
+    style: { theme: string, accent: string, font: string, radius: number, contrastBoost: number }
   }} */ ({
     general: { showHelpOverlay: true, fluxionInstallPath: '' },
     grid2d: { enabled: true, baseMinor: 32, majorMultiplier: 2, minGridPx: 10, maxGridLines: 240, showAxes: true },
     grid3d: { enabled: true, autoScale: true, minor: 1, majorMultiplier: 5, halfSpan: 50, showAxes: true },
+    style: { theme: 'dark', accent: '#6cd2ff', font: 'Manrope, "Segoe UI", sans-serif', radius: 10, contrastBoost: 0.08 },
   }),
 
   _projectSelectOpen: false,
@@ -328,6 +332,8 @@ const game = {
   _consoleCaptureInstalled: false,
   _consoleMaxLines: 500,
   _consoleAutoscroll: true,
+  /** @type {import('./log.js').Logger|null} */
+  _logger: null,
 
   _addNodeOpen: false,
   _addNodeSearch: '',
@@ -454,6 +460,7 @@ const game = {
     ui.editorSettingsCatGeneral = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGeneral'));
     ui.editorSettingsCatGrid2D = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGrid2D'));
     ui.editorSettingsCatGrid3D = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatGrid3D'));
+    ui.editorSettingsCatStyle = /** @type {HTMLButtonElement} */ (document.getElementById('editorSettingsCatStyle'));
 
     ui.animSpriteModal = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteModal'));
     ui.animSpriteCloseBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteCloseBtn'));
@@ -1393,6 +1400,7 @@ const game = {
 
     tools.innerHTML = '';
 
+    /** @param {string} id @param {string} label @param {string=} title */
     const makeBtn = (id, label, title) => {
       const b = document.createElement('button');
       b.type = 'button';
@@ -1442,35 +1450,53 @@ const game = {
     if (this._consoleCaptureInstalled) return;
     this._consoleCaptureInstalled = true;
 
-    /** @type {(level: 'log'|'info'|'warn'|'error'|string, args: any[]) => void} */
-    const append = (level, args) => {
-      try {
-        this._appendConsoleLine(String(level || 'log'), args);
-      } catch {}
-    };
-
     const original = {
       log: console.log,
       info: console.info,
       warn: console.warn,
       error: console.error,
+      debug: console.debug ? console.debug : console.log,
     };
 
-    console.log = (...args) => { original.log.apply(console, args); append('log', args); };
-    console.info = (...args) => { original.info.apply(console, args); append('info', args); };
-    console.warn = (...args) => { original.warn.apply(console, args); append('warn', args); };
-    console.error = (...args) => { original.error.apply(console, args); append('error', args); };
+    /** @param {import('./log.js').LogEvent} evt */
+    const handler = (evt) => {
+      const level = evt.level;
+      const args = evt.args || [];
+      const ts = evt.time ? evt.time.toISOString() : '';
+      const prefix = evt.name ? `[${evt.name}]` : '';
+      const payload = ts ? [ts, prefix, ...args] : [prefix, ...args];
+
+      /** @param {(this: Console, ...args: any[]) => void} fn */
+      const callOriginal = (fn) => {
+        try { fn.apply(console, payload); } catch {}
+      };
+
+      switch (level) {
+        case 'debug': callOriginal(original.debug); break;
+        case 'info': callOriginal(original.info); break;
+        case 'warn': callOriginal(original.warn); break;
+        case 'error': callOriginal(original.error); break;
+        default: callOriginal(original.log); break;
+      }
+
+      this._appendConsoleLine(level, args);
+    };
+
+    const logger = new Logger({ name: 'game', level: 'debug', handler });
+    this._logger = logger;
+
+    console.log = (...args) => logger.info(...args);
+    console.info = (...args) => logger.info(...args);
+    console.warn = (...args) => logger.warn(...args);
+    console.error = (...args) => logger.error(...args);
+    console.debug = (...args) => logger.debug(...args);
 
     window.addEventListener('error', (ev) => {
-      try {
-        append('error', [ev.message || 'Error', ev.filename ? `(${ev.filename}:${ev.lineno || 0})` : '']);
-      } catch {}
+      logger.error(ev.message || 'Error', ev.filename ? `(${ev.filename}:${ev.lineno || 0})` : '');
     });
 
     window.addEventListener('unhandledrejection', (ev) => {
-      try {
-        append('error', ['Unhandled Promise Rejection', ev.reason]);
-      } catch {}
+      logger.error('Unhandled Promise Rejection', ev.reason);
     });
   },
 
@@ -5553,6 +5579,7 @@ const game = {
 
   _loadEditorSettingsFromStorage() {
     loadEditorSettingsFromStorage(this);
+    this._applyStyleSettings();
   },
 
   _saveEditorSettingsToStorage() {
@@ -5563,7 +5590,93 @@ const game = {
     applyEditorSettingsFilter(this, ui);
   },
 
-  /** @param {'general'|'grid2d'|'grid3d'} cat */
+  _applyStyleSettings() {
+    const s = this._editorSettings?.style;
+    const root = document.documentElement;
+    if (!s || !root) return;
+
+    const clamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    const clampByte = (v) => Math.max(0, Math.min(255, Math.round(v)));
+
+    const parseHex = (hex) => {
+      const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(hex || '').trim());
+      if (!m) return null;
+      let h = m[1];
+      if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+      const n = parseInt(h, 16);
+      return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    };
+
+    const toHex = (rgb) => `#${[rgb.r, rgb.g, rgb.b].map((v) => clampByte(v).toString(16).padStart(2, '0')).join('')}`;
+
+    const applyContrast = (hex) => {
+      const rgb = parseHex(hex);
+      if (!rgb) return hex;
+      const boost = clamp01(Number(s.contrastBoost) || 0);
+      const scale = 1 + (boost * 0.8);
+      const adj = (c) => clampByte(128 + (c - 128) * scale);
+      return toHex({ r: adj(rgb.r), g: adj(rgb.g), b: adj(rgb.b) });
+    };
+
+    const resolveTheme = () => {
+      const t = String(s.theme || '').trim().toLowerCase();
+      if (t === 'light' || t === 'dark') return t;
+      try {
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) return 'light';
+      } catch {}
+      return 'dark';
+    };
+
+    const palettes = {
+      dark: {
+        bg: '#0d1016',
+        panel: '#141922',
+        panel2: '#1a1f29',
+        panel3: '#10141b',
+        border: '#242b35',
+        text: '#e9edf5',
+        muted: '#9ca6b6',
+        accent: '#6cd2ff',
+        accentWarm: '#f7a531',
+      },
+      light: {
+        bg: '#f6f8fb',
+        panel: '#ffffff',
+        panel2: '#eef1f7',
+        panel3: '#e3e8f2',
+        border: '#cfd6e3',
+        text: '#0d1726',
+        muted: '#4c5c73',
+        accent: '#2680ff',
+        accentWarm: '#d68000',
+      },
+    };
+
+    const theme = resolveTheme();
+    const base = palettes[theme] || palettes.dark;
+    const setVar = (k, v) => root.style.setProperty(k, v);
+
+    setVar('--bg', applyContrast(base.bg));
+    setVar('--panel', applyContrast(base.panel));
+    setVar('--panel2', applyContrast(base.panel2));
+    setVar('--panel3', applyContrast(base.panel3));
+    setVar('--border', applyContrast(base.border));
+    setVar('--text', applyContrast(base.text));
+    setVar('--muted', applyContrast(base.muted));
+
+    const accent = String(s.accent || '').trim() || base.accent;
+    setVar('--accent', accent);
+    setVar('--accent-warm', applyContrast(base.accentWarm));
+
+    const radius = Math.max(0, Math.min(32, Number(s.radius) || 0));
+    setVar('--radius', `${radius}px`);
+
+    const font = String(s.font || '').trim();
+    if (font && document.body) document.body.style.fontFamily = font;
+    if (document.body) document.body.dataset.theme = theme;
+  },
+
+  /** @param {'general'|'grid2d'|'grid3d'|'style'} cat */
   _setEditorSettingsCategory(cat) {
     setEditorSettingsCategory(this, ui, cat);
   },

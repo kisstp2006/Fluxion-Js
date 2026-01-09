@@ -1,5 +1,7 @@
 // @ts-check
 
+/** @typedef {{ level: LogLevel, name: string, time: Date, args: any[] }} LogEvent */
+
 /** Simple structured logger for game/editor scripts. */
 export class Logger {
   /**
@@ -32,27 +34,33 @@ export class Logger {
   error(...args) { this.log('error', ...args); }
 
   /** Create a scoped child logger. */
+  /** @param {string} scope */
   child(scope) {
     const childName = this.name ? `${this.name}:${scope}` : scope;
     return new Logger({ name: childName, level: this.level, handler: this.handler });
   }
 
   /** Change minimum level. */
+  /** @param {LogLevel} level */
   setLevel(level) { this.level = level; }
 
   /** Replace handler (e.g., to forward into in-editor console). */
+  /** @param {LogHandler} handler */
   setHandler(handler) { this.handler = handler; }
 }
 
 /** @typedef {'debug'|'info'|'warn'|'error'} LogLevel */
-/** @typedef {(evt: { level: LogLevel, name: string, time: Date, args: any[] }) => void} LogHandler */
+/** @typedef {(evt: LogEvent) => void} LogHandler */
 
+/** @type {Record<LogLevel, number>} */
 const order = { debug: 10, info: 20, warn: 30, error: 40 };
+/** @param {LogLevel} min @param {LogLevel} level */
 function shouldEmit(min, level) {
   return (order[level] ?? 999) >= (order[min] ?? 10);
 }
 
 /** Default handler prints to console with timestamp and scope. */
+/** @param {LogEvent} evt */
 const defaultHandler = (evt) => {
   const ts = evt.time.toISOString();
   const prefix = `[${ts}] [${evt.name}]`;
@@ -65,9 +73,10 @@ const defaultHandler = (evt) => {
 };
 
 /** Create a logger with an optional name and level. */
+/** @param {string} [name='app'] @param {LogLevel} [level='debug'] @param {LogHandler} [handler=defaultHandler] */
 export function createLogger(name = 'app', level = 'debug', handler = defaultHandler) {
   return new Logger({ name, level, handler });
 }
 
 /** A shared singleton logger for convenience. */
-export const log = new Logger({ name: 'game' });
+export const log = new Logger({ name: 'game', level: 'debug' });
