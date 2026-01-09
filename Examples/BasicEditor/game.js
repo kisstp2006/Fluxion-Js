@@ -327,6 +327,7 @@ const game = {
 
   _consoleCaptureInstalled: false,
   _consoleMaxLines: 500,
+  _consoleAutoscroll: true,
 
   _addNodeOpen: false,
   _addNodeSearch: '',
@@ -559,6 +560,8 @@ const game = {
     // Bottom panel tabs
     ui.assetTabAssetsBtn?.addEventListener('click', () => this._setBottomTab('assets'));
     ui.assetTabConsoleBtn?.addEventListener('click', () => this._setBottomTab('console'));
+
+    this._setupConsoleUI();
     this._setBottomTab('assets');
 
     // Main tabs (viewport + scripts)
@@ -1384,6 +1387,57 @@ const game = {
     }
   },
 
+  _setupConsoleUI() {
+    const tools = ui.assetHeaderConsoleTools;
+    if (!tools) return;
+
+    tools.innerHTML = '';
+
+    const makeBtn = (id, label, title) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = id;
+      b.className = 'assetToolBtn';
+      b.textContent = label;
+      if (title) b.title = title;
+      return b;
+    };
+
+    const clearBtn = makeBtn('consoleClearBtn', 'Clear', 'Clear console');
+    const copyBtn = makeBtn('consoleCopyBtn', 'Copy', 'Copy console text');
+    const autoBtn = makeBtn('consoleAutoBtn', 'Auto-scroll: On', 'Toggle auto-scroll');
+
+    clearBtn.addEventListener('click', () => {
+      if (ui.consoleOutput) ui.consoleOutput.innerHTML = '';
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      const text = ui.consoleOutput?.innerText || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        copyBtn.textContent = 'Copied';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 900);
+      } catch (e) {
+        console.warn('Copy failed', e);
+        copyBtn.textContent = 'Failed';
+        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 900);
+      }
+    });
+
+    const updateAutoLabel = () => {
+      autoBtn.textContent = this._consoleAutoscroll ? 'Auto-scroll: On' : 'Auto-scroll: Off';
+    };
+
+    autoBtn.addEventListener('click', () => {
+      this._consoleAutoscroll = !this._consoleAutoscroll;
+      updateAutoLabel();
+    });
+
+    updateAutoLabel();
+
+    tools.append(clearBtn, copyBtn, autoBtn);
+  },
+
   _installEditorConsoleCapture() {
     if (this._consoleCaptureInstalled) return;
     this._consoleCaptureInstalled = true;
@@ -1426,7 +1480,7 @@ const game = {
     if (!out) return;
 
     const line = document.createElement('div');
-    line.className = 'consoleLine';
+    line.className = `consoleLine level-${level}`;
 
     const text = this._formatConsoleArgs(args);
     const prefix = level && level !== 'log' ? `[${level}] ` : '';
@@ -1441,9 +1495,11 @@ const game = {
       first.remove();
     }
 
-    // Auto-scroll if user is near the bottom.
-    const dist = out.scrollHeight - out.scrollTop - out.clientHeight;
-    if (dist < 40) out.scrollTop = out.scrollHeight;
+    // Auto-scroll if enabled and user is near the bottom.
+    if (this._consoleAutoscroll) {
+      const dist = out.scrollHeight - out.scrollTop - out.clientHeight;
+      if (dist < 40) out.scrollTop = out.scrollHeight;
+    }
   },
 
   /** @param {any[]} args */

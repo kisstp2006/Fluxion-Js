@@ -1084,20 +1084,63 @@ body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  background: linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.5)), var(--panel3);
+  border-top: 1px solid var(--border);
 }
 
 .consoleOutput {
   height: 100%;
   overflow: auto;
-  padding: 10px;
+  padding: 10px 12px;
   font-size: 12px;
+  font-family: "Cascadia Code", "Fira Code", "Consolas", monospace;
+  line-height: 1.4;
+  color: var(--text);
+  scrollbar-gutter: stable;
 }
 
 .consoleLine {
-  padding: 3px 0;
-  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
   white-space: pre-wrap;
   word-break: break-word;
+  color: var(--muted);
+}
+
+.consoleLine:last-child {
+  border-bottom: none;
+}
+
+.consoleLine.level-log { color: var(--text); }
+.consoleLine.level-info { color: #8ddcff; }
+.consoleLine.level-warn { color: #ffd479; }
+.consoleLine.level-error { color: #ff7b7b; }
+
+.assetHeaderTools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assetToolBtn {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 100ms ease, border-color 100ms ease, transform 80ms ease;
+}
+
+.assetToolBtn:hover {
+  background: rgba(108,210,255,0.12);
+  border-color: rgba(108,210,255,0.24);
+}
+
+.assetToolBtn:active {
+  transform: translateY(1px);
 }
 
 .assetFolders {
