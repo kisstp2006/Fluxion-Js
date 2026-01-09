@@ -5595,10 +5595,10 @@ const game = {
     const root = document.documentElement;
     if (!s || !root) return;
 
-    const clamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
-    const clampByte = (v) => Math.max(0, Math.min(255, Math.round(v)));
+    const clamp01 = (/** @type {any} */ v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+    const clampByte = (/** @type {any} */ v) => Math.max(0, Math.min(255, Math.round(v)));
 
-    const parseHex = (hex) => {
+    const parseHex = (/** @type {any} */ hex) => {
       const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(hex || '').trim());
       if (!m) return null;
       let h = m[1];
@@ -5607,14 +5607,14 @@ const game = {
       return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
     };
 
-    const toHex = (rgb) => `#${[rgb.r, rgb.g, rgb.b].map((v) => clampByte(v).toString(16).padStart(2, '0')).join('')}`;
+    const toHex = (/** @type {any} */ rgb) => `#${[rgb.r, rgb.g, rgb.b].map((v) => clampByte(v).toString(16).padStart(2, '0')).join('')}`;
 
-    const applyContrast = (hex) => {
+    const applyContrast = (/** @type {any} */ hex) => {
       const rgb = parseHex(hex);
       if (!rgb) return hex;
       const boost = clamp01(Number(s.contrastBoost) || 0);
       const scale = 1 + (boost * 0.8);
-      const adj = (c) => clampByte(128 + (c - 128) * scale);
+      const adj = (/** @type {any} */ c) => clampByte(128 + (c - 128) * scale);
       return toHex({ r: adj(rgb.r), g: adj(rgb.g), b: adj(rgb.b) });
     };
 
@@ -5654,7 +5654,7 @@ const game = {
 
     const theme = resolveTheme();
     const base = palettes[theme] || palettes.dark;
-    const setVar = (k, v) => root.style.setProperty(k, v);
+    const setVar = (/** @type {any} */ k, /** @type {any} */ v) => root.style.setProperty(k, v);
 
     setVar('--bg', applyContrast(base.bg));
     setVar('--panel', applyContrast(base.panel));
