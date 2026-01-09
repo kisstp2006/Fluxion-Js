@@ -5656,24 +5656,33 @@ const game = {
     const base = palettes[theme] || palettes.dark;
     const setVar = (/** @type {any} */ k, /** @type {any} */ v) => root.style.setProperty(k, v);
 
-    setVar('--bg', applyContrast(base.bg));
-    setVar('--panel', applyContrast(base.panel));
-    setVar('--panel2', applyContrast(base.panel2));
-    setVar('--panel3', applyContrast(base.panel3));
-    setVar('--border', applyContrast(base.border));
-    setVar('--text', applyContrast(base.text));
-    setVar('--muted', applyContrast(base.muted));
+    // Apply base colors without contrast modification
+    setVar('--bg', base.bg);
+    setVar('--panel', base.panel);
+    setVar('--panel2', base.panel2);
+    setVar('--panel3', base.panel3);
+    setVar('--border', base.border);
+    setVar('--text', base.text);
+    setVar('--muted', base.muted);
 
     const accent = String(s.accent || '').trim() || base.accent;
     setVar('--accent', accent);
-    setVar('--accent-warm', applyContrast(base.accentWarm));
+    setVar('--accent-warm', base.accentWarm);
 
     const radius = Math.max(0, Math.min(32, Number(s.radius) || 0));
     setVar('--radius', `${radius}px`);
 
     const font = String(s.font || '').trim();
     if (font && document.body) document.body.style.fontFamily = font;
-    if (document.body) document.body.dataset.theme = theme;
+    if (document.body) {
+      document.body.dataset.theme = theme;
+      // Update body background gradient for theme
+      if (theme === 'light') {
+        document.body.style.background = `radial-gradient(circle at 20% 20%, rgba(38,128,255,0.08), transparent 28%), radial-gradient(circle at 80% 0%, rgba(214,128,0,0.08), transparent 32%), ${base.bg}`;
+      } else {
+        document.body.style.background = `radial-gradient(circle at 20% 20%, rgba(108,210,255,0.05), transparent 28%), radial-gradient(circle at 80% 0%, rgba(247,165,49,0.05), transparent 32%), ${base.bg}`;
+      }
+    }
   },
 
   /** @param {'general'|'grid2d'|'grid3d'|'style'} cat */
