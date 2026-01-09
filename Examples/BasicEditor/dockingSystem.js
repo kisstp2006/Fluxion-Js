@@ -32,28 +32,117 @@ export class DockingSystem {
     this.draggingWindow = null;
     this.resizingPanel = null;
     this.activeTabGroup = null;
-    this.snapDistance = 30;
+    this.snapDistance = 50;
     this.minSize = { width: 200, height: 150 };
     this.storageKey = 'fluxion-editor-layout';
     this.debounceTimers = new Map();
-    this.autoSaveDebounceMs = 500; // Debounce auto-saves during drag/resize
+    this.autoSaveDebounceMs = 500;
     this.isPersistenceEnabled = true;
     this.lastSaveTime = 0;
     this.pendingSave = false;
-    // Batch floating style updates per frame
     this._dirtyFloating = new Set();
     this._rafPending = false;
-    // Bound handler refs for proper removeEventListener
+    this._dropZones = [];
+    this._activeDropZone = null;
+    this._floatingZOrder = 1000;
+    // Bound handler refs
     this._bound = {
       dragMove: this._onDragMove.bind(this),
       dragEnd: this._onDragEnd.bind(this),
       resizeMove: this._onResizeMove.bind(this),
       resizeEnd: this._onResizeEnd.bind(this),
+      edgeResizeMove: this._onEdgeResizeMove.bind(this),
+      edgeResizeEnd: this._onEdgeResizeEnd.bind(this),
     };
+    this._initDropZones();
     
     // Auto-save layout before unload
     window.addEventListener('beforeunload', () => this._flushPendingSaves());
     window.addEventListener('pagehide', () => this._flushPendingSaves());
+  }
+
+  /**
+   * Initialize drop zones for docking visualization
+   * @private
+   */
+  _initDropZones() {
+    const zones = ['left', 'right', 'top', 'bottom', 'center'];
+    zones.forEach(zone => {
+      const el = document.createElement('div');
+      el.className = `dock-drop-zone dock-drop-zone-${zone}`;
+      el.style.cssText = `
+        position: fixed;
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 150ms ease;
+        background: rgba(108, 210, 255, 0.15);
+        border: 2px dashed rgba(108, 210, 255, 0.5);
+        z-index: 9999;
+      `;
+      document.body.appendChild(el);
+      this._dropZones.push({ zone, element: el });
+    });
+  }
+
+  /**
+   * Show drop zones during drag
+   * @private
+   */
+  _showDropZones() {
+    const app = document.querySelector('.app');
+    if (!app) return;
+    const rect = app.getBoundingClientRect();
+    const margin = 60;
+    
+    this._dropZones.forEach(({ zone, element }) => {
+      let style = '';
+      switch(zone) {
+        case 'left':
+          style = `left: ${rect.left}px; top: ${rect.top}px; width: ${margin}%; height: ${rect.height}px;`;
+          break;
+        case 'right':
+          style = `left: ${rect.right - (rect.width * margin / 100)}px; top: ${rect.top}px; width: ${margin}%; height: ${rect.height}px;`;
+          break;
+        case 'top':
+          style = `left: ${rect.left}px; top: ${rect.top}px; width: ${rect.width}px; height: ${margin}%;`;
+          break;
+        case 'bottom':
+          style = `left: ${rect.left}px; top: ${rect.bottom - (rect.height * margin / 100)}px; width: ${rect.width}px; height: ${margin}%;`;
+          break;
+        case 'center':
+          const w = rect.width * 0.4;
+          const h = rect.height * 0.4;
+          style = `left: ${rect.left + (rect.width - w) / 2}px; top: ${rect.top + (rect.height - h) / 2}px; width: ${w}px; height: ${h}px;`;
+          break;
+      }
+      element.style.cssText += style;
+    });
+  }
+
+  /**
+   * Hide drop zones
+   * @private
+   */
+  _hideDropZones() {
+    this._dropZones.forEach(({ element }) => {
+      element.style.opacity = '0';
+    });
+    this._activeDropZone = null;
+  }
+
+  /**
+   * Update drop zone highlighting based on mouse position
+   * @private
+   */
+  _updateDropZones(x, y) {
+    let hoveredZone = null;
+    this._dropZones.forEach(({ zone, element }) => {
+      const rect = element.getBoundingClientRect();
+      const isHovered = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      element.style.opacity = isHovered ? '1' : '0.3';
+      if (isHovered) hoveredZone = zone;
+    });
+    this._activeDropZone = hoveredZone;
   }
 
   /**
@@ -294,16 +383,28 @@ export class DockingSystem {
     const dx = event.clientX - this.draggingWindow.startX;
     const dy = event.clientY - this.draggingWindow.startY;
 
+    // Show drop zones if not already visible
+    if (this._dropZones.length > 0 && this._dropZones[0].element.style.opacity === '0') {
+      this._showDropZones();
+    }
+
+    // Update drop zone highlighting
+    this._updateDropZones(event.clientX, event.clientY);
+
     if (window.state === 'floating') {
       window.x = this.draggingWindow.currentX + dx;
       window.y = this.draggingWindow.currentY + dy;
       this._scheduleFloatingStyle(window.id);
     } else if (window.state === 'docked') {
-      // Convert to floating when dragged
-      window.state = 'floating';
-      window.x = this.draggingWindow.currentX + dx;
-      window.y = this.draggingWindow.currentY + dy;
-      this.floatWindow(window.id, window.x, window.y, window.width, window.height);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 10) {
+        window.state = 'floating';
+        window.x = event.clientX - 150;
+        window.y = event.clientY - 20;
+        this.floatWindow(window.id, window.x, window.y, window.width, window.height);
+        this.draggingWindow.currentX = window.x;
+        this.draggingWindow.currentY = window.y;
+      }
     }
   }
 
@@ -316,11 +417,17 @@ export class DockingSystem {
 
     const window = this.windows.get(this.draggingWindow.id);
     if (window) {
-      this._snapToGrid(window);
-      this._debouncedSaveLayout(); // Debounce to avoid excessive writes
+      // Dock to active zone if hovering over one
+      if (this._activeDropZone) {
+        this.dockWindow(window.id, this._activeDropZone, window.size || 320);
+      } else {
+        this._snapToGrid(window);
+      }
+      this._debouncedSaveLayout();
       try { window.element?.classList.remove('dragging'); } catch {}
     }
 
+    this._hideDropZones();
     document.removeEventListener('mousemove', this._bound.dragMove);
     document.removeEventListener('mouseup', this._bound.dragEnd);
 
@@ -342,51 +449,134 @@ export class DockingSystem {
   }
 
   /**
-   * Attach resize handle to window
+   * Attach resize handles to window (corner + edges)
    * @private
    */
   _attachResizeHandle(windowId, element) {
-    const resizeHandle = document.createElement('div');
-    resizeHandle.className = 'dock-resize-handle';
-    resizeHandle.style.cssText = `
+    // Corner resize handle (for floating windows)
+    const cornerHandle = document.createElement('div');
+    cornerHandle.className = 'dock-resize-handle';
+    cornerHandle.style.cssText = `
       position: absolute;
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
       bottom: 0;
       right: 0;
       cursor: se-resize;
       background: rgba(108,210,255,0.3);
       z-index: 1000;
+      border-radius: 0 0 var(--radius) 0;
     `;
+    element.appendChild(cornerHandle);
+    cornerHandle.addEventListener('mousedown', e => this._startResize(windowId, e, 'corner'));
+
+    // Edge handles for all windows
+    const edges = [
+      { name: 'right', cursor: 'ew-resize', style: 'position: absolute; right: 0; top: 0; bottom: 0; width: 4px;' },
+      { name: 'bottom', cursor: 'ns-resize', style: 'position: absolute; bottom: 0; left: 0; right: 0; height: 4px;' },
+      { name: 'left', cursor: 'ew-resize', style: 'position: absolute; left: 0; top: 0; bottom: 0; width: 4px;' },
+      { name: 'top', cursor: 'ns-resize', style: 'position: absolute; top: 0; left: 0; right: 0; height: 4px;' }
+    ];
+
+    edges.forEach(({ name, cursor, style }) => {
+      const handle = document.createElement('div');
+      handle.className = `dock-edge-resize dock-edge-${name}`;
+      handle.style.cssText = `${style} cursor: ${cursor}; z-index: 999;`;
+      element.appendChild(handle);
+      handle.addEventListener('mousedown', e => this._startResize(windowId, e, name));
+    });
 
     element.style.position = 'relative';
-    element.appendChild(resizeHandle);
-
-    resizeHandle.addEventListener('mousedown', e => {
-      this._startResize(windowId, e);
-    });
   }
 
   /**
    * Start resizing a window
    * @private
    */
-  _startResize(windowId, event) {
+  _startResize(windowId, event, edge = 'corner') {
     const window = this.windows.get(windowId);
     if (!window) return;
 
     this.resizingPanel = {
       id: windowId,
+      edge,
       startX: event.clientX,
       startY: event.clientY,
       startWidth: window.width || 640,
       startHeight: window.height || 480,
+      startSize: window.size || 320,
     };
 
-    document.addEventListener('mousemove', this._bound.resizeMove);
-    document.addEventListener('mouseup', this._bound.resizeEnd);
+    const moveHandler = edge === 'corner' ? this._bound.resizeMove : this._bound.edgeResizeMove;
+    const endHandler = edge === 'corner' ? this._bound.resizeEnd : this._bound.edgeResizeEnd;
+
+    document.addEventListener('mousemove', moveHandler);
+    document.addEventListener('mouseup', endHandler);
 
     event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /**
+   * Handle edge resizing motion for docked panels
+   * @private
+   */
+  _onEdgeResizeMove(event) {
+    if (!this.resizingPanel) return;
+
+    const window = this.windows.get(this.resizingPanel.id);
+    if (!window) return;
+
+    const dx = event.clientX - this.resizingPanel.startX;
+    const dy = event.clientY - this.resizingPanel.startY;
+    const { edge } = this.resizingPanel;
+
+    if (window.state === 'docked') {
+      // Resize docked panel size
+      if (edge === 'right' || edge === 'left') {
+        const delta = edge === 'right' ? dx : -dx;
+        window.size = Math.max(this.minSize.width, this.resizingPanel.startSize + delta);
+      } else if (edge === 'bottom' || edge === 'top') {
+        const delta = edge === 'bottom' ? dy : -dy;
+        window.size = Math.max(this.minSize.height, this.resizingPanel.startSize + delta);
+      }
+      this._updateLayout();
+    } else if (window.state === 'floating') {
+      // Resize floating window
+      if (edge === 'right') {
+        window.width = Math.max(this.minSize.width, this.resizingPanel.startWidth + dx);
+      } else if (edge === 'left') {
+        const newWidth = Math.max(this.minSize.width, this.resizingPanel.startWidth - dx);
+        window.x += this.resizingPanel.startWidth - newWidth;
+        window.width = newWidth;
+      }
+      if (edge === 'bottom') {
+        window.height = Math.max(this.minSize.height, this.resizingPanel.startHeight + dy);
+      } else if (edge === 'top') {
+        const newHeight = Math.max(this.minSize.height, this.resizingPanel.startHeight - dy);
+        window.y += this.resizingPanel.startHeight - newHeight;
+        window.height = newHeight;
+      }
+      this._scheduleFloatingStyle(window.id);
+    }
+  }
+
+  /**
+   * End edge resizing
+   * @private
+   */
+  _onEdgeResizeEnd() {
+    if (!this.resizingPanel) return;
+
+    const window = this.windows.get(this.resizingPanel.id);
+    if (window) {
+      this._debouncedSaveLayout();
+    }
+
+    document.removeEventListener('mousemove', this._bound.edgeResizeMove);
+    document.removeEventListener('mouseup', this._bound.edgeResizeEnd);
+
+    this.resizingPanel = null;
   }
 
   /**
@@ -436,7 +626,7 @@ export class DockingSystem {
     // Initialize static floating styles once
     el.classList.add('dock-panel', 'floating');
     el.style.position = 'fixed';
-    el.style.zIndex = '100';
+    el.style.zIndex = String(window.zIndex || this._floatingZOrder++);
     el.style.display = 'flex';
     el.style.flexDirection = 'column';
     el.style.overflow = 'hidden';
@@ -445,6 +635,24 @@ export class DockingSystem {
     el.style.height = `${Math.max(this.minSize.height, window.height || 0) | 0}px`;
     // Use GPU-accelerated transform for position
     el.style.transform = `translate3d(${(window.x || 0) | 0}px, ${(window.y || 0) | 0}px, 0)`;
+
+    // Bring to front on click
+    if (!el.dataset.zorderListenerAdded) {
+      el.addEventListener('mousedown', () => this._bringToFront(window.id));
+      el.dataset.zorderListenerAdded = 'true';
+    }
+  }
+
+  /**
+   * Bring window to front
+   * @private
+   */
+  _bringToFront(windowId) {
+    const window = this.windows.get(windowId);
+    if (!window || !window.element || window.state !== 'floating') return;
+
+    window.zIndex = this._floatingZOrder++;
+    window.element.style.zIndex = String(window.zIndex);
   }
 
   /**
