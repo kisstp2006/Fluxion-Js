@@ -8,6 +8,7 @@ import { preserveUiStateDuring } from "./uiStatePreservation.js";
 import MenuBar from "./menuBar.js";
 import { registerMenuActions } from "./menuActions.js";
 import { registerMenuStructure } from "./menuStructure.js";
+import { mountMenuBarToTopbar } from "./menuTopbar.js";
 import { Logger } from "./log.js";
 import {
   wireProjectSelectionUI,
@@ -118,8 +119,6 @@ const ui = {
   scriptEditorWrap: /** @type {HTMLDivElement|null} */ (null),
   scriptHighlight: /** @type {HTMLPreElement|null} */ (null),
   scriptEditorText: /** @type {HTMLTextAreaElement|null} */ (null),
-  mode2dBtn: /** @type {HTMLButtonElement|null} */ (null),
-  mode3dBtn: /** @type {HTMLButtonElement|null} */ (null),
   vpMode2DBtn: /** @type {HTMLButtonElement|null} */ (null),
   vpMode3DBtn: /** @type {HTMLButtonElement|null} */ (null),
   vpGizmoTranslateBtn: /** @type {HTMLButtonElement|null} */ (null),
@@ -531,8 +530,6 @@ const game = {
     if (ui.addNodeModal) ui.addNodeModal.hidden = true;
 
     this._setupAssetBrowser();
-    ui.mode2dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode2dBtn"));
-    ui.mode3dBtn = /** @type {HTMLButtonElement} */ (document.getElementById("mode3dBtn"));
     ui.vpMode2DBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpMode2DBtn'));
     ui.vpMode3DBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpMode3DBtn'));
     ui.vpGizmoTranslateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('vpGizmoTranslateBtn'));
@@ -770,13 +767,6 @@ const game = {
     if (rightPanel) setupDockMenu('inspector', rightPanel);
     if (bottomPanel) setupDockMenu('project', bottomPanel);
     if (viewportView) setupDockMenu('viewport', viewportView);
-
-    ui.mode2dBtn?.addEventListener('click', () => {
-      this.setMode('2d');
-    });
-    ui.mode3dBtn?.addEventListener('click', () => {
-      this.setMode('3d');
-    });
 
     // Viewport toolbar wiring
     ui.vpMode2DBtn?.addEventListener('click', () => this.setMode('2d'));
@@ -2589,19 +2579,8 @@ const game = {
     // Register all action handlers
     registerMenuActions(this, ui, renderer);
 
-    // Mount to the topbar container
-    const topbar = /** @type {HTMLElement|null} */ (document.querySelector('.topbar'));
-    if (topbar) {
-      this.menuBar.mount(topbar, this);
-    }
-
-    // Add a reload button at the end
-    const reloadBtn = document.createElement('button');
-    reloadBtn.className = 'menuBtn';
-    reloadBtn.type = 'button';
-    reloadBtn.textContent = 'Reload (Ctrl+R)';
-    reloadBtn.addEventListener('click', () => window.location.reload());
-    topbar?.appendChild(reloadBtn);
+    // Mount to the topbar container (+ reload button)
+    mountMenuBarToTopbar(this.menuBar, this, { selector: '.topbar', addReloadButton: true });
   },
 
   /**
@@ -4264,8 +4243,8 @@ const game = {
 
     // If only one mode is available, hide the mode switch buttons.
     const canSwitch = !!(allow2D && allow3D);
-    if (ui.mode2dBtn) ui.mode2dBtn.style.display = canSwitch ? '' : 'none';
-    if (ui.mode3dBtn) ui.mode3dBtn.style.display = canSwitch ? '' : 'none';
+    if (ui.vpMode2DBtn) ui.vpMode2DBtn.style.display = canSwitch ? '' : 'none';
+    if (ui.vpMode3DBtn) ui.vpMode3DBtn.style.display = canSwitch ? '' : 'none';
 
     // Clamp current mode to an allowed one.
     if (this.mode === '2d' && !allow2D && allow3D) this.setMode('3d');
@@ -4566,21 +4545,6 @@ const game = {
       r.setRenderScale(1.0);
       r.resizeCanvas();
       this._syncActiveCameraSizes();
-    }
-
-    if (ui.mode2dBtn && ui.mode3dBtn) {
-      ui.mode2dBtn.classList.toggle('active', mode === '2d');
-      ui.mode3dBtn.classList.toggle('active', mode === '3d');
-      ui.mode2dBtn.setAttribute('aria-selected', mode === '2d' ? 'true' : 'false');
-      ui.mode3dBtn.setAttribute('aria-selected', mode === '3d' ? 'true' : 'false');
-    }
-
-    // Sync viewport toolbar mode buttons
-    if (ui.vpMode2DBtn && ui.vpMode3DBtn) {
-      ui.vpMode2DBtn.classList.toggle('active', mode === '2d');
-      ui.vpMode3DBtn.classList.toggle('active', mode === '3d');
-      ui.vpMode2DBtn.setAttribute('aria-selected', mode === '2d' ? 'true' : 'false');
-      ui.vpMode3DBtn.setAttribute('aria-selected', mode === '3d' ? 'true' : 'false');
     }
 
     // Pick a default selection that matches the mode, update UI incrementally.
