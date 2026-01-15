@@ -1,6 +1,102 @@
-const { app, BrowserWindow, ipcMain, dialog, protocol, shell } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, protocol, shell, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
+
+function getWindowStateFilePath() {
+  try {
+    return path.join(app.getPath('userData'), 'window-state.json');
+  } catch {
+    return path.join(__dirname, '.window-state.json');
+  }
+}
+
+function readWindowState() {
+  const fallback = {
+    width: 1280,
+    height: 720,
+    x: undefined,
+    y: undefined,
+    isMaximized: false,
+    isFullScreen: false,
+  };
+
+  try {
+    const fp = getWindowStateFilePath();
+    if (!fs.existsSync(fp)) return fallback;
+    const raw = fs.readFileSync(fp, 'utf8');
+    const parsed = raw ? JSON.parse(raw) : null;
+    if (!parsed || typeof parsed !== 'object') return fallback;
+
+    const width = Math.max(640, Number(parsed.width) || fallback.width);
+    const height = Math.max(360, Number(parsed.height) || fallback.height);
+    const x = Number.isFinite(Number(parsed.x)) ? Number(parsed.x) : undefined;
+    const y = Number.isFinite(Number(parsed.y)) ? Number(parsed.y) : undefined;
+    const isMaximized = !!parsed.isMaximized;
+    const isFullScreen = !!parsed.isFullScreen;
+
+    return { width, height, x, y, isMaximized, isFullScreen };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Ensure restored window bounds are visible on at least one display.
+ * @param {{x?: number, y?: number, width: number, height: number}} state
+ */
+function sanitizeWindowState(state) {
+  try {
+    // If we don't have a position, let Electron decide.
+    if (!Number.isFinite(state.x) || !Number.isFinite(state.y)) return state;
+
+    const bounds = {
+      x: Number(state.x),
+      y: Number(state.y),
+      width: Number(state.width),
+      height: Number(state.height),
+    };
+
+    const displays = screen.getAllDisplays();
+    const visible = displays.some((d) => {
+      const wa = d.workArea || d.bounds;
+      // Require at least a small overlap so the window isn't entirely off-screen.
+      const overlapW = Math.min(bounds.x + bounds.width, wa.x + wa.width) - Math.max(bounds.x, wa.x);
+      const overlapH = Math.min(bounds.y + bounds.height, wa.y + wa.height) - Math.max(bounds.y, wa.y);
+      return overlapW >= 64 && overlapH >= 64;
+    });
+
+    if (visible) return state;
+    return { ...state, x: undefined, y: undefined };
+  } catch {
+    return state;
+  }
+}
+
+/** @param {BrowserWindow} win */
+function writeWindowState(win) {
+  try {
+    if (!win || win.isDestroyed()) return;
+
+    const isMaximized = !!win.isMaximized();
+    const isFullScreen = !!win.isFullScreen();
+    // If maximized/fullscreen, normalBounds gives the last "restored" bounds.
+    const b = (typeof win.getNormalBounds === 'function') ? win.getNormalBounds() : win.getBounds();
+    const payload = {
+      x: Number.isFinite(b.x) ? b.x : undefined,
+      y: Number.isFinite(b.y) ? b.y : undefined,
+      width: Math.max(640, Number(b.width) || 1280),
+      height: Math.max(360, Number(b.height) || 720),
+      isMaximized,
+      isFullScreen,
+    };
+
+    const fp = getWindowStateFilePath();
+    try { fs.mkdirSync(path.dirname(fp), { recursive: true }); } catch {}
+    fs.writeFileSync(fp, JSON.stringify(payload, null, 2), 'utf8');
+  } catch {
+    // ignore
+  }
+}
 
 // Must be called BEFORE app is ready.
 // This enables Chromium features (like fetch()) for our custom scheme.
@@ -211,10 +307,14 @@ if (!gotTheLock) {
       }
     });
 
+    const restored = sanitizeWindowState(readWindowState());
+
     mainWindow = new BrowserWindow({
       icon: iconPath,
-      width: 1280,
-      height: 720,
+      width: restored.width,
+      height: restored.height,
+      ...(Number.isFinite(restored.x) ? { x: restored.x } : {}),
+      ...(Number.isFinite(restored.y) ? { y: restored.y } : {}),
       frame: false,
       webPreferences: {
         nodeIntegration: false,
@@ -232,6 +332,24 @@ if (!gotTheLock) {
 
     mainWindow.on("closed", () => {
       mainWindow = null;
+    });
+
+    // Persist window state on changes + shutdown.
+    const persist = () => writeWindowState(mainWindow);
+    mainWindow.on('close', persist);
+    mainWindow.on('resize', persist);
+    mainWindow.on('move', persist);
+    mainWindow.on('maximize', persist);
+    mainWindow.on('unmaximize', persist);
+    mainWindow.on('enter-full-screen', persist);
+    mainWindow.on('leave-full-screen', persist);
+
+    // Restore maximized/fullscreen after window is ready.
+    mainWindow.once('ready-to-show', () => {
+      try {
+        if (restored.isMaximized) mainWindow.maximize();
+        if (restored.isFullScreen) mainWindow.setFullScreen(true);
+      } catch {}
     });
 
     mainWindow.loadFile("./packages/editor/BasicEditor/index.html");
