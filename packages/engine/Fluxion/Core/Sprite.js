@@ -173,6 +173,19 @@ export default class Sprite {
         if (imageSrc === null || imageSrc === undefined) return;
         if (typeof imageSrc === 'string' && imageSrc.trim() === '') return;
 
+        // If we're changing sprite-sheet textures on an existing sprite, release the old refcount.
+        // This is important for object pooling and any workflow that reuses Sprite instances.
+        const nextKey = (this.useSpriteSheet && typeof imageSrc === 'string') ? imageSrc : null;
+        if (this.textureKey && nextKey && this.textureKey !== nextKey && this.renderer?.releaseTexture) {
+            try { this.renderer.releaseTexture(this.textureKey); } catch {}
+            this.texture = null;
+        }
+        if (!this.useSpriteSheet) {
+            // Reset non-spritesheet mode buffers when changing sources.
+            this.texture = null;
+            this.images.length = 0;
+        }
+
         if (this.useSpriteSheet) {
             this.textureKey = typeof imageSrc === 'string' ? imageSrc : null;
 
