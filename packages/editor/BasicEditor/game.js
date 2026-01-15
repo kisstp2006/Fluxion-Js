@@ -2630,7 +2630,7 @@ const game = {
 
     // Register all action handlers
     this.menuBar.registerAction('file.createProject', () => {
-      this._createProjectDialog?.createProjectFromEditor().catch(console.error);
+      this._createAndOpenNewProject().catch(console.error);
     });
 
     this.menuBar.registerAction('file.openProject', () => {
