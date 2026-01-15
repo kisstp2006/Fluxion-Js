@@ -85,6 +85,9 @@ const ui = {
   animSpriteAnimList: /** @type {HTMLDivElement|null} */ (null),
   animSpriteNameInput: /** @type {HTMLInputElement|null} */ (null),
   animSpriteApplyBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpritePlayBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpriteCancelBtn: /** @type {HTMLButtonElement|null} */ (null),
+  animSpriteOkBtn: /** @type {HTMLButtonElement|null} */ (null),
   animSpritePreviewWrap: /** @type {HTMLDivElement|null} */ (null),
   animSpriteFrameLabel: /** @type {HTMLDivElement|null} */ (null),
   animSpriteFramePreview: /** @type {HTMLImageElement|null} */ (null),
@@ -480,6 +483,9 @@ const game = {
     ui.animSpriteAnimList = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteAnimList'));
     ui.animSpriteNameInput = /** @type {HTMLInputElement} */ (document.getElementById('animSpriteNameInput'));
     ui.animSpriteApplyBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteApplyBtn'));
+    ui.animSpritePlayBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpritePlayBtn'));
+    ui.animSpriteCancelBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteCancelBtn'));
+    ui.animSpriteOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById('animSpriteOkBtn'));
     ui.animSpritePreviewWrap = /** @type {HTMLDivElement} */ (document.getElementById('animSpritePreviewWrap'));
     ui.animSpriteFrameLabel = /** @type {HTMLDivElement} */ (document.getElementById('animSpriteFrameLabel'));
     ui.animSpriteFramePreview = /** @type {HTMLImageElement} */ (document.getElementById('animSpriteFramePreview'));

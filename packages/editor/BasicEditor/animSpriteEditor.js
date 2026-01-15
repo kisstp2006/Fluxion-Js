@@ -10,6 +10,9 @@ import { AnimatedSprite } from "../../engine/Fluxion/index.js";
  *  animSpriteAnimList: HTMLDivElement|null,
  *  animSpriteNameInput: HTMLInputElement|null,
  *  animSpriteApplyBtn: HTMLButtonElement|null,
+ *  animSpritePlayBtn: HTMLButtonElement|null,
+ *  animSpriteCancelBtn: HTMLButtonElement|null,
+ *  animSpriteOkBtn: HTMLButtonElement|null,
  *  animSpritePreviewWrap: HTMLDivElement|null,
  *  animSpriteFrameLabel: HTMLDivElement|null,
  *  animSpriteFramePreview: HTMLImageElement|null,
@@ -17,6 +20,111 @@ import { AnimatedSprite } from "../../engine/Fluxion/index.js";
  *  animSpriteError: HTMLDivElement|null,
  * }} AnimSpriteUI
  */
+
+/**
+ * @typedef {{
+ *  animations: Array<{ name: string, frames: any[], fps: number, loop: boolean }>,
+ * }} AnimSpriteEditSnapshot
+ */
+
+/** @param {any[]} frames */
+function cloneFrames(frames) {
+  /** @type {any[]} */
+  const out = [];
+  for (const f of frames || []) {
+    if (typeof f === 'string' || typeof f === 'number' || f == null) {
+      out.push(f);
+      continue;
+    }
+    if (typeof f === 'object') {
+      out.push({
+        x: Number(f.x) || 0,
+        y: Number(f.y) || 0,
+        w: Number(f.w ?? f.width) || 0,
+        h: Number(f.h ?? f.height) || 0,
+      });
+      continue;
+    }
+    out.push(f);
+  }
+  return out;
+}
+
+/** @param {any} sprite @returns {AnimSpriteEditSnapshot} */
+function captureSnapshot(sprite) {
+  /** @type {AnimSpriteEditSnapshot} */
+  const snap = { animations: [] };
+  const anims = sprite?.animations;
+  if (!(anims instanceof Map)) return snap;
+
+  for (const [name, anim] of anims.entries()) {
+    const n = String(name);
+    const frames = Array.isArray(anim?.frames) ? cloneFrames(anim.frames) : [];
+    const fps = Number(anim?.fps);
+    const loop = !!anim?.loop;
+    snap.animations.push({ name: n, frames, fps: Number.isFinite(fps) ? fps : 10, loop });
+  }
+  return snap;
+}
+
+/** Release any per-frame textures owned by current animations (best-effort). @param {any} sprite */
+function releaseAnimationTextures(sprite) {
+  const r = sprite?.renderer;
+  if (!r?.releaseTexture) return;
+  const anims = sprite?.animations;
+  if (!(anims instanceof Map)) return;
+
+  const released = new Set();
+  for (const anim of anims.values()) {
+    const keys = anim?._frameKeys;
+    if (!Array.isArray(keys)) continue;
+    for (const k of keys) {
+      const key = String(k || '');
+      if (!key || released.has(key)) continue;
+      released.add(key);
+      try { r.releaseTexture(key); } catch {}
+    }
+  }
+}
+
+/** @param {any} sprite @param {AnimSpriteEditSnapshot} snap */
+function restoreSnapshot(sprite, snap) {
+  if (!isAnimatedSprite(sprite)) return;
+  if (!snap || !Array.isArray(snap.animations)) return;
+
+  // Release textures created/held by current animations.
+  releaseAnimationTextures(sprite);
+
+  sprite.animations = new Map();
+  sprite.currentAnimation = null;
+  sprite.currentAnimationName = '';
+  sprite.currentFrameIndex = 0;
+  sprite.timer = 0;
+  sprite.isPlaying = false;
+
+  for (const a of snap.animations) {
+    try {
+      const name = String(a?.name || '').trim();
+      if (!name) continue;
+      const frames = Array.isArray(a?.frames) ? cloneFrames(a.frames) : [];
+      const fps = Number(a?.fps);
+      const loop = !!a?.loop;
+      sprite.addAnimation(name, frames, Number.isFinite(fps) ? fps : 10, loop);
+    } catch {}
+  }
+}
+
+/** @param {any} host @param {AnimSpriteUI} ui */
+function syncPlaybackUI(host, ui) {
+  if (!ui.animSpritePlayBtn) return;
+  const sprite = host._animSpriteTarget;
+  const canPlay = isAnimatedSprite(sprite) && !!host._animSpriteAnimName;
+  ui.animSpritePlayBtn.disabled = !canPlay;
+  ui.animSpritePlayBtn.textContent = host._animSpritePreviewPlaying ? 'Pause' : 'Play';
+
+  if (ui.animSpriteOkBtn) ui.animSpriteOkBtn.disabled = !isAnimatedSprite(sprite);
+  if (ui.animSpriteCancelBtn) ui.animSpriteCancelBtn.disabled = !isAnimatedSprite(sprite);
+}
 
 /** @param {any} obj */
 export function isAnimatedSprite(obj) {
@@ -28,9 +136,10 @@ export function isAnimatedSprite(obj) {
 
 /** @param {any} host @param {AnimSpriteUI} ui */
 export function wireAnimSpriteEditorUI(host, ui) {
-  ui.animSpriteCloseBtn?.addEventListener('click', () => host._closeAnimSpriteEditor());
+  const onCancel = () => cancelAnimSpriteEditor(host, ui);
+  ui.animSpriteCloseBtn?.addEventListener('click', onCancel);
   ui.animSpriteModal?.addEventListener('mousedown', (e) => {
-    if (e.target === ui.animSpriteModal) host._closeAnimSpriteEditor();
+    if (e.target === ui.animSpriteModal) onCancel();
   });
 
   ui.animSpriteApplyBtn?.addEventListener('click', () => host._applyAnimSpriteRename());
@@ -40,6 +149,10 @@ export function wireAnimSpriteEditorUI(host, ui) {
       host._applyAnimSpriteRename();
     }
   });
+
+  ui.animSpritePlayBtn?.addEventListener('click', () => toggleAnimSpritePlay(host, ui));
+  ui.animSpriteCancelBtn?.addEventListener('click', onCancel);
+  ui.animSpriteOkBtn?.addEventListener('click', () => okAnimSpriteEditor(host, ui));
 }
 
 /** @param {any} host @param {AnimSpriteUI} ui */
@@ -52,6 +165,8 @@ export function openAnimSpriteEditor(host, ui) {
   host._animSpriteTarget = obj;
   host._animSpriteAnimName = null;
   host._animSpriteFrameIndex = null;
+  host._animSpritePreviewPlaying = false;
+  host._animSpriteEditSnapshot = captureSnapshot(obj);
 
   // Capture prior playback state so the editor can preview frames in the viewport
   // without permanently changing the scene.
@@ -65,11 +180,14 @@ export function openAnimSpriteEditor(host, ui) {
   populateAnimSpriteEditor(host, ui);
   if (host.menuBar) host.menuBar.closeMenus();
   ui.animSpriteCloseBtn?.focus();
+  syncPlaybackUI(host, ui);
 }
 
 /** @param {any} host @param {AnimSpriteUI} ui */
 export function closeAnimSpriteEditor(host, ui) {
   if (!ui.animSpriteModal) return;
+
+  host._animSpritePreviewPlaying = false;
 
   // Restore prior playback state if possible.
   const sprite = host._animSpriteTarget;
@@ -91,7 +209,41 @@ export function closeAnimSpriteEditor(host, ui) {
   host._animSpriteAnimName = null;
   host._animSpriteFrameIndex = null;
   host._animSpritePrevPlayback = null;
+  host._animSpriteEditSnapshot = null;
   ui.animSpriteModal.hidden = true;
+}
+
+/** OK = keep edits, close modal (restores prior playback state). @param {any} host @param {AnimSpriteUI} ui */
+export function okAnimSpriteEditor(host, ui) {
+  closeAnimSpriteEditor(host, ui);
+}
+
+/** Cancel = restore snapshot, close modal (restores prior playback state). @param {any} host @param {AnimSpriteUI} ui */
+export function cancelAnimSpriteEditor(host, ui) {
+  const sprite = host._animSpriteTarget;
+  const snap = host._animSpriteEditSnapshot;
+  if (isAnimatedSprite(sprite) && snap) {
+    restoreSnapshot(sprite, snap);
+    try { host.rebuildInspector?.(); } catch {}
+  }
+  closeAnimSpriteEditor(host, ui);
+}
+
+/** Toggle preview play/pause inside the editor. @param {any} host @param {AnimSpriteUI} ui */
+export function toggleAnimSpritePlay(host, ui) {
+  const sprite = host._animSpriteTarget;
+  const animName = host._animSpriteAnimName;
+  if (!isAnimatedSprite(sprite) || !animName) return;
+
+  if (host._animSpritePreviewPlaying) {
+    try { sprite.pause?.(); } catch { try { sprite.isPlaying = false; } catch {} }
+    host._animSpritePreviewPlaying = false;
+  } else {
+    try { sprite.play?.(animName, true); } catch {}
+    host._animSpritePreviewPlaying = true;
+  }
+
+  syncPlaybackUI(host, ui);
 }
 
 /** @param {any} host @param {AnimSpriteUI} ui @param {string} msg */
@@ -144,15 +296,17 @@ export function updateAnimSpriteFramePreview(host, ui) {
     }
 
     // While the editor modal is open, force the sprite to display the selected frame
-    // so it's visible in the main viewport.
+    // so it's visible in the main viewport. If preview is playing, don't pause.
     if (host._animSpriteOpen && isAnimatedSprite(sprite) && (sprite.animations instanceof Map)) {
       const anim = sprite.animations.get(animName);
       if (anim) {
         sprite.currentAnimationName = animName;
         sprite.currentAnimation = anim;
         sprite.currentFrameIndex = idx;
-        // Pause playback during manual frame inspection.
-        sprite.isPlaying = false;
+        if (!host._animSpritePreviewPlaying) {
+          // Pause playback during manual frame inspection.
+          sprite.isPlaying = false;
+        }
       }
     }
   } else {
@@ -210,6 +364,9 @@ export function populateAnimSpriteEditor(host, ui) {
     btn.addEventListener('click', () => {
       host._animSpriteAnimName = k;
       host._animSpriteFrameIndex = null;
+      if (host._animSpritePreviewPlaying && isAnimatedSprite(sprite)) {
+        try { sprite.play?.(k, true); } catch {}
+      }
       populateAnimSpriteEditor(host, ui);
     });
     ui.animSpriteAnimList.appendChild(btn);
@@ -227,6 +384,7 @@ export function populateAnimSpriteEditor(host, ui) {
   ui.animSpriteNameInput.value = host._animSpriteAnimName;
   setAnimSpriteError(host, ui, '');
   renderAnimSpriteFrames(host, ui);
+  syncPlaybackUI(host, ui);
 }
 
 /** @param {any} host @param {AnimSpriteUI} ui */
@@ -351,6 +509,11 @@ export function renderAnimSpriteFrames(host, ui) {
     cell.dataset.index = String(i);
     cell.addEventListener('click', () => {
       host._animSpriteFrameIndex = i;
+      if (host._animSpritePreviewPlaying && isAnimatedSprite(sprite)) {
+        try { sprite.pause?.(); } catch { try { sprite.isPlaying = false; } catch {} }
+        host._animSpritePreviewPlaying = false;
+        syncPlaybackUI(host, ui);
+      }
       const strip = ui.animSpriteFramesStrip;
       if (strip) {
         for (const el of Array.from(strip.children)) {
@@ -462,4 +625,5 @@ export function renderAnimSpriteFrames(host, ui) {
   }
 
   updateAnimSpriteFramePreview(host, ui);
+  syncPlaybackUI(host, ui);
 }
