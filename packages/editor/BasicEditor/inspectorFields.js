@@ -1175,13 +1175,87 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 	/** @param {HTMLElement} anchor */
 	const openPicker = (anchor) => {
 		if (!canPick) return;
-		// Reuse the existing menu styling (same as context menus).
+		// Use context-menu styling (topbar .menu dropdowns are hidden by default).
 		const menu = document.createElement('div');
-		menu.className = 'menu contextMenu open';
+		menu.className = 'contextMenu open';
 		menu.setAttribute('role', 'menu');
 		menu.style.display = 'block';
-		menu.style.zIndex = '200';
+		// Must be above modals/backdrops.
+		menu.style.zIndex = '10006';
+		menu.style.maxWidth = '520px';
+		menu.style.maxHeight = `${Math.max(240, window.innerHeight - 8)}px`;
+		menu.style.overflow = 'hidden';
 		document.body.appendChild(menu);
+
+		// Header (search) + scrollable list.
+		const header = document.createElement('div');
+		header.className = 'menuSearchRow';
+		const search = document.createElement('input');
+		search.type = 'text';
+		search.className = 'menuSearchInput';
+		search.placeholder = 'Search…';
+		search.autocomplete = 'off';
+		search.spellcheck = false;
+		header.appendChild(search);
+		menu.appendChild(header);
+
+		const list = document.createElement('div');
+		list.className = 'menuList';
+		list.style.maxHeight = '60vh';
+		list.style.overflow = 'auto';
+		menu.appendChild(list);
+
+		/** Clamp + flip the menu to stay within viewport. */
+		const reposition = () => {
+			try {
+				const pad = 4;
+				// Ensure menu can't exceed viewport height.
+				menu.style.maxHeight = `${Math.max(240, window.innerHeight - pad * 2)}px`;
+				// Recompute list maxHeight based on header/footer sizes.
+				const headerH = header.getBoundingClientRect().height || 0;
+				const footerH = 0;
+				const maxList = Math.max(140, (window.innerHeight - pad * 2) - headerH - footerH - 12);
+				list.style.maxHeight = `${maxList}px`;
+
+				const r = anchor.getBoundingClientRect();
+				// First set a reasonable default position.
+				menu.style.left = `${Math.max(pad, Math.floor(r.left))}px`;
+				menu.style.top = `${Math.max(pad, Math.floor(r.bottom + 6))}px`;
+
+				// Measure after layout.
+				requestAnimationFrame(() => {
+					if (closed) return;
+					const mr = menu.getBoundingClientRect();
+					const maxX = Math.max(pad, window.innerWidth - mr.width - pad);
+					let x = Math.min(Math.max(pad, Math.floor(r.left)), maxX);
+
+					// Prefer below, but flip above if bottom would overflow.
+					const yDown = Math.floor(r.bottom + 6);
+					const yUp = Math.floor(r.top - 6 - mr.height);
+					let y;
+					if (yDown + mr.height + pad <= window.innerHeight) {
+						y = Math.max(pad, yDown);
+					} else if (yUp >= pad) {
+						y = yUp;
+					} else {
+						const maxY = Math.max(pad, window.innerHeight - mr.height - pad);
+						y = Math.min(Math.max(pad, yDown), maxY);
+					}
+
+					menu.style.left = `${x}px`;
+					menu.style.top = `${y}px`;
+				});
+			} catch {}
+		};
+
+		let repositionRAF = 0;
+		const scheduleReposition = () => {
+			try { if (repositionRAF) cancelAnimationFrame(repositionRAF); } catch {}
+			repositionRAF = requestAnimationFrame(() => {
+				repositionRAF = 0;
+				reposition();
+			});
+		};
 
 		let closed = false;
 		const close = () => {
@@ -1189,6 +1263,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			closed = true;
 			try { menu.remove(); } catch {}
 			window.removeEventListener('blur', close);
+			window.removeEventListener('resize', scheduleReposition);
 			document.removeEventListener('mousedown', onDocMouseDown, true);
 			document.removeEventListener('keydown', onKeyDown, true);
 		};
@@ -1207,32 +1282,23 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		};
 
 		window.addEventListener('blur', close);
+		window.addEventListener('resize', scheduleReposition);
 		document.addEventListener('mousedown', onDocMouseDown, true);
 		document.addEventListener('keydown', onKeyDown, true);
-
-		// Position near the anchor.
-		try {
-			const r = anchor.getBoundingClientRect();
-			menu.style.left = `${Math.max(4, Math.floor(r.left))}px`;
-			menu.style.top = `${Math.max(4, Math.floor(r.bottom + 6))}px`;
-			requestAnimationFrame(() => {
-				if (closed) return;
-				const mr = menu.getBoundingClientRect();
-				const maxX = Math.max(4, window.innerWidth - mr.width - 4);
-				const maxY = Math.max(4, window.innerHeight - mr.height - 4);
-				const nextX = Math.min(Math.max(4, Math.floor(r.left)), maxX);
-				const nextY = Math.min(Math.max(4, Math.floor(r.bottom + 6)), maxY);
-				menu.style.left = `${nextX}px`;
-				menu.style.top = `${nextY}px`;
-			});
-		} catch {}
+		scheduleReposition();
 
 		/**
 		 * @param {string} labelText
 		 * @param {() => void} onClick
 		 * @param {boolean=} enabled
 		 */
-		const addItem = (labelText, onClick, enabled = true) => {
+		/**
+		 * @param {HTMLElement} parent
+		 * @param {string} labelText
+		 * @param {() => void} onClick
+		 * @param {boolean=} enabled
+		 */
+		const addItemTo = (parent, labelText, onClick, enabled = true) => {
 			const btn = document.createElement('button');
 			btn.type = 'button';
 			btn.className = 'menuItem';
@@ -1248,8 +1314,11 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 				if (!enabled) return;
 				try { onClick(); } catch {}
 			});
-			menu.appendChild(btn);
+			parent.appendChild(btn);
 		};
+
+		/** @param {string} labelText @param {() => void} onClick @param {boolean=} enabled */
+		const addItem = (labelText, onClick, enabled = true) => addItemTo(list, labelText, onClick, enabled);
 
 		addItem('Loading…', () => {}, false);
 
@@ -1314,26 +1383,66 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			return out;
 		};
 
+		/** @type {string[]} */
+		let allFiles = [];
+
+		const renderList = () => {
+			if (closed) return;
+			list.innerHTML = '';
+			const q = String(search.value || '').trim().toLowerCase();
+			let shown = 0;
+			const maxShow = 500;
+			const src = Array.isArray(allFiles) ? allFiles : [];
+			for (const rel of src) {
+				if (!rel) continue;
+				if (q) {
+					const hay = String(rel).toLowerCase();
+					if (!hay.includes(q)) continue;
+				}
+				addItemTo(list, rel, () => {
+					input.value = toValue(rel);
+					apply(true);
+					close();
+				});
+				shown++;
+				if (shown >= maxShow) break;
+			}
+			if (shown === 0) {
+				addItemTo(list, 'No matching files found', () => {}, false);
+				return;
+			}
+			if (src.length > maxShow) {
+				const more = q ? src.filter((r) => String(r).toLowerCase().includes(q)).length : src.length;
+				if (more > maxShow) {
+					addItemTo(list, `Showing ${maxShow} of ${more}. Refine search…`, () => {}, false);
+				}
+			}
+		};
+
+		search.addEventListener('input', () => {
+			renderList();
+			scheduleReposition();
+		});
+		search.addEventListener('keydown', (e) => {
+			if (e.key === 'Escape') {
+				e.preventDefault();
+				close();
+			}
+		});
+
 		Promise.resolve(listMatchingFiles())
 			.then((files) => {
 				if (closed) return;
-				menu.innerHTML = '';
-				if (!files || files.length === 0) {
-					addItem('No matching files found', () => {}, false);
-					return;
-				}
-				for (const rel of files) {
-					addItem(rel, () => {
-						input.value = toValue(rel);
-						apply(true);
-						close();
-					});
-				}
+				allFiles = Array.isArray(files) ? files : [];
+				renderList();
+				scheduleReposition();
+				// Focus search after list arrives (avoids stealing focus while positioning).
+				try { search.focus(); } catch {}
 			})
 			.catch(() => {
 				if (closed) return;
-				menu.innerHTML = '';
-				addItem('Failed to list project files', () => {}, false);
+				list.innerHTML = '';
+				addItemTo(list, 'Failed to list project files', () => {}, false);
 			});
 	};
 

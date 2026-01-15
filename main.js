@@ -245,6 +245,7 @@ function safeProjectFilenameFromName(name) {
 }
 
 let mainWindow;
+let animSpritePreviewWindow;
 const iconPath = "./packages/engine/Fluxion/Icon/Fluxion_icon.ico";
 
 // Filesystem root used by the editor for browsing/loading assets.
@@ -257,6 +258,52 @@ function setWorkspaceRootAbs(p) {
 
 function getWorkspaceRootAbs() {
   return workspaceRootAbs;
+}
+
+/**
+ * @param {any} payload
+ */
+async function openAnimSpritePreviewWindow(payload) {
+  // Close existing preview window (simpler UX: one preview at a time).
+  try {
+    if (animSpritePreviewWindow && !animSpritePreviewWindow.isDestroyed()) {
+      animSpritePreviewWindow.close();
+    }
+  } catch {}
+
+  animSpritePreviewWindow = new BrowserWindow({
+    width: 420,
+    height: 420,
+    useContentSize: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    title: 'Animation Preview',
+    backgroundColor: '#0b0f14',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      devTools: true,
+      spellcheck: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  animSpritePreviewWindow.setMenuBarVisibility(false);
+
+  animSpritePreviewWindow.on('closed', () => {
+    animSpritePreviewWindow = null;
+  });
+
+  const htmlPath = path.join(__dirname, 'packages', 'editor', 'BasicEditor', 'animSpritePreview.html');
+  await animSpritePreviewWindow.loadFile(htmlPath);
+
+  // Send the payload once the renderer is ready.
+  try {
+    animSpritePreviewWindow.webContents.send('anim-sprite-preview-data', payload);
+  } catch {}
 }
 
 function resolveUnderWorkspace(relPathFromUrl) {
@@ -392,6 +439,11 @@ if (!gotTheLock) {
     if (win) win.setSize(width, height);
   });
 
+  ipcMain.on('window-set-content-size', (event, width, height) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) win.setContentSize(width, height);
+  });
+
   ipcMain.on("save-debug-file", (event, filename, content) => {
     const filePath = path.join(app.getPath("userData"), "Debug", filename);
     const dir = path.dirname(filePath);
@@ -471,6 +523,17 @@ if (!gotTheLock) {
         npm: parseNpmVersionFromEnv(),
         engine,
       };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // AnimatedSprite preview window
+  ipcMain.handle('open-anim-sprite-preview', async (event, payload) => {
+    void event;
+    try {
+      await openAnimSpritePreviewWindow(payload);
+      return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }

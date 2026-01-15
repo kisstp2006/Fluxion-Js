@@ -87,6 +87,327 @@ function releaseAnimationTextures(sprite) {
   }
 }
 
+/**
+ * Open a project-file picker (multi-select) for image assets.
+ * @param {HTMLElement} anchor
+ * @param {(selectedRelPaths: string[]) => void} onAdd
+ */
+function openImageMultiPicker(anchor, onAdd) {
+  try {
+    const api = /** @type {any} */ (window).electronAPI;
+    if (!api || typeof api.listProjectDir !== 'function') return false;
+
+    const menu = document.createElement('div');
+    // Use context-menu styling (topbar .menu dropdowns are hidden by default).
+    menu.className = 'contextMenu open';
+    menu.setAttribute('role', 'menu');
+    menu.style.display = 'block';
+    // Must be above modals/backdrops.
+    menu.style.zIndex = '10006';
+    menu.style.maxWidth = '560px';
+    menu.style.maxHeight = `${Math.max(240, window.innerHeight - 8)}px`;
+    menu.style.overflow = 'hidden';
+    document.body.appendChild(menu);
+
+    const header = document.createElement('div');
+    header.className = 'menuSearchRow';
+    const search = document.createElement('input');
+    search.type = 'text';
+    search.className = 'menuSearchInput';
+    search.placeholder = 'Search…';
+    search.autocomplete = 'off';
+    search.spellcheck = false;
+    header.appendChild(search);
+    menu.appendChild(header);
+
+    const list = document.createElement('div');
+    list.className = 'menuList';
+    list.style.maxHeight = '55vh';
+    list.style.overflow = 'auto';
+    menu.appendChild(list);
+
+    const footer = document.createElement('div');
+    footer.className = 'menuFooterRow';
+    menu.appendChild(footer);
+
+    /** Clamp + flip the menu to stay within viewport. */
+    const reposition = () => {
+      try {
+        const pad = 4;
+        // Ensure menu can't exceed viewport height.
+        menu.style.maxHeight = `${Math.max(240, window.innerHeight - pad * 2)}px`;
+        const headerH = header.getBoundingClientRect().height || 0;
+        const footerH = footer.getBoundingClientRect().height || 0;
+        const maxList = Math.max(140, (window.innerHeight - pad * 2) - headerH - footerH - 16);
+        list.style.maxHeight = `${maxList}px`;
+
+        const r = anchor.getBoundingClientRect();
+        menu.style.left = `${Math.max(pad, Math.floor(r.left))}px`;
+        menu.style.top = `${Math.max(pad, Math.floor(r.bottom + 6))}px`;
+
+        requestAnimationFrame(() => {
+          if (closed) return;
+          const mr = menu.getBoundingClientRect();
+          const maxX = Math.max(pad, window.innerWidth - mr.width - pad);
+          let x = Math.min(Math.max(pad, Math.floor(r.left)), maxX);
+
+          const yDown = Math.floor(r.bottom + 6);
+          const yUp = Math.floor(r.top - 6 - mr.height);
+          let y;
+          if (yDown + mr.height + pad <= window.innerHeight) {
+            y = Math.max(pad, yDown);
+          } else if (yUp >= pad) {
+            y = yUp;
+          } else {
+            const maxY = Math.max(pad, window.innerHeight - mr.height - pad);
+            y = Math.min(Math.max(pad, yDown), maxY);
+          }
+
+          menu.style.left = `${x}px`;
+          menu.style.top = `${y}px`;
+        });
+      } catch {}
+    };
+
+    let repositionRAF = 0;
+    const scheduleReposition = () => {
+      try { if (repositionRAF) cancelAnimationFrame(repositionRAF); } catch {}
+      repositionRAF = requestAnimationFrame(() => {
+        repositionRAF = 0;
+        reposition();
+      });
+    };
+
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      try { menu.remove(); } catch {}
+      window.removeEventListener('blur', close);
+      window.removeEventListener('resize', scheduleReposition);
+      document.removeEventListener('mousedown', onDocMouseDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+
+    /** @param {MouseEvent} e */
+    const onDocMouseDown = (e) => {
+      const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+      if (!t) return;
+      if (t === menu || menu.contains(t)) return;
+      close();
+    };
+
+    /** @param {KeyboardEvent} e */
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') close();
+    };
+
+    window.addEventListener('blur', close);
+    window.addEventListener('resize', scheduleReposition);
+    document.addEventListener('mousedown', onDocMouseDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+
+    scheduleReposition();
+
+    /** @param {string} rel */
+    const isImageRel = (rel) => {
+      const p = String(rel || '').trim().toLowerCase();
+      if (!p) return false;
+      return p.endsWith('.png') || p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.gif') || p.endsWith('.webp') || p.endsWith('.bmp');
+    };
+
+    /** @returns {Promise<string[]>} */
+    const listMatchingFiles = async () => {
+      const preferredRoots = ['Texture', 'Textures', 'Images', 'Image', 'Model', 'Assets', 'Asset'];
+      /** @type {string[]} */
+      const roots = [];
+      const ignore = new Set(['node_modules', '.git', '.vscode', 'packages', 'examples', 'docs', 'third-party', 'tests', 'dist']);
+
+      for (const d of preferredRoots) {
+        try {
+          const res = await api.listProjectDir(d);
+          if (res && res.ok) roots.push(d);
+        } catch {}
+      }
+      if (roots.length === 0) roots.push('.');
+
+      /** @type {string[]} */
+      const out = [];
+      /** @type {string[]} */
+      const stack = roots.map((r) => String(r));
+      let dirOps = 0;
+      const maxDirOps = 2500;
+      const maxFiles = 2500;
+
+      while (stack.length > 0) {
+        const dir = String(stack.pop() || '');
+        if (!dir && dir !== '.') continue;
+        if (dirOps++ > maxDirOps) break;
+
+        const last = dir.split('/').pop() || dir.split('\\').pop() || dir;
+        if (ignore.has(String(last))) continue;
+
+        let res;
+        try {
+          res = await api.listProjectDir(dir === '.' ? '.' : dir);
+        } catch {
+          continue;
+        }
+        if (!res || !res.ok) continue;
+        const entries = Array.isArray(res.entries) ? res.entries : [];
+        for (const ent of entries) {
+          if (!ent) continue;
+          const p = String(ent.path || '').trim();
+          if (!p) continue;
+          if (ent.isDir) {
+            stack.push(p);
+            continue;
+          }
+          if (!isImageRel(p)) continue;
+          out.push(p);
+          if (out.length >= maxFiles) break;
+        }
+        if (out.length >= maxFiles) break;
+      }
+
+      out.sort((a, b) => a.localeCompare(b));
+      return out;
+    };
+
+    /** @type {string[]} */
+    let allFiles = [];
+    const selected = new Set();
+
+    /** @param {string} rel */
+    const renderRowLabel = (rel) => `${selected.has(rel) ? '☑' : '☐'} ${rel}`;
+
+    const renderFooter = () => {
+      footer.innerHTML = '';
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'btn btnSmall';
+      addBtn.textContent = `Add Selected (${selected.size})`;
+      addBtn.disabled = selected.size === 0;
+      addBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (selected.size === 0) return;
+        try { onAdd(Array.from(selected)); } catch {}
+        close();
+      });
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'btn btnSmall';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        close();
+      });
+
+      footer.appendChild(addBtn);
+      footer.appendChild(cancelBtn);
+    };
+
+    const renderList = () => {
+      list.innerHTML = '';
+      const q = String(search.value || '').trim().toLowerCase();
+      const maxShow = 600;
+      let shown = 0;
+
+      const src = Array.isArray(allFiles) ? allFiles : [];
+      for (const rel of src) {
+        if (!rel) continue;
+        if (q) {
+          const hay = String(rel).toLowerCase();
+          if (!hay.includes(q)) continue;
+        }
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'menuItem';
+        btn.textContent = renderRowLabel(rel);
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (selected.has(rel)) selected.delete(rel);
+          else selected.add(rel);
+          btn.textContent = renderRowLabel(rel);
+          renderFooter();
+        });
+        list.appendChild(btn);
+
+        shown++;
+        if (shown >= maxShow) break;
+      }
+
+      if (shown === 0) {
+        const empty = document.createElement('button');
+        empty.type = 'button';
+        empty.className = 'menuItem';
+        empty.textContent = 'No matching images found';
+        empty.disabled = true;
+        list.appendChild(empty);
+      } else if (src.length > maxShow) {
+        const note = document.createElement('button');
+        note.type = 'button';
+        note.className = 'menuItem';
+        note.textContent = `Showing ${maxShow} max. Refine search…`;
+        note.disabled = true;
+        list.appendChild(note);
+      }
+
+      renderFooter();
+    };
+
+    search.addEventListener('input', () => {
+      renderList();
+      scheduleReposition();
+    });
+    search.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
+
+    // Initial state
+    list.innerHTML = '';
+    const loading = document.createElement('button');
+    loading.type = 'button';
+    loading.className = 'menuItem';
+    loading.textContent = 'Loading…';
+    loading.disabled = true;
+    list.appendChild(loading);
+    renderFooter();
+
+    Promise.resolve(listMatchingFiles())
+      .then((files) => {
+        if (closed) return;
+        allFiles = Array.isArray(files) ? files : [];
+        renderList();
+        scheduleReposition();
+        try { search.focus(); } catch {}
+      })
+      .catch(() => {
+        if (closed) return;
+        list.innerHTML = '';
+        const err = document.createElement('button');
+        err.type = 'button';
+        err.className = 'menuItem';
+        err.textContent = 'Failed to list project files';
+        err.disabled = true;
+        list.appendChild(err);
+        renderFooter();
+      });
+    return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
 /** @param {any} sprite @param {AnimSpriteEditSnapshot} snap */
 function restoreSnapshot(sprite, snap) {
   if (!isAnimatedSprite(sprite)) return;
@@ -120,7 +441,7 @@ function syncPlaybackUI(host, ui) {
   const sprite = host._animSpriteTarget;
   const canPlay = isAnimatedSprite(sprite) && !!host._animSpriteAnimName;
   ui.animSpritePlayBtn.disabled = !canPlay;
-  ui.animSpritePlayBtn.textContent = host._animSpritePreviewPlaying ? 'Pause' : 'Play';
+  ui.animSpritePlayBtn.textContent = 'Play';
 
   if (ui.animSpriteOkBtn) ui.animSpriteOkBtn.disabled = !isAnimatedSprite(sprite);
   if (ui.animSpriteCancelBtn) ui.animSpriteCancelBtn.disabled = !isAnimatedSprite(sprite);
@@ -165,7 +486,6 @@ export function openAnimSpriteEditor(host, ui) {
   host._animSpriteTarget = obj;
   host._animSpriteAnimName = null;
   host._animSpriteFrameIndex = null;
-  host._animSpritePreviewPlaying = false;
   host._animSpriteEditSnapshot = captureSnapshot(obj);
 
   // Capture prior playback state so the editor can preview frames in the viewport
@@ -186,8 +506,6 @@ export function openAnimSpriteEditor(host, ui) {
 /** @param {any} host @param {AnimSpriteUI} ui */
 export function closeAnimSpriteEditor(host, ui) {
   if (!ui.animSpriteModal) return;
-
-  host._animSpritePreviewPlaying = false;
 
   // Restore prior playback state if possible.
   const sprite = host._animSpriteTarget;
@@ -230,17 +548,49 @@ export function cancelAnimSpriteEditor(host, ui) {
 }
 
 /** Toggle preview play/pause inside the editor. @param {any} host @param {AnimSpriteUI} ui */
-export function toggleAnimSpritePlay(host, ui) {
+export async function toggleAnimSpritePlay(host, ui) {
   const sprite = host._animSpriteTarget;
   const animName = host._animSpriteAnimName;
   if (!isAnimatedSprite(sprite) || !animName) return;
+  if (!(sprite.animations instanceof Map)) return;
 
-  if (host._animSpritePreviewPlaying) {
-    try { sprite.pause?.(); } catch { try { sprite.isPlaying = false; } catch {} }
-    host._animSpritePreviewPlaying = false;
+  const anim = sprite.animations.get(animName);
+  if (!anim || !Array.isArray(anim.frames) || anim.frames.length === 0) return;
+
+  // Build a minimal payload for the preview window.
+  const fps = Number(anim.fps);
+  const frames = anim.frames.slice();
+
+  /** @type {any} */
+  let payload;
+  if (typeof frames[0] === 'string') {
+    payload = {
+      kind: 'images',
+      name: animName,
+      fps: Number.isFinite(fps) ? fps : 10,
+      loop: true,
+      frames,
+    };
   } else {
-    try { sprite.play?.(animName, true); } catch {}
-    host._animSpritePreviewPlaying = true;
+    payload = {
+      kind: 'sheet',
+      name: animName,
+      fps: Number.isFinite(fps) ? fps : 10,
+      loop: true,
+      frames,
+      sheetSrc: String(sprite.textureKey || ''),
+      frameWidth: Number(sprite.frameWidth) || 0,
+      frameHeight: Number(sprite.frameHeight) || 0,
+    };
+  }
+
+  try {
+    const api = /** @type {any} */ (window).electronAPI;
+    if (api && typeof api.openAnimSpritePreview === 'function') {
+      await api.openAnimSpritePreview(payload);
+    }
+  } catch (e) {
+    console.error(e);
   }
 
   syncPlaybackUI(host, ui);
@@ -296,17 +646,15 @@ export function updateAnimSpriteFramePreview(host, ui) {
     }
 
     // While the editor modal is open, force the sprite to display the selected frame
-    // so it's visible in the main viewport. If preview is playing, don't pause.
+    // so it's visible in the main viewport.
     if (host._animSpriteOpen && isAnimatedSprite(sprite) && (sprite.animations instanceof Map)) {
       const anim = sprite.animations.get(animName);
       if (anim) {
         sprite.currentAnimationName = animName;
         sprite.currentAnimation = anim;
         sprite.currentFrameIndex = idx;
-        if (!host._animSpritePreviewPlaying) {
-          // Pause playback during manual frame inspection.
-          sprite.isPlaying = false;
-        }
+        // Pause playback during manual frame inspection.
+        sprite.isPlaying = false;
       }
     }
   } else {
@@ -364,9 +712,6 @@ export function populateAnimSpriteEditor(host, ui) {
     btn.addEventListener('click', () => {
       host._animSpriteAnimName = k;
       host._animSpriteFrameIndex = null;
-      if (host._animSpritePreviewPlaying && isAnimatedSprite(sprite)) {
-        try { sprite.play?.(k, true); } catch {}
-      }
       populateAnimSpriteEditor(host, ui);
     });
     ui.animSpriteAnimList.appendChild(btn);
@@ -445,27 +790,28 @@ export function renderAnimSpriteFrames(host, ui) {
   }
 
   const frames = anim.frames;
-  const isImageFrames = frames.length > 0 && typeof frames[0] === 'string';
-
-  if (frames.length === 0) {
-    host._animSpriteFrameIndex = null;
-    updateAnimSpriteFramePreview(host, ui);
-    return;
-  }
+  const isImageFrames = frames.length === 0 || typeof frames[0] === 'string';
 
   // Default to the sprite's current frame when editing its current animation.
-  if (host._animSpriteFrameIndex === null || host._animSpriteFrameIndex === undefined) {
-    const preferredIdx = (sprite.currentAnimationName === animName)
-      ? Number(sprite.currentFrameIndex)
-      : 0;
-    host._animSpriteFrameIndex = Number.isFinite(preferredIdx)
-      ? Math.max(0, Math.min(frames.length - 1, Math.trunc(preferredIdx)))
-      : 0;
+  if (frames.length === 0) {
+    host._animSpriteFrameIndex = null;
+  } else {
+    if (host._animSpriteFrameIndex === null || host._animSpriteFrameIndex === undefined) {
+      const preferredIdx = (sprite.currentAnimationName === animName)
+        ? Number(sprite.currentFrameIndex)
+        : 0;
+      host._animSpriteFrameIndex = Number.isFinite(preferredIdx)
+        ? Math.max(0, Math.min(frames.length - 1, Math.trunc(preferredIdx)))
+        : 0;
+    }
+
+    let selectedIndex = Number(host._animSpriteFrameIndex);
+    if (!Number.isFinite(selectedIndex) || selectedIndex < 0 || selectedIndex >= frames.length) selectedIndex = 0;
+    host._animSpriteFrameIndex = selectedIndex;
   }
 
   let selectedIndex = Number(host._animSpriteFrameIndex);
-  if (!Number.isFinite(selectedIndex) || selectedIndex < 0 || selectedIndex >= frames.length) selectedIndex = 0;
-  host._animSpriteFrameIndex = selectedIndex;
+  if (!Number.isFinite(selectedIndex)) selectedIndex = -1;
   if (isImageFrames && !Array.isArray(anim.images)) {
     anim.images = new Array(frames.length).fill(null);
   }
@@ -509,11 +855,6 @@ export function renderAnimSpriteFrames(host, ui) {
     cell.dataset.index = String(i);
     cell.addEventListener('click', () => {
       host._animSpriteFrameIndex = i;
-      if (host._animSpritePreviewPlaying && isAnimatedSprite(sprite)) {
-        try { sprite.pause?.(); } catch { try { sprite.isPlaying = false; } catch {} }
-        host._animSpritePreviewPlaying = false;
-        syncPlaybackUI(host, ui);
-      }
       const strip = ui.animSpriteFramesStrip;
       if (strip) {
         for (const el of Array.from(strip.children)) {
@@ -623,6 +964,74 @@ export function renderAnimSpriteFrames(host, ui) {
 
     ui.animSpriteFramesStrip.appendChild(cell);
   }
+
+  // Add-frames button after the last frame.
+  const addCell = document.createElement('div');
+  addCell.className = 'frameCell frameCellAdd';
+  addCell.dataset.index = 'add';
+
+  const addLabel = document.createElement('div');
+  addLabel.className = 'frameIdx';
+  addLabel.textContent = 'Add frame(s)';
+  addCell.appendChild(addLabel);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'btn btnSmall frameAddBtn';
+  addBtn.textContent = isImageFrames ? '+ Add Images…' : '+ Add Frame';
+
+  addBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // If this animation uses image frames, allow selecting multiple project images.
+    if (isImageFrames) {
+      const opened = openImageMultiPicker(addBtn, (selectedRelPaths) => {
+        const rels = Array.isArray(selectedRelPaths) ? selectedRelPaths : [];
+        if (rels.length === 0) return;
+
+        const beforeLen = frames.length;
+        for (const rel of rels) {
+          const cleanRel = String(rel || '').replace(/^\/+/, '');
+          if (!cleanRel) continue;
+          const url = cleanRel.startsWith('fluxion://') ? cleanRel : `fluxion://workspace/${cleanRel}`;
+          frames.push(url);
+        }
+
+        if (!Array.isArray(anim.images)) anim.images = new Array(frames.length).fill(null);
+        if (!Array.isArray(anim._frameKeys)) anim._frameKeys = frames.slice();
+        while (anim.images.length < frames.length) anim.images.push(null);
+        while (anim._frameKeys.length < frames.length) anim._frameKeys.push(String(frames[anim._frameKeys.length] || ''));
+
+        // Select first newly added frame.
+        host._animSpriteFrameIndex = beforeLen < frames.length ? beforeLen : host._animSpriteFrameIndex;
+        renderAnimSpriteFrames(host, ui);
+      });
+      if (!opened) {
+        setAnimSpriteError(host, ui, 'File picker unavailable (electronAPI.listProjectDir missing).');
+      }
+      return;
+    }
+
+    // Non-image animations: add a reasonable default frame.
+    try {
+      if (frames.length > 0 && typeof frames[0] === 'number') {
+        const last = Number(frames[frames.length - 1]);
+        const next = Number.isFinite(last) ? (Math.trunc(last) + 1) : frames.length;
+        frames.push(next);
+      } else if (frames.length > 0 && frames[0] && typeof frames[0] === 'object') {
+        const f0 = /** @type {any} */ (frames[frames.length - 1]);
+        frames.push({ x: Number(f0.x) || 0, y: Number(f0.y) || 0, w: Number(f0.w ?? f0.width) || 0, h: Number(f0.h ?? f0.height) || 0 });
+      } else {
+        frames.push(0);
+      }
+      host._animSpriteFrameIndex = frames.length - 1;
+      renderAnimSpriteFrames(host, ui);
+    } catch {}
+  });
+
+  addCell.appendChild(addBtn);
+  ui.animSpriteFramesStrip.appendChild(addCell);
 
   updateAnimSpriteFramePreview(host, ui);
   syncPlaybackUI(host, ui);

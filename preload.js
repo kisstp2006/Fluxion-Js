@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
   resize: (width, height) => ipcRenderer.send('window-resize', width, height),
+  setContentSize: (width, height) => ipcRenderer.send('window-set-content-size', width, height),
   saveDebugFile: (filename, content) => ipcRenderer.send('save-debug-file', filename, content),
   // Writes an absolute path within the project folder (dev mode). Returns {ok, path?, error?}.
   saveProjectFile: (absolutePath, content) => ipcRenderer.invoke('save-project-file', absolutePath, content),
@@ -45,5 +46,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts),
 
   // Version helpers (About dialog)
-  getVersions: () => ipcRenderer.invoke('get-versions')
+  getVersions: () => ipcRenderer.invoke('get-versions'),
+
+  // AnimatedSprite preview window (editor workflow)
+  openAnimSpritePreview: (payload) => ipcRenderer.invoke('open-anim-sprite-preview', payload),
+  onAnimSpritePreviewData: (cb) => {
+    if (typeof cb !== 'function') return;
+    ipcRenderer.removeAllListeners('anim-sprite-preview-data');
+    ipcRenderer.on('anim-sprite-preview-data', (_event, payload) => {
+      try { cb(payload); } catch {}
+    });
+  },
 }); 
