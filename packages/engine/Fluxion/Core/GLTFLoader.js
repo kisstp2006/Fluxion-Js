@@ -2,7 +2,7 @@
  * GLTF loader integration for Fluxion-Js.
  * Converts GLTF models to Fluxion Mesh objects.
  * 
- * Requires: minimal-gltf-loader.js from 3rdParty folder
+ * Requires: minimal-gltf-loader.js from third-party folder
  */
 
 import Mesh from './Mesh.js';
@@ -35,7 +35,7 @@ export async function loadGLTF(url, gl, renderer) {
                 // The user should add an import map or install gl-matrix
                 try {
                     // Use import with a relative path - the browser will handle URL encoding
-                    const loaderPath = new URL('../../3rdParty/minimal-gltf-loader.js', import.meta.url).href;
+                    const loaderPath = new URL('../../../../third-party/minimal-gltf-loader.js', import.meta.url).href;
                     const module = await import(loaderPath);
                     if (module.glTFLoader) {
                         glTFLoader = new module.glTFLoader(gl);

@@ -1,8 +1,8 @@
 // @ts-check
 
-import { Engine, Scene, Sprite, Text } from "../../Fluxion/index.js";
+import { Engine, Scene, Sprite, Text } from "../../packages/engine/Fluxion/index.js";
 
-/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Renderer.js").default} Renderer */
 
 const game = {
   /** @type {Scene | null} */
@@ -29,7 +29,7 @@ const game = {
     const scene = new Scene();
 
     // Add a sprite to the scene
-    const sprite = new Sprite(renderer, "../../Fluxion/Icon/Fluxion_icon.png", 200, 200, 96, 96);
+    const sprite = new Sprite(renderer, "../../packages/engine/Fluxion/Icon/Fluxion_icon.png", 200, 200, 96, 96);
     scene.add(sprite);
 
     // Add some text

@@ -3,12 +3,12 @@
 This is the smallest “move a sprite with input” example.
 
 ```js
-import Engine from "../../Fluxion/Core/Engine.js";
-import Sprite from "../../Fluxion/Core/Sprite.js";
-import Input from "../../Fluxion/Core/Input.js";
+import Engine from "../../packages/engine/Fluxion/Core/Engine.js";
+import Sprite from "../../packages/engine/Fluxion/Core/Sprite.js";
+import Input from "../../packages/engine/Fluxion/Core/Input.js";
 
 const input = new Input();
-const FluxionLogo = "../../Fluxion/Icon/Fluxion_icon.png";
+const FluxionLogo = "../../packages/engine/Fluxion/Icon/Fluxion_icon.png";
 
 const game = {
   spriteList: [],

@@ -1,14 +1,14 @@
 // @ts-check
 
-import { Engine, SceneLoader, Input } from "../../Fluxion/index.js";
+import { Engine, SceneLoader, Input } from "../../packages/engine/Fluxion/index.js";
 
 const SCENE_URL = new URL('./scene2.xml', import.meta.url).toString();
 
-/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
-/** @typedef {import("../../Fluxion/Core/Scene.js").default} Scene */
-/** @typedef {import("../../Fluxion/Core/ClickableArea.js").default} ClickableArea */
-/** @typedef {import("../../Fluxion/Core/Text.js").default} TextNode */
-/** @typedef {import("../../Fluxion/Core/Sprite.js").default} Sprite */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Scene.js").default} Scene */
+/** @typedef {import("../../packages/engine/Fluxion/Core/ClickableArea.js").default} ClickableArea */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Text.js").default} TextNode */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Sprite.js").default} Sprite */
 
 const input = new Input();
 

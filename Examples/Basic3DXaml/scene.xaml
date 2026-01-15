@@ -123,7 +123,7 @@
             color="#cfcfcf"
             layer="2"/>
       <Sprite name="Logo"
-              imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+              imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png"
               x="40"
               y="110"
               width="96"

@@ -1,6 +1,6 @@
 # Examples Guide
 
-Fluxion-Js includes a set of runnable examples in the `Examples/` folder. Each example is a small, focused project with its own `index.html` and `game.js`.
+Fluxion-Js includes a set of runnable examples in the `examples/` folder. Each example is a small, focused project with its own `index.html` and `game.js`.
 
 ## How to run examples
 
@@ -20,8 +20,8 @@ npm run web
 
 3. Open an example in your browser:
 
-- `http://localhost:8080/Examples/ActiveTest/`
-- `http://localhost:8080/Examples/PostProcessing/`
+- `http://localhost:8080/examples/ActiveTest/`
+- `http://localhost:8080/examples/PostProcessing/`
 
 (You can also add `index.html` explicitly if you prefer.)
 
@@ -29,76 +29,76 @@ npm run web
 
 ### Core / Basics
 
-- **ActiveTest** (`Examples/ActiveTest/`)
+- **ActiveTest** (`examples/ActiveTest/`)
 
   - Minimal scene that demonstrates the `active` flag behavior.
 
-- **LayerTest** (`Examples/LayerTest/`)
+- **LayerTest** (`examples/LayerTest/`)
 
   - Loads a scene from `scene.xml` and shows how draw order is controlled by object `layer`.
 
-- **ResolutionTest** (`Examples/ResolutionTest/`)
+- **ResolutionTest** (`examples/ResolutionTest/`)
 
   - Demonstrates how the engine scales/letterboxes to a target resolution.
 
-- **AllNodesTest** (`Examples/AllNodesTest/`)
+- **AllNodesTest** (`examples/AllNodesTest/`)
   - Broad coverage test scene for many built-in node/object types.
 
 ### Animation
 
-- **AnimationTest** (`Examples/AnimationTest/`)
+- **AnimationTest** (`examples/AnimationTest/`)
 
   - Sprite sheet animation basics.
 
-- **MultiImageAnimationTest** (`Examples/MultiImageAnimationTest/`)
+- **MultiImageAnimationTest** (`examples/MultiImageAnimationTest/`)
 
   - Animation using multiple images/frames.
 
-- **Character** (`Examples/Character/`)
+- **Character** (`examples/Character/`)
   - Character-style movement/behavior sample.
 
 ### Text / Fonts
 
-- **TextTest** (`Examples/TextTest/`)
+- **TextTest** (`examples/TextTest/`)
 
   - Text rendering and updating.
 
-- **FontTest** (`Examples/FontTest/`)
+- **FontTest** (`examples/FontTest/`)
   - Font loading/rendering behavior.
 
 ### Scenes / Loading / UI
 
-- **MultiScene** (`Examples/MultiScene/`)
+- **MultiScene** (`examples/MultiScene/`)
 
   - Switches between a menu and game scene loaded from XML.
   - Controls:
     - Menu: click the icon or press `Enter`
     - Game: `WASD` move, `Escape` to return to menu
 
-- **XamlLoading** (`Examples/XamlLoading/`)
+- **XamlLoading** (`examples/XamlLoading/`)
 
   - Loads a scene from `scene.xaml` and demonstrates hitbox interactions.
   - Controls:
     - Hover/click: interactive sprite reacts
     - Arrow keys: move the camera defined in the scene
 
-- **Jolly3Chapter2Elevator** (`Examples/Jolly3Chapter2Elevator/`)
+- **Jolly3Chapter2Elevator** (`examples/Jolly3Chapter2Elevator/`)
 
   - Larger FNAF game style example (includes assets and sounds).
 
-- **Jolly3Chapter2ElevatorXaml** (`Examples/Jolly3Chapter2ElevatorXaml/`)
+- **Jolly3Chapter2ElevatorXaml** (`examples/Jolly3Chapter2ElevatorXaml/`)
   - XAML-loading variant of the elevator example.
 
 ### Rendering / Effects
 
-- **PostProcessing** (`Examples/PostProcessing/`)
+- **PostProcessing** (`examples/PostProcessing/`)
 
   - Demonstrates post-processing effects.
   - Controls: `1` grayscale, `2` blur, `3` CRT, `4` contrast, `0` clear
 
-- **SpriteComparison** (`Examples/SpriteComparison/`)
+- **SpriteComparison** (`examples/SpriteComparison/`)
   - Compares sprite usage/performance patterns.
 
 ## Import patterns (not a runnable example)
 
-- `Examples/IMPORT_EXAMPLES.js` shows different ways to import Fluxion modules (from `Fluxion/index.js`, from `Fluxion/Core/index.js`, and from `Fluxion/extras.js`).
+- `examples/IMPORT_EXAMPLES.js` shows different ways to import Fluxion modules (from `packages/engine/Fluxion/index.js`, from `packages/engine/Fluxion/Core/index.js`, and from `packages/engine/Fluxion/extras.js`).

@@ -29,7 +29,19 @@ function parseNpmVersionFromEnv() {
 
 function readFluxionEngineVersion(engineRootAbs = __dirname) {
   try {
-    const p = path.join(path.resolve(String(engineRootAbs || __dirname)), 'Fluxion', 'version.py');
+    const root = path.resolve(String(engineRootAbs || __dirname));
+    const candidates = [
+      path.join(root, 'packages', 'engine', 'Fluxion', 'version.py'),
+      path.join(root, 'Fluxion', 'version.py'),
+    ];
+    const p = candidates.find((fp) => {
+      try {
+        return fs.existsSync(fp);
+      } catch {
+        return false;
+      }
+    });
+    if (!p) throw new Error('version.py not found');
     const txt = fs.readFileSync(p, 'utf8');
     const get = (key) => {
       const re = new RegExp(`^\\s*${key}\\s*=\\s*\"([^\"]*)\"`, 'm');
@@ -50,13 +62,15 @@ function readFluxionEngineVersion(engineRootAbs = __dirname) {
 function resolveFluxionInstall(enginePathAbs) {
   const p = path.resolve(String(enginePathAbs || __dirname));
 
-  // Accept either:
-  // - an engine root folder that contains a "Fluxion" folder
-  // - a direct path to the "Fluxion" folder itself
-  const asRoot = path.join(p, 'Fluxion');
+  // Accept either (new or legacy layouts):
+  // - engine root folder that contains packages/engine/Fluxion
+  // - engine root folder that contains Fluxion (legacy)
+  // - a direct path to the Fluxion folder itself
+  const asMonorepoRoot = path.join(p, 'packages', 'engine', 'Fluxion');
+  const asLegacyRoot = path.join(p, 'Fluxion');
   const rootHasFluxion = (() => {
     try {
-      return fs.statSync(asRoot).isDirectory();
+      return fs.statSync(asMonorepoRoot).isDirectory() || fs.statSync(asLegacyRoot).isDirectory();
     } catch {
       return false;
     }
@@ -73,7 +87,15 @@ function resolveFluxionInstall(enginePathAbs) {
     }
   })();
 
-  if (rootHasFluxion) return { engineRootAbs: p, fluxionDirAbs: asRoot };
+  if (rootHasFluxion) {
+    const fluxionDirAbs = (() => {
+      try {
+        if (fs.statSync(asMonorepoRoot).isDirectory()) return asMonorepoRoot;
+      } catch { /* ignore */ }
+      return asLegacyRoot;
+    })();
+    return { engineRootAbs: p, fluxionDirAbs };
+  }
   if (isFluxionFolder) return { engineRootAbs: path.dirname(p), fluxionDirAbs: p };
   return { engineRootAbs: p, fluxionDirAbs: null };
 }
@@ -127,7 +149,7 @@ function safeProjectFilenameFromName(name) {
 }
 
 let mainWindow;
-const iconPath = "./Fluxion/Icon/Fluxion_icon.ico";
+const iconPath = "./packages/engine/Fluxion/Icon/Fluxion_icon.ico";
 
 // Filesystem root used by the editor for browsing/loading assets.
 // Defaults to this repo, but can be changed to any folder via IPC.
@@ -212,7 +234,7 @@ if (!gotTheLock) {
       mainWindow = null;
     });
 
-    mainWindow.loadFile("./Examples/BasicEditor/index.html");
+    mainWindow.loadFile("./packages/editor/BasicEditor/index.html");
   });
 
   // Window Management IPC Handlers
@@ -807,7 +829,7 @@ if (!gotTheLock) {
       if (!install.fluxionDirAbs) {
         return {
           ok: false,
-          error: `Invalid Fluxion install path. Expected either a folder containing "Fluxion/" or the "Fluxion" folder itself.\n\nGot: ${engineRootIn || path.resolve(__dirname)}`,
+          error: `Invalid Fluxion install path. Expected either a folder containing "packages/engine/Fluxion/" (new) or "Fluxion/" (legacy), or a direct path to the "Fluxion" folder itself.\n\nGot: ${engineRootIn || path.resolve(__dirname)}`,
         };
       }
 

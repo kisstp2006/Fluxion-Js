@@ -4,7 +4,7 @@ This guide explains how to use the GLTF loader integration in Fluxion-Js to load
 
 ## Prerequisites
 
-1. **GLTF Loader Library**: The `minimal-gltf-loader.js` file must be available in the `3rdParty` folder
+1. **GLTF Loader Library**: The `minimal-gltf-loader.js` file must be available in the `third-party` folder
 2. **gl-matrix**: The loader requires `gl-matrix` library (vec3, vec4, quat, mat4)
 3. **WebGL Context**: A WebGL rendering context is required
 
@@ -44,7 +44,7 @@ You can load GLTF files directly in your scene XAML files:
 You can load GLTF files programmatically:
 
 ```javascript
-import { Engine, Scene, loadGLTF, MeshNode } from "./Fluxion/index.js";
+import { Engine, Scene, loadGLTF, MeshNode } from "./packages/engine/Fluxion/index.js";
 
 const game = {
     currentScene: null,
@@ -235,7 +235,7 @@ GLTF materials are converted to Fluxion's PBR material system:
 **Error**: `GLTF loader not available`
 
 **Solution**: Make sure `minimal-gltf-loader.js` is loaded before using the GLTF loader. You can:
-1. Add it to your HTML: `<script src="3rdParty/minimal-gltf-loader.js"></script>`
+1. Add it to your HTML: `<script src="third-party/minimal-gltf-loader.js"></script>`
 2. Or import it as a module (if using ES modules)
 
 ### gl-matrix Not Found

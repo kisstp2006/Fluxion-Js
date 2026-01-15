@@ -1,9 +1,9 @@
 // @ts-check
 
-import { Engine, Sprite, Input } from "../../Fluxion/index.js";
+import { Engine, Sprite, Input } from "../../packages/engine/Fluxion/index.js";
 
 const input = new Input();
-const LOGO = new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
+const LOGO = new URL('../../packages/engine/Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
 
 function setActiveEffectsText(text) {
     const el = document.getElementById("activeEffects");

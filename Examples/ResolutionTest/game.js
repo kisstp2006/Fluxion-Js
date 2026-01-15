@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, Text, Input, Sprite } from '../../Fluxion/index.js';
+import { Engine, Text, Input, Sprite } from '../../packages/engine/Fluxion/index.js';
 
 const input = new Input();
 
@@ -18,7 +18,7 @@ class ResolutionGame {
 
     init(renderer) {
         // Put a sprite on screen so MSAA differences are visible when rotated.
-        const LOGO = new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
+        const LOGO = new URL('../../packages/engine/Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString();
         this.logo = new Sprite(renderer, LOGO, 440, 160, 400, 400);
 
         // Create text overlays

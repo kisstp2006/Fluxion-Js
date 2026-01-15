@@ -1,7 +1,7 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea, MeshNode, DirectionalLight, PointLight, SpotLight, loadGLTF } from "../../Fluxion/index.js";
-import Scene from "../../Fluxion/Core/Scene.js";
+import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSprite, Sprite, Text, ClickableArea, MeshNode, DirectionalLight, PointLight, SpotLight, loadGLTF } from "../../engine/Fluxion/index.js";
+import Scene from "../../engine/Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
@@ -47,7 +47,7 @@ import {
 
 import * as InspectorFields from "./inspectorFields.js";
 
-/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../engine/Fluxion/Core/Renderer.js").default} Renderer */
 
 const ui = {
   aboutModal: /** @type {HTMLDivElement|null} */ (null),
@@ -141,7 +141,7 @@ const ui = {
  * - Draws simple 3D debug overlays for the selection
  */
 const game = {
-  /** @type {import("../../Fluxion/Core/Scene.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Scene.js").default | null} */
   currentScene: null,
 
   /** @type {any | null} */
@@ -163,20 +163,20 @@ const game = {
   /** @type {Renderer | null} */
   _renderer: null,
 
-  /** @type {import("../../Fluxion/Core/Input.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Input.js").default | null} */
   _input: null,
 
-  /** @type {import("../../Fluxion/Core/Camera.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Camera.js").default | null} */
   _editorCamera2D: null,
-  /** @type {import("../../Fluxion/Core/Camera3D.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Camera3D.js").default | null} */
   _editorCamera3D: null,
-  /** @type {import("../../Fluxion/Core/Camera.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Camera.js").default | null} */
   _sceneCamera2D: null,
-  /** @type {import("../../Fluxion/Core/Camera.js").default[]} */
+  /** @type {import("../../engine/Fluxion/Core/Camera.js").default[]} */
   _sceneCameras2D: [],
-  /** @type {import("../../Fluxion/Core/Camera3D.js").default | null} */
+  /** @type {import("../../engine/Fluxion/Core/Camera3D.js").default | null} */
   _sceneCamera3D: null,
-  /** @type {import("../../Fluxion/Core/Camera3D.js").default[]} */
+  /** @type {import("../../engine/Fluxion/Core/Camera3D.js").default[]} */
   _sceneCameras3D: [],
   _usingEditorCamera2D: false,
   _usingEditorCamera3D: false,
@@ -352,7 +352,7 @@ const game = {
   /** @type {string[]} */
   _addNodeRecent: [],
 
-  _defaultSpriteIconUrl: new URL('../../Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString(),
+  _defaultSpriteIconUrl: new URL('../../engine/Fluxion/Icon/Fluxion_icon.png', import.meta.url).toString(),
 
   _animSpriteOpen: false,
   /** @type {any|null} */
@@ -366,7 +366,7 @@ const game = {
 
   _inspectorAutoRefreshT: 0,
 
-  _speakerIconUrl: new URL('../../Fluxion/Icon/Speaker.png', import.meta.url).toString(),
+  _speakerIconUrl: new URL('../../engine/Fluxion/Icon/Speaker.png', import.meta.url).toString(),
   /** @type {WebGLTexture|null} */
   _speakerIconTexture: null,
   /** @type {Promise<boolean>|null} */
@@ -4872,7 +4872,7 @@ const game = {
     this._requestViewportSync(r);
   },
 
-  /** @param {import("../../Fluxion/Core/Camera3D.js").default} cam3 */
+  /** @param {import("../../engine/Fluxion/Core/Camera3D.js").default} cam3 */
   _updateEditorCamera3DTarget(cam3) {
     const st = this._editorCam3DState;
     const yaw = st.yaw;

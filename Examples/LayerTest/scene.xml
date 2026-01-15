@@ -3,13 +3,13 @@
 
     <!-- Background Layer (-1) -->
     <!-- Using the icon as a background tile or just a large sprite -->
-    <Sprite name="Background" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="100" y="100" width="400" height="400" layer="-1" />
+    <Sprite name="Background" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="100" y="100" width="400" height="400" layer="-1" />
     
     <!-- Middle Layer (0) - Default -->
-    <Sprite name="Middle" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="200" y="200" width="200" height="200" layer="0" />
+    <Sprite name="Middle" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="200" y="200" width="200" height="200" layer="0" />
 
     <!-- Foreground Layer (1) -->
-    <Sprite name="Foreground" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="250" y="250" width="100" height="100" layer="1" />
+    <Sprite name="Foreground" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="250" y="250" width="100" height="100" layer="1" />
 
     <!-- Text on top (10) -->
     <Text name="LayerInfo" text="Layers: -1 (Big), 0 (Med), 1 (Small)" x="50" y="50" fontSize="32" color="white" layer="10" />

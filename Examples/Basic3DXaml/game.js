@@ -1,12 +1,12 @@
 // @ts-check
 
-import { Engine, SceneLoader, Vector3 } from "../../Fluxion/index.js";
-import Input from "../../Fluxion/Core/Input.js";
+import { Engine, SceneLoader, Vector3 } from "../../packages/engine/Fluxion/index.js";
+import Input from "../../packages/engine/Fluxion/Core/Input.js";
 
-/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Renderer.js").default} Renderer */
 
 const game = {
-  /** @type {import("../../Fluxion/Core/Scene.js").default | null} */
+  /** @type {import("../../packages/engine/Fluxion/Core/Scene.js").default | null} */
   currentScene: null,
 
   _sunAngle: 0,

@@ -34,8 +34,8 @@ export default class PostProcessing {
   async loadEffect(name, fragmentShaderPath, uniforms = {}, options = {}) {
     try {
       const vertexPath = this.isWebGL2
-        ? '../../Fluxion/Shaders/PostProcessing/vertex_300es.glsl'
-        : '../../Fluxion/Shaders/PostProcessing/vertex.glsl';
+        ? new URL('../Shaders/PostProcessing/vertex_300es.glsl', import.meta.url).href
+        : new URL('../Shaders/PostProcessing/vertex.glsl', import.meta.url).href;
       const vertexSource = await this.loadShader(vertexPath);
       const fragmentSource = await this.loadShader(fragmentShaderPath);
       
@@ -90,8 +90,8 @@ export default class PostProcessing {
   async init(width = 1, height = 1, options = {}) {
     // Load all available effects
     const effect = (name) => this.isWebGL2
-      ? `../../Fluxion/Shaders/PostProcessing/${name}_300es.glsl`
-      : `../../Fluxion/Shaders/PostProcessing/${name}.glsl`;
+      ? new URL(`../Shaders/PostProcessing/${name}_300es.glsl`, import.meta.url).href
+      : new URL(`../Shaders/PostProcessing/${name}.glsl`, import.meta.url).href;
 
     const enableSSS = !!options?.enableScreenSpaceShadows;
 

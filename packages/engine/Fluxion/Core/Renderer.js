@@ -1135,23 +1135,23 @@ export default class Renderer {
     // Load shaders from files.
     // Use dedicated GLSL 3.00 ES sources for WebGL2 and keep GLSL 1.00 sources for WebGL1 fallback.
     const vertexShaderPath = this.isWebGL2
-      ? '../../Fluxion/Shaders/vertex_300es.glsl'
-      : '../../Fluxion/Shaders/vertex.glsl';
+      ? new URL('../Shaders/vertex_300es.glsl', import.meta.url).href
+      : new URL('../Shaders/vertex.glsl', import.meta.url).href;
     const fragmentShaderPath = this.isWebGL2
-      ? '../../Fluxion/Shaders/fragment_300es.glsl'
-      : '../../Fluxion/Shaders/fragment.glsl';
+      ? new URL('../Shaders/fragment_300es.glsl', import.meta.url).href
+      : new URL('../Shaders/fragment.glsl', import.meta.url).href;
 
-    const instancedVertexShaderPath = '../../Fluxion/Shaders/vertex_instanced_300es.glsl';
-    const vertex3DShaderPath = '../../Fluxion/Shaders/vertex3d_300es.glsl';
-    const fragment3DShaderPath = '../../Fluxion/Shaders/fragment3d_300es.glsl';
-    const skyboxVertexShaderPath = '../../Fluxion/Shaders/skybox_vertex_300es.glsl';
-    const skyboxFragmentShaderPath = '../../Fluxion/Shaders/skybox_fragment_300es.glsl';
-    const shadowVertexShaderPath = '../../Fluxion/Shaders/shadow_depth_vertex_300es.glsl';
-    const shadowFragmentShaderPath = '../../Fluxion/Shaders/shadow_depthonly_fragment_300es.glsl';
-    const depthPrepassVertexShaderPath = '../../Fluxion/Shaders/depth_prepass_vertex_300es.glsl';
-    const depthPrepassFragmentShaderPath = '../../Fluxion/Shaders/depth_prepass_fragment_300es.glsl';
-    const normalPrepassVertexShaderPath = '../../Fluxion/Shaders/normal_prepass_vertex_300es.glsl';
-    const normalPrepassFragmentShaderPath = '../../Fluxion/Shaders/normal_prepass_fragment_300es.glsl';
+    const instancedVertexShaderPath = new URL('../Shaders/vertex_instanced_300es.glsl', import.meta.url).href;
+    const vertex3DShaderPath = new URL('../Shaders/vertex3d_300es.glsl', import.meta.url).href;
+    const fragment3DShaderPath = new URL('../Shaders/fragment3d_300es.glsl', import.meta.url).href;
+    const skyboxVertexShaderPath = new URL('../Shaders/skybox_vertex_300es.glsl', import.meta.url).href;
+    const skyboxFragmentShaderPath = new URL('../Shaders/skybox_fragment_300es.glsl', import.meta.url).href;
+    const shadowVertexShaderPath = new URL('../Shaders/shadow_depth_vertex_300es.glsl', import.meta.url).href;
+    const shadowFragmentShaderPath = new URL('../Shaders/shadow_depthonly_fragment_300es.glsl', import.meta.url).href;
+    const depthPrepassVertexShaderPath = new URL('../Shaders/depth_prepass_vertex_300es.glsl', import.meta.url).href;
+    const depthPrepassFragmentShaderPath = new URL('../Shaders/depth_prepass_fragment_300es.glsl', import.meta.url).href;
+    const normalPrepassVertexShaderPath = new URL('../Shaders/normal_prepass_vertex_300es.glsl', import.meta.url).href;
+    const normalPrepassFragmentShaderPath = new URL('../Shaders/normal_prepass_fragment_300es.glsl', import.meta.url).href;
 
     const vertexShaderSource = await this.loadShaderFile(vertexShaderPath);
     const fragmentShaderSource = await this.loadShaderFile(fragmentShaderPath);
@@ -1532,11 +1532,11 @@ export default class Renderer {
 
     if (this.isWebGL2) {
       try {
-        const vCap = await this.loadShaderFile('../../Fluxion/Shaders/IBL/cubemap_capture_vertex_300es.glsl');
-        const fIrr = await this.loadShaderFile('../../Fluxion/Shaders/IBL/irradiance_convolution_fragment_300es.glsl');
-        const fPre = await this.loadShaderFile('../../Fluxion/Shaders/IBL/prefilter_env_fragment_300es.glsl');
-        const vBrdf = await this.loadShaderFile('../../Fluxion/Shaders/IBL/brdf_lut_vertex_300es.glsl');
-        const fBrdf = await this.loadShaderFile('../../Fluxion/Shaders/IBL/brdf_lut_fragment_300es.glsl');
+        const vCap = await this.loadShaderFile(new URL('../Shaders/IBL/cubemap_capture_vertex_300es.glsl', import.meta.url).href);
+        const fIrr = await this.loadShaderFile(new URL('../Shaders/IBL/irradiance_convolution_fragment_300es.glsl', import.meta.url).href);
+        const fPre = await this.loadShaderFile(new URL('../Shaders/IBL/prefilter_env_fragment_300es.glsl', import.meta.url).href);
+        const vBrdf = await this.loadShaderFile(new URL('../Shaders/IBL/brdf_lut_vertex_300es.glsl', import.meta.url).href);
+        const fBrdf = await this.loadShaderFile(new URL('../Shaders/IBL/brdf_lut_fragment_300es.glsl', import.meta.url).href);
 
         const vsCap = this.createShader(this.gl.VERTEX_SHADER, vCap);
         const fsIrr = this.createShader(this.gl.FRAGMENT_SHADER, fIrr);

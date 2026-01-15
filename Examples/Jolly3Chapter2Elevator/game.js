@@ -1,5 +1,5 @@
-import { Engine, Sprite, Input } from "../../Fluxion/index.js";
-import { Audio } from "../../Fluxion/extras.js";
+import { Engine, Sprite, Input } from "../../packages/engine/Fluxion/index.js";
+import { Audio } from "../../packages/engine/Fluxion/extras.js";
 
 const input = new Input(); // Create an Input instance for handling user input
 const elevatorSound = new Audio(); // Create an Audio instance for the elevator sound
@@ -41,7 +41,7 @@ const elevatorDoor = ["./assets/elevator/Door_0.png", "./assets/elevator/Door_1.
 const monitor = ["./assets/elevator/monitor/Active 6_0-0_0.png"];
 
 // Load the Fluxion logo asset
-const FluxionLogo = "../../Fluxion/Icon/Fluxion_bar.png";
+const FluxionLogo = "../../packages/engine/Fluxion/Icon/Fluxion_bar.png";
 
 // Variable to track elevator progress
 var elevatorprogress = 0.0;

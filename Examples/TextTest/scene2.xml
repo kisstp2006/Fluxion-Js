@@ -3,7 +3,7 @@
     
     <Text name="Title" text="Hello Fluxion!" x="24" y="24" fontSize="52" fontFamily="Arial" color="#22ff22" />
     <Text name="Subtitle" text="This is a text node." x="24" y="100" fontSize="24" fontFamily="Arial" color="#d0d0d0" />
-    <Sprite name="Button" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="560" y="360" width="160" height="160">
+    <Sprite name="Button" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="560" y="360" width="160" height="160">
         <ClickableArea name="ButtonHitbox" />
     </Sprite>
     <Text name="Counter" text="Clicks: 0" x="24" y="620" fontSize="40" fontFamily="Arial" color="#ffd84d" />

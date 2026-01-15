@@ -6,7 +6,7 @@
 
 import * as InspectorFields from "./inspectorFields.js";
 import * as InspectorWidgets from "./inspectorWidgets.js";
-import { SceneLoader, Skybox, Material, loadGLTF } from "../../Fluxion/index.js";
+import { SceneLoader, Skybox, Material, loadGLTF } from "../../engine/Fluxion/index.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
 
 // Cache last-applied values for Skybox stubs so inspector rebuilds don't

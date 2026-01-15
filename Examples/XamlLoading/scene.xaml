@@ -10,7 +10,7 @@
 
     <!-- Static Background Sprite -->
     <Sprite name="ClickableSprite"
-            imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+            imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png"
             x="100"
             y="300"
             width="200"
@@ -22,7 +22,7 @@
     <!-- Assuming icon is roughly square, we split it into 2x2 grid -->
     <!-- We'll just animate through them -->
     <AnimatedSprite
-        imageSrc="../../Fluxion/Icon/Fluxion_icon.png"
+        imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png"
         x="800"
         y="300"
         width="200"

@@ -66,7 +66,7 @@ export async function populateAboutVersions(ui) {
   // Fallback for engine version if not provided via IPC.
   if (!engine) {
     try {
-      const r = await fetch('../../Fluxion/version.py');
+      const r = await fetch('../../engine/Fluxion/version.py');
       if (r.ok) {
         const txt = await r.text();
         const mVer = /^\s*VERSION\s*=\s*\"([^\"]*)\"/m.exec(txt);

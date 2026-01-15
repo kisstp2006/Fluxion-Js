@@ -1,8 +1,8 @@
 // @ts-check
 
-import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3, Material, DirectionalLight, PointLight } from "../../Fluxion/index.js";
+import { Engine, Scene, Sprite, Text, Camera3D, Mesh, Mat4, Vector3, Material, DirectionalLight, PointLight } from "../../packages/engine/Fluxion/index.js";
 
-/** @typedef {import("../../Fluxion/Core/Renderer.js").default} Renderer */
+/** @typedef {import("../../packages/engine/Fluxion/Core/Renderer.js").default} Renderer */
 
 class Cube3D {
   /** @param {Renderer} renderer */
@@ -83,7 +83,7 @@ const game = {
     scene.add(cube);
 
     // 2D overlay (layer 1 + sub-layer via Sprite.layer)
-    const logo = new Sprite(renderer, "../../Fluxion/Icon/Fluxion_icon.png", 40, 40, 96, 96);
+    const logo = new Sprite(renderer, "../../packages/engine/Fluxion/Icon/Fluxion_icon.png", 40, 40, 96, 96);
     logo.setLayer(1);
     scene.add(logo);
 

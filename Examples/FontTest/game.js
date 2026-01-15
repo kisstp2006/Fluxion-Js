@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, SceneLoader } from "../../Fluxion/index.js";
+import { Engine, SceneLoader } from "../../packages/engine/Fluxion/index.js";
 
 const SCENE_URL = new URL('./scene.xml', import.meta.url).toString();
 

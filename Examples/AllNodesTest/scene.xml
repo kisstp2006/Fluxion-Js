@@ -2,16 +2,16 @@
     <Camera name="MainCamera" x="0" y="0" zoom="1" rotation="0" />
     
     <!-- Standard Sprite -->
-    <Sprite name="LogoSprite" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="320" y="360" width="100" height="100" />
+    <Sprite name="LogoSprite" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="320" y="360" width="100" height="100" />
     
     <!-- Animated Sprite 
          Using the same image as a "spritesheet" just to demonstrate the node.
          Assuming the image is the frame itself. 
     -->
-    <AnimatedSprite name="AnimSprite" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="960" y="360" width="100" height="100" frameWidth="512" frameHeight="512">
+    <AnimatedSprite name="AnimSprite" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="960" y="360" width="100" height="100" frameWidth="512" frameHeight="512">
         <Animation name="spin" frames="0" speed="0.5" loop="true" autoplay="true" />
     </AnimatedSprite>
     
     <!-- Audio Node -->
-    <Audio name="BackgroundAudio" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" volume="0.2" autoplay="true" />
+    <Audio name="BackgroundAudio" src="../../examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" volume="0.2" autoplay="true" />
 </Scene>

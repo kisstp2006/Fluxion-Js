@@ -1,7 +1,7 @@
 // ============================================================================
 // NEW IMPROVED VERSION - Single line import!
 // ============================================================================
-import { Engine, Input, SceneLoader } from "../../Fluxion/index.js";
+import { Engine, Input, SceneLoader } from "../../packages/engine/Fluxion/index.js";
 
 const input = new Input();
 

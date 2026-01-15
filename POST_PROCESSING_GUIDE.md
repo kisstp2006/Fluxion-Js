@@ -13,7 +13,7 @@ The Fluxion-Js engine includes a **comprehensive post-processing system** that a
 Enable post-processing when creating the Engine:
 
 ```javascript
-import { Engine } from "./Fluxion/index.js";
+import { Engine } from "./packages/engine/Fluxion/index.js";
 
 const game = {
     // ... your game code
@@ -125,7 +125,7 @@ if (pp.activeEffects.includes("blur")) {
 Here's a complete example with keyboard controls:
 
 ```javascript
-import { Engine, Sprite, Input } from "./Fluxion/index.js";
+import { Engine, Sprite, Input } from "./packages/engine/Fluxion/index.js";
 
 const input = new Input();
 

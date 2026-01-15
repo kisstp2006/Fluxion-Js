@@ -1259,7 +1259,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 			const preferredRoots = ['Model', 'Texture', 'Textures', 'Images', 'Image', 'Audio', 'Sounds', 'Sound', 'Assets', 'Asset'];
 			/** @type {string[]} */
 			const roots = [];
-			const ignore = new Set(['node_modules', '.git', '.vscode', 'Fluxion', 'Examples', 'Docs', '3rdParty', '_GeneratedTestGame']);
+			const ignore = new Set(['node_modules', '.git', '.vscode', 'packages', 'examples', 'docs', 'third-party', 'tests', 'dist']);
 
 			// Keep only roots that exist.
 			for (const d of preferredRoots) {

@@ -1,5 +1,5 @@
-import { Engine, Input, SceneLoader } from "../../Fluxion/index.js";
-import { Audio } from "../../Fluxion/extras.js";
+import { Engine, Input, SceneLoader } from "../../packages/engine/Fluxion/index.js";
+import { Audio } from "../../packages/engine/Fluxion/extras.js";
 
 const input = new Input();
 

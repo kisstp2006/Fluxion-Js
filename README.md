@@ -84,4 +84,4 @@ For questions, feedback, or suggestions, feel free to reach out via:
 
 ## Resources
 
-- Examples: see the `Examples/` folder
+- Examples: see the `examples/` folder

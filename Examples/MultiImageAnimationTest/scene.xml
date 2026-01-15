@@ -12,7 +12,7 @@
             frames: Comma-separated list of image paths.
             The engine detects these are strings and loads them individually.
         -->
-        <Animation name="Idle" frames="../../Fluxion/Icon/Fluxion_icon.png, ../../Fluxion/Icon/Fluxion_icon.png" speed="0.5" loop="true" autoplay="true" />
+        <Animation name="Idle" frames="../../packages/engine/Fluxion/Icon/Fluxion_icon.png, ../../packages/engine/Fluxion/Icon/Fluxion_icon.png" speed="0.5" loop="true" autoplay="true" />
         
         <!-- Example with hypothetical different images -->
         <!-- <Animation name="Walk" frames="walk1.png, walk2.png, walk3.png" speed="0.1" loop="true" /> -->

@@ -1,4 +1,4 @@
-import { Engine, Sprite, Input, SceneLoader } from "../../Fluxion/index.js";
+import { Engine, Sprite, Input, SceneLoader } from "../../packages/engine/Fluxion/index.js";
 
 const input = new Input(); // Create a new Input instance to handle user input
 

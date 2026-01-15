@@ -6,29 +6,29 @@
          Original order: floor1, floor2, floor3, pipesBg, elevatorDoor, elevator, monitor, logo.
     -->
     
-    <Sprite name="Floor1" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor1.png" 
+    <Sprite name="Floor1" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/floor1.png" 
             x="480" y="2160" width="1242" height="810" />
             
-    <Sprite name="Floor2" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor2.png" 
+    <Sprite name="Floor2" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/floor2.png" 
             x="480" y="3780" width="1242" height="810" />
             
-    <Sprite name="Floor3" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/floor3.png" 
+    <Sprite name="Floor3" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/floor3.png" 
             x="480" y="5400" width="1242" height="810" />
             
-    <Sprite name="PipesBg" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/pipes1.png" 
+    <Sprite name="PipesBg" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/pipes1.png" 
             x="0" y="1944" width="2400" height="1080" />
             
     <!-- Foreground Elements -->
-    <Sprite name="ElevatorDoor" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/Door_0.png" 
+    <Sprite name="ElevatorDoor" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/Door_0.png" 
             x="770" y="1053" width="870" height="1026" />
             
-    <Sprite name="Elevator" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/0.png" 
+    <Sprite name="Elevator" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/0.png" 
             x="0" y="1080" width="2400" height="1080" />
             
-    <Sprite name="Monitor" imageSrc="../../Examples/Jolly3Chapter2Elevator/assets/elevator/monitor/Active 6_0-0_0.png" 
+    <Sprite name="Monitor" imageSrc="../../examples/Jolly3Chapter2Elevator/assets/elevator/monitor/Active 6_0-0_0.png" 
             x="441" y="421" width="475" height="405" />
             
-    <Sprite name="FluxionLogo" imageSrc="../../Fluxion/Icon/Fluxion_bar.png" 
+    <Sprite name="FluxionLogo" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_bar.png" 
             x="96" y="972" width="480" height="162" />
 
         <!-- Screen-edge scroll zones (invisible sprites) -->
@@ -40,7 +40,7 @@
         </Sprite>
 
     <!-- Audio -->
-    <Audio name="ElevatorSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" autoplay="true" />
-    <Audio name="ChiefSound" src="../../Examples/Jolly3Chapter2Elevator/assets/sounds/chief v2 final.mp3" loop="false" autoplay="true" />
+    <Audio name="ElevatorSound" src="../../examples/Jolly3Chapter2Elevator/assets/sounds/elevator loop.mp3" loop="true" autoplay="true" />
+    <Audio name="ChiefSound" src="../../examples/Jolly3Chapter2Elevator/assets/sounds/chief v2 final.mp3" loop="false" autoplay="true" />
 
 </Scene>

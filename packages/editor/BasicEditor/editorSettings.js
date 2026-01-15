@@ -165,7 +165,7 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
 
       const input = document.createElement('input');
       input.type = 'text';
-      input.placeholder = 'Pick Fluxion/version.py to set this automatically';
+      input.placeholder = 'Pick packages/engine/Fluxion/version.py (or legacy Fluxion/version.py) to set this automatically';
       input.value = String(obj.fluxionInstallPath || '');
 
       const browse = document.createElement('button');
@@ -197,17 +197,22 @@ export function rebuildEditorSettingsUI(/** @type {EditorSettingsHost} */ host, 
         const sep = picked.includes('\\') ? '\\' : '/';
 
         // Derive engine root from picked file.
-        // Expected: <engineRoot>/Fluxion/version.py
+        // Expected (new): <engineRoot>/packages/engine/Fluxion/version.py
+        // Expected (legacy): <engineRoot>/Fluxion/version.py
         const parts = picked.split(/[/\\]+/g).filter(Boolean);
         const fileName = String(parts[parts.length - 1] || '').toLowerCase();
         const parentName = String(parts[parts.length - 2] || '').toLowerCase();
 
+        const maybeEngineName = String(parts[parts.length - 3] || '').toLowerCase();
+        const maybePackagesName = String(parts[parts.length - 4] || '').toLowerCase();
+
         if (fileName !== 'version.py' || parentName !== 'fluxion') {
-          window.alert('Please select the engine file at: <engineRoot>/Fluxion/version.py');
+          window.alert('Please select the engine file at: <engineRoot>/packages/engine/Fluxion/version.py (or legacy: <engineRoot>/Fluxion/version.py)');
           return;
         }
 
-        input.value = parts.slice(0, -2).join(sep);
+        const isMonorepoLayout = maybeEngineName === 'engine' && maybePackagesName === 'packages';
+        input.value = parts.slice(0, isMonorepoLayout ? -4 : -2).join(sep);
         apply();
       });
 

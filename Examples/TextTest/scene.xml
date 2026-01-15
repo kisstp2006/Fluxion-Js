@@ -5,7 +5,7 @@
     
     <Text name="Subtitle" text="This is a text node." x="24" y="100" fontSize="24" fontFamily="Arial" color="#d0d0d0" />
     
-    <Sprite name="Button" imageSrc="../../Fluxion/Icon/Fluxion_icon.png" x="560" y="360" width="160" height="160">
+    <Sprite name="Button" imageSrc="../../packages/engine/Fluxion/Icon/Fluxion_icon.png" x="560" y="360" width="160" height="160">
         <ClickableArea name="ButtonHitbox" />
     </Sprite>
     

@@ -1,6 +1,6 @@
 // @ts-check
 
-import { Engine, Sprite, AnimatedSprite } from "../../Fluxion/index.js";
+import { Engine, Sprite, AnimatedSprite } from "../../packages/engine/Fluxion/index.js";
 
 // Helper to generate a simple spritesheet data URL
 function createSpritesheet() {
@@ -42,7 +42,7 @@ const game = {
         // Uses the Fluxion icon
         this.staticSprite = new Sprite(
             renderer, 
-            "../../Fluxion/Icon/Fluxion_icon.png", 
+            "../../packages/engine/Fluxion/Icon/Fluxion_icon.png", 
             320, 360,  // x, y (Pixel coordinates)
             200, 200   // w, h
         );
