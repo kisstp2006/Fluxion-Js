@@ -6,6 +6,8 @@ import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
 import MenuBar from "./menuBar.js";
+import { registerMenuActions } from "./menuActions.js";
+import { registerMenuStructure } from "./menuStructure.js";
 import { Logger } from "./log.js";
 import {
   wireProjectSelectionUI,
@@ -2581,106 +2583,11 @@ const game = {
     // Create menu bar instance
     this.menuBar = new MenuBar();
 
-    // Register menus in order
-    this.menuBar.registerMenu('file', 'File', 1);
-    this.menuBar.registerMenu('view', 'View', 2);
-    this.menuBar.registerMenu('scene', 'Scene', 3);
-    this.menuBar.registerMenu('help', 'Help', 4);
-    this.menuBar.registerMenu('debug', 'Debug', 100);
-
-    // Register File menu items
-    this.menuBar.addMenuItems('file', [
-      { type: 'item', label: 'Create Project...', action: 'file.createProject' },
-      { type: 'item', label: 'Open Project...', action: 'file.openProject' },
-      { type: 'item', label: 'Open Folder...', action: 'file.openFolder' },
-      { type: 'item', label: 'Editor Settings...', action: 'app.settings' },
-      { type: 'separator' },
-      { type: 'item', label: 'Save Scene (Ctrl+S)', action: 'file.saveScene' },
-      { type: 'item', label: 'Reload Scene', action: 'file.reloadScene' },
-      { type: 'item', label: 'Reload App (Ctrl+R)', action: 'app.reload' },
-    ]);
-
-    // Register View menu items
-    this.menuBar.addMenuItems('view', [
-      { type: 'item', label: 'Toggle Help Overlay (F1)', action: 'view.toggleHelp' },
-      { type: 'separator' },
-      { type: 'item', label: 'Mode: 2D', action: 'view.mode2d' },
-      { type: 'item', label: 'Mode: 3D', action: 'view.mode3d' },
-    ]);
-
-    // Register Scene menu items
-    this.menuBar.addMenuItems('scene', [
-      { type: 'item', label: 'Focus Selection (F)', action: 'scene.focusSelection' },
-      { type: 'separator' },
-      { type: 'item', label: 'Add Node...', action: 'scene.addNode' },
-    ]);
-
-    // Register Help menu items
-    this.menuBar.addMenuItems('help', [
-      { type: 'item', label: 'Toggle Help Overlay (F1)', action: 'view.toggleHelp' },
-      { type: 'separator' },
-      { type: 'item', label: 'About', action: 'help.about' },
-    ]);
-
-    // Register Debug menu items
-    this.menuBar.addMenuItems('debug', [
-      { type: 'item', label: 'Reload Scene', action: 'file.reloadScene' },
-      { type: 'item', label: 'Reload App (Ctrl+R)', action: 'app.reload' },
-    ]);
+    // Register menus + menu items
+    registerMenuStructure(this.menuBar);
 
     // Register all action handlers
-    this.menuBar.registerAction('file.createProject', () => {
-      this._createAndOpenNewProject().catch(console.error);
-    });
-
-    this.menuBar.registerAction('file.openProject', () => {
-      this._openProjectFolderStrict().catch(console.error);
-    });
-
-    this.menuBar.registerAction('file.openFolder', () => {
-      this._openWorkspaceFolder().catch(console.error);
-    });
-
-    this.menuBar.registerAction('file.reloadScene', () => {
-      this.loadSelectedScene(renderer).catch(console.error);
-    });
-
-    this.menuBar.registerAction('file.saveScene', () => {
-      this.saveCurrentScene().catch(console.error);
-    });
-
-    this.menuBar.registerAction('app.reload', () => {
-      window.location.reload();
-    });
-
-    this.menuBar.registerAction('app.settings', () => {
-      this._openEditorSettings();
-    });
-
-    this.menuBar.registerAction('view.toggleHelp', () => {
-      this._helpVisible = !this._helpVisible;
-      if (ui.overlay) ui.overlay.style.display = this._helpVisible ? 'block' : 'none';
-    });
-
-    this.menuBar.registerAction('scene.focusSelection', () => {
-      this.focusSelection();
-    });
-
-    this.menuBar.registerAction('scene.addNode', () => {
-      this._openAddNode();
-    });
-
-    this.menuBar.registerAction('view.mode2d', () => {
-      this.setMode('2d');
-    });
-
-    this.menuBar.registerAction('view.mode3d', () => {
-      this.setMode('3d');
-    });
-
-    this.menuBar.registerAction('help.about', () => {
-      this._openAbout();
-    });
+    registerMenuActions(this, ui, renderer);
 
     // Mount to the topbar container
     const topbar = /** @type {HTMLElement|null} */ (document.querySelector('.topbar'));
