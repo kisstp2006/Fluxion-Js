@@ -2,7 +2,7 @@
  * Represents an audio object for playing sound effects or music.
  * Uses the Web Audio API.
  */
-class Audio {
+export default class Audio {
   static audioContext = null;
  
   /**
@@ -162,5 +162,3 @@ class Audio {
       }
   }
 }
-
-export default Audio;
