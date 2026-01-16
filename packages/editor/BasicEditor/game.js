@@ -138,6 +138,7 @@ const ui = {
   assetPanelConsole: /** @type {HTMLDivElement|null} */ (null),
   consoleOutput: /** @type {HTMLDivElement|null} */ (null),
   mainTabViewportBtn: /** @type {HTMLButtonElement|null} */ (null),
+  mainPlayBtn: /** @type {HTMLButtonElement|null} */ (null),
   mainTabsDynamic: /** @type {HTMLDivElement|null} */ (null),
   viewportView: /** @type {HTMLDivElement|null} */ (null),
   scriptView: /** @type {HTMLDivElement|null} */ (null),
@@ -345,7 +346,7 @@ const game = {
   _recentProjects: [],
   _recentProjectsMax: 10,
 
-  /** @type {{ name: string, creator: string, resolution: { width: number, height: number }, engineVersion: string, mainScene?: string, enable2D?: boolean, enable3D?: boolean } | null} */
+  /** @type {{ name: string, creator: string, resolution: { width: number, height: number }, engineVersion: string, startupScene?: string, enable2D?: boolean, enable3D?: boolean } | null} */
   _projectMeta: null,
   /** @type {string[]} */
   _projectMetaFiles: [],
@@ -418,6 +419,9 @@ const game = {
     cwd: '.',
     selected: /** @type {string|null} */ (null),
   },
+
+  /** @type {Set<string>} */
+  _hiddenProjectPaths: new Set(),
 
   _assetBrowserCtl: /** @type {ReturnType<typeof createAssetBrowser> | null} */ (null),
 
@@ -558,6 +562,7 @@ const game = {
     ui.consoleOutput = /** @type {HTMLDivElement} */ (document.getElementById('consoleOutput'));
 
     ui.mainTabViewportBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainTabViewportBtn'));
+    ui.mainPlayBtn = /** @type {HTMLButtonElement} */ (document.getElementById('mainPlayBtn'));
     ui.mainTabsDynamic = /** @type {HTMLDivElement} */ (document.getElementById('mainTabsDynamic'));
     ui.viewportView = /** @type {HTMLDivElement} */ (document.getElementById('viewportView'));
     ui.scriptView = /** @type {HTMLDivElement} */ (document.getElementById('scriptView'));
@@ -623,6 +628,7 @@ const game = {
 
     // Main tabs (viewport + scripts)
     ui.mainTabViewportBtn?.addEventListener('click', () => this._setMainTab('viewport'));
+    ui.mainPlayBtn?.addEventListener('click', () => this.playInNewWindow().catch(console.error));
     ui.scriptSaveBtn?.addEventListener('click', () => this._saveActiveScript().catch(console.error));
     ui.scriptEditorText?.addEventListener('input', () => {
       this._markActiveScriptDirty();
@@ -827,6 +833,121 @@ const game = {
       this._syncViewportToolbarUI();
     });
     ui.vpFocusBtn?.addEventListener('click', () => this.focusSelection());
+
+    // Drag-drop: attach scripts from Asset panel to hierarchy nodes.
+    // Asset browser drags use dataTransfer text/plain with a project-relative path.
+    if (ui.tree) {
+      /** @param {any} p */
+      const isScriptPath = (p) => {
+        const s = String(p || '').trim().toLowerCase();
+        return s.endsWith('.js') || s.endsWith('.mjs');
+      };
+
+      /** @param {DragEvent} e */
+      const getDraggedPath = (e) => {
+        try {
+          const dt = e.dataTransfer;
+          if (!dt) return '';
+          const p = String(
+            dt.getData('application/x-fluxion-asset-path') ||
+            dt.getData('text/plain') ||
+            ''
+          ).trim();
+          if (p) return p;
+          // Fallback for cases where getData() is empty during dragover.
+          try {
+            const g = /** @type {any} */ (window).__fluxionDragAssetPath;
+            return String(g || '').trim();
+          } catch {
+            return '';
+          }
+        } catch {
+          return '';
+        }
+      };
+
+      /** @param {DragEvent} e */
+      const getTargetTreeItem = (e) => {
+        const t = /** @type {HTMLElement|null} */ (e.target instanceof HTMLElement ? e.target : null);
+        return /** @type {HTMLElement|null} */ (t?.closest('.treeItem') || null);
+      };
+
+      const clearTreeDropHighlight = () => {
+        try {
+          const prev = ui.tree?.querySelector('.treeItem.dropScript');
+          if (prev) prev.classList.remove('dropScript');
+        } catch {}
+      };
+
+      ui.tree.addEventListener('dragleave', () => clearTreeDropHighlight());
+      ui.tree.addEventListener('dragend', () => clearTreeDropHighlight());
+
+      ui.tree.addEventListener('dragover', (e) => {
+        const dt = e.dataTransfer;
+        const p = getDraggedPath(e);
+        const hasFluxionType = !!dt && Array.from(dt.types || []).includes('application/x-fluxion-asset-path');
+        if (!isScriptPath(p) && !hasFluxionType) return;
+
+        const item = getTargetTreeItem(e);
+        if (!item) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        try { if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; } catch {}
+
+        clearTreeDropHighlight();
+        item.classList.add('dropScript');
+      });
+
+      ui.tree.addEventListener('drop', (e) => {
+        const p = getDraggedPath(e);
+        if (!isScriptPath(p)) return;
+
+        const item = getTargetTreeItem(e);
+        if (!item) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        clearTreeDropHighlight();
+
+        const obj = /** @type {any} */ (item).__fluxionObj;
+        if (!obj || typeof obj !== 'object') return;
+
+        // Disallow attaching scripts to editor-only XML declarations.
+        if (typeof obj.__xmlTag === 'string') {
+          alert('Scripts can only be attached to scene nodes (not scene declarations like Mesh/Material/Font).');
+          return;
+        }
+
+        const cleanRel = String(p || '')
+          .trim()
+          .replace(/\\/g, '/')
+          .replace(/^\.\//, '')
+          .replace(/^\.\\/, '')
+          .replace(/^\/+/, '')
+          .replace(/\/+$/, '');
+        if (!cleanRel) return;
+
+        const src = `fluxion://workspace/${cleanRel}`;
+
+        try {
+          if (!Array.isArray(obj.scripts)) obj.scripts = [];
+          const scripts = /** @type {any[]} */ (obj.scripts);
+          const already = scripts.some((s) => s && String(s.src || '').trim() === src);
+          if (already) return;
+          scripts.push({ src, enabled: true });
+        } catch (err) {
+          console.error(err);
+          return;
+        }
+
+        // Select target so the inspector shows the script immediately.
+        try { this.setSelectedEntity(obj, { tree: 'sync' }); } catch {}
+        try { this._markInspectorDirty?.(); } catch {}
+        try { this.rebuildInspector?.(); } catch {}
+        try { this.rebuildTree?.(); } catch {}
+      });
+    }
 
     window.addEventListener("keydown", (e) => {
       // Ctrl+S / Cmd+S should work even while typing.
@@ -1648,6 +1769,17 @@ const game = {
       return p ? `fluxion://workspace/${p}` : '';
     };
 
+    /** @param {string} u */
+    const fromWorkspaceUrl = (u) => {
+      const s = String(u || '').trim();
+      const prefix = 'fluxion://workspace/';
+      if (s.startsWith(prefix)) {
+        const rest = s.slice(prefix.length);
+        try { return decodeURIComponent(rest); } catch { return rest; }
+      }
+      return s;
+    };
+
     /** @param {string} base */
     const toPascal = (base) => {
       const raw = String(base || '').replace(/\.[^.]+$/, '');
@@ -1663,10 +1795,10 @@ const game = {
         return `// @ts-check\n\n// ${fileName}\n`;
       }
       if (template === 'functions') {
-        return `// @ts-check\n\n// ${fileName}\n// You can export start(ctx) and update(dt, ctx).\n\nexport function start(ctx) {\n  // ctx.node, ctx.scene, ctx.time\n}\n\nexport function update(dt, ctx) {\n  // dt is seconds\n}\n`;
+        return `// @ts-check\n\n// ${fileName}\n// You can export start(ctx) and update(dt, ctx).\n\nexport function start(ctx) {\n  // ctx.node, ctx.scene, ctx.time, ctx.input\n}\n\nexport function update(dt, ctx) {\n  // dt is seconds\n  // Example: if (ctx.input.getKey('w')) ctx.node.y += 200 * dt;\n}\n`;
       }
       // default: class
-      return `// @ts-check\n\n// ${fileName}\n// Default export can be a class or an object with start/update.\n\nexport default class ${className} {\n  start(ctx) {\n    // this.node, this.scene are injected by ScriptRuntime\n    // ctx.node, ctx.scene, ctx.time\n  }\n\n  update(dt, ctx) {\n    // dt is seconds\n  }\n}\n`;
+      return `// @ts-check\n\n// ${fileName}\n// Default export can be a class or an object with start/update.\n\nexport default class ${className} {\n  start(ctx) {\n    // this.node, this.scene, this.input are injected by ScriptRuntime\n    // ctx.node, ctx.scene, ctx.time, ctx.input\n  }\n\n  update(dt, ctx) {\n    // dt is seconds\n    // Example: if (ctx.input.getKey('w')) this.node.y += 200 * dt;\n  }\n}\n`;
     };
 
     const selLabel = (() => {
@@ -1679,6 +1811,17 @@ const game = {
     })();
 
     const canAttach = !!this.selected;
+    /** @type {string[]} */
+    const attachedScripts = (() => {
+      try {
+        const arr = (this.selected && Array.isArray(/** @type {any} */ (this.selected).scripts))
+          ? /** @type {any[]} */ (/** @type {any} */ (this.selected).scripts)
+          : [];
+        return arr.map((s) => String(s && s.src ? s.src : '')).map((s) => s.trim()).filter(Boolean);
+      } catch {
+        return [];
+      }
+    })();
     const initialName = (() => {
       try {
         const n = /** @type {any} */ (this.selected)?.name;
@@ -1694,6 +1837,7 @@ const game = {
       initialFolderRel,
       canAttach,
       selectionLabel: selLabel,
+      attachedScripts,
     });
     if (!cfg) return;
 
@@ -1743,6 +1887,7 @@ const game = {
         this.selected.scripts.push({ src: toWorkspaceUrl(relPath), enabled: true });
         try { this._markInspectorDirty?.(); } catch {}
         try { this.rebuildInspector?.(); } catch {}
+        try { this.rebuildTree?.(); } catch {}
       } catch {}
     }
 
@@ -1793,6 +1938,7 @@ const game = {
     if (!electronAPI || typeof electronAPI.listProjectDir !== 'function') {
       this._projectMeta = null;
       this._projectMetaFiles = [];
+      this._setHiddenProjectPaths([]);
       this.rebuildInspector();
       return;
     }
@@ -1817,6 +1963,7 @@ const game = {
       if (!primary) {
         this._projectMeta = null;
         this._projectMetaFiles = [];
+        this._setHiddenProjectPaths([]);
         this.rebuildInspector();
         return;
       }
@@ -1828,7 +1975,7 @@ const game = {
       const name = String(data && data.name ? data.name : '').trim() || 'My Game';
       const creator = String(data && data.creator ? data.creator : '');
       const engineVersion = String(data && data.engineVersion ? data.engineVersion : '');
-      const startupScene = String(data && data.mainScene ? data.mainScene : '').trim() || './scene.xml';
+      const startupScene = String(data && (data.startupScene || data.mainScene) ? (data.startupScene || data.mainScene) : '').trim() || './scene.xml';
       const r = /** @type {any} */ (data && data.resolution ? data.resolution : null);
       let w = 1280;
       let h = 720;
@@ -1843,8 +1990,10 @@ const game = {
       const enable2D = (data && typeof data.enable2D === 'boolean') ? data.enable2D : true;
       const enable3D = (data && typeof data.enable3D === 'boolean') ? data.enable3D : true;
 
-      this._projectMeta = { name, creator, resolution: { width: w | 0, height: h | 0 }, engineVersion, mainScene: startupScene, enable2D, enable3D };
+      this._projectMeta = { name, creator, resolution: { width: w | 0, height: h | 0 }, engineVersion, startupScene, enable2D, enable3D };
       this._projectMetaFiles = metaFiles;
+
+      await this._refreshHiddenProjectPaths();
       this._applyRenderLayers();
       this._applyModeAvailability();
       this.rebuildInspector();
@@ -1852,7 +2001,127 @@ const game = {
       console.warn(e);
       this._projectMeta = null;
       this._projectMetaFiles = [];
+      this._setHiddenProjectPaths([]);
       this.rebuildInspector();
+    }
+  },
+
+  /** @param {string[]} paths */
+  _setHiddenProjectPaths(paths) {
+    /** @type {Set<string>} */
+    const next = new Set();
+    for (const p of Array.isArray(paths) ? paths : []) {
+      const s = String(p || '').replace(/\\/g, '/').replace(/^\.\/+/, '').trim();
+      if (s) next.add(s);
+    }
+    this._hiddenProjectPaths = next;
+    try { /** @type {any} */ (window).__fluxionHiddenProjectPaths = next; } catch {}
+  },
+
+  /** @param {string} text @returns {boolean} */
+  _looksLikeGeneratedBootstrapScript(text) {
+    const s = String(text || '');
+    if (!s) return false;
+    if (s.includes('@fluxion-internal bootstrap')) return true;
+    // Back-compat heuristic for older generated projects.
+    if (s.length > 8000) return false;
+    if (!s.includes('New-project bootstrap')) return false;
+    if (!/new\s+Engine\s*\(/.test(s)) return false;
+    return true;
+  },
+
+  /** @param {string} text @returns {boolean} */
+  _looksLikeInternalPlayPreviewScene(text) {
+    const s = String(text || '');
+    if (!s) return false;
+    return s.includes('@fluxion-internal play-preview');
+  },
+
+  async _refreshHiddenProjectPaths() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI || typeof electronAPI.readProjectTextFile !== 'function') {
+      this._setHiddenProjectPaths([]);
+      return;
+    }
+
+    /** @type {string[]} */
+    const hidden = [];
+    try {
+      const srcGame = await electronAPI.readProjectTextFile('src/game.js');
+      if (this._looksLikeGeneratedBootstrapScript(srcGame)) hidden.push('src/game.js');
+    } catch {}
+
+    try {
+      const tmpScene = await electronAPI.readProjectTextFile('.fluxion/playPreviewScene.xml');
+      if (this._looksLikeInternalPlayPreviewScene(tmpScene)) hidden.push('.fluxion/playPreviewScene.xml');
+    } catch {}
+
+    // Back-compat: older builds mistakenly wrote to "fluxion/playPreviewScene.xml".
+    try {
+      const tmpSceneLegacy = await electronAPI.readProjectTextFile('fluxion/playPreviewScene.xml');
+      if (this._looksLikeInternalPlayPreviewScene(tmpSceneLegacy)) hidden.push('fluxion/playPreviewScene.xml');
+    } catch {}
+
+    this._setHiddenProjectPaths(hidden);
+    try { this._assetBrowserCtl?.render?.(); } catch {}
+  },
+
+  async playInNewWindow() {
+    const scene = this.currentScene;
+    if (!scene) {
+      alert('No scene is currently open.');
+      return;
+    }
+
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    if (!electronAPI
+      || typeof electronAPI.openPlayPreview !== 'function'
+      || typeof electronAPI.getWorkspaceRoot !== 'function'
+      || typeof electronAPI.saveProjectFile !== 'function') {
+      alert('Play is only available in the Electron editor.');
+      return;
+    }
+
+    const rel = '.fluxion/playPreviewScene.xml';
+    const marker = '<!-- @fluxion-internal play-preview -->\n';
+    const xml = this._serializeSceneToXml();
+
+    const rootRes = await electronAPI.getWorkspaceRoot();
+    if (!rootRes || !rootRes.ok || !rootRes.path) {
+      alert(`Failed to resolve workspace root: ${rootRes && rootRes.error ? rootRes.error : 'Unknown error'}`);
+      return;
+    }
+
+    const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
+    const relClean = String(rel || '')
+      .replace(/^\.\//, '')
+      .replace(/^\.\\/, '')
+      .replace(/^\/+/, '');
+    const absPath = `${rootAbs}/${relClean}`;
+
+    const writeRes = await electronAPI.saveProjectFile(absPath, marker + xml);
+    if (!writeRes || !writeRes.ok) {
+      alert(`Failed to write play preview scene: ${writeRes && writeRes.error ? writeRes.error : 'Unknown error'}`);
+      return;
+    }
+
+    // Hide the temp file from asset browser/pickers.
+    await this._refreshHiddenProjectPaths();
+
+    const sceneUrl = `fluxion://workspace/${String(rel).replace(/^\/+/, '')}`;
+
+    const rw = Number(this._projectMeta?.resolution?.width) || Number(this._renderer?.targetWidth) || 1920;
+    const rh = Number(this._projectMeta?.resolution?.height) || Number(this._renderer?.targetHeight) || 1080;
+    const title = this._projectMeta?.name ? `${this._projectMeta.name} — Play` : 'Play';
+
+    const res = await electronAPI.openPlayPreview({
+      title,
+      sceneUrl,
+      resolution: { width: rw, height: rh },
+    });
+
+    if (!res || !res.ok) {
+      alert(`Failed to open Play window: ${res && res.error ? res.error : 'Unknown error'}`);
     }
   },
 
@@ -1883,16 +2152,15 @@ const game = {
       creator: String(meta.creator || ''),
       resolution: { width: Number(meta.resolution?.width) || 1280, height: Number(meta.resolution?.height) || 720 },
       engineVersion: String(meta.engineVersion || ''),
-      mainScene: String(meta.mainScene || '').trim() || './scene.xml',
+      startupScene: String(meta.startupScene || '').trim() || './scene.xml',
       enable2D: typeof meta.enable2D === 'boolean' ? meta.enable2D : true,
       enable3D: typeof meta.enable3D === 'boolean' ? meta.enable3D : true,
-      // Preserve mainScene if it exists in the file by writing only known fields? For now,
-      // keep it stable by also attempting to read+merge at save time.
+      // Keep merge-based saves so we don't accidentally drop unknown fields.
     };
 
     for (const rel of this._projectMetaFiles) {
       try {
-        // Merge with existing so we don't accidentally drop fields like mainScene.
+        // Merge with existing so we don't accidentally drop unknown fields.
         let existing = {};
         try {
           const fr = await fetch(`fluxion://workspace/${encodeURIComponent(rel)}`);
@@ -1962,10 +2230,10 @@ const game = {
     addResNumber('resolution.height', 'height');
 
     // Startup scene
-    const sceneObj = /** @type {any} */ ({ mainScene: String(meta.mainScene || './scene.xml') });
-    InspectorFields.addStringWithDrop(container, 'mainScene', sceneObj, 'mainScene', () => {
-      const v = String(sceneObj.mainScene || '').trim();
-      meta.mainScene = v || './scene.xml';
+    const sceneObj = /** @type {any} */ ({ startupScene: String(meta.startupScene || './scene.xml') });
+    InspectorFields.addStringWithDrop(container, 'startupScene', sceneObj, 'startupScene', () => {
+      const v = String(sceneObj.startupScene || '').trim();
+      meta.startupScene = v || './scene.xml';
       this._scheduleSaveProjectMeta();
     }, /** @type {any} */ ({
       acceptExtensions: ['.xml', '.xaml'],
@@ -2012,7 +2280,7 @@ const game = {
     const r = this._renderer;
     if (!r) return;
 
-    // Best-effort: read fluxion.project.json (preferred) or a *.flux file and load its mainScene.
+    // Best-effort: read fluxion.project.json (preferred) or a *.flux file and load its startupScene.
     try {
       let res = await fetch('fluxion://workspace/fluxion.project.json');
       if (!res.ok) {
@@ -2024,9 +2292,9 @@ const game = {
 
       const txt = await res.text();
       const data = JSON.parse(txt);
-      const mainScene = String(data && data.mainScene ? data.mainScene : '').trim();
-      if (!mainScene) return;
-      const clean = mainScene.replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
+      const startupScene = String(data && (data.startupScene || data.mainScene) ? (data.startupScene || data.mainScene) : '').trim();
+      if (!startupScene) return;
+      const clean = startupScene.replace(/^\.(?:\/)?/, '').replace(/^\/+/, '');
       this._scenePath = `fluxion://workspace/${clean}`;
       await this.loadSelectedScene(r);
     } catch {
@@ -3059,7 +3327,10 @@ const game = {
     }
 
     const rootAbs = String(rootRes.path || '').replace(/[\\/]+$/, '');
-    const relClean = String(rel || '').replace(/^\.(?:\\|\/)?/, '').replace(/^\/+/, '');
+    const relClean = String(rel || '')
+      .replace(/^\.\//, '')
+      .replace(/^\.\\/, '')
+      .replace(/^\/+/, '');
     const absPath = `${rootAbs}/${relClean}`;
 
     const xml = this._serializeSceneToXml();
@@ -3123,6 +3394,33 @@ const game = {
     const sceneName = scene.name ? String(scene.name) : 'Untitled';
     lines.push(`<Scene name="${esc(sceneName)}">`);
 
+    /**
+     * Serialize Unity-like scripts as child nodes.
+     * @param {any} o
+     * @param {number} indentLevel
+     * @returns {string[]}
+     */
+    const serializeScriptsAsChildren = (o, indentLevel) => {
+      const scripts = (o && Array.isArray(o.scripts)) ? o.scripts : [];
+      if (!scripts || scripts.length === 0) return [];
+      const childIndent = '    '.repeat(Math.max(0, indentLevel + 1));
+      /** @type {string[]} */
+      const out = [];
+      for (const s of scripts) {
+        if (!s) continue;
+        const src = String(s.src || '').trim();
+        if (!src) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'src', src);
+        if (Object.prototype.hasOwnProperty.call(s, 'enabled') && s.enabled === false) {
+          addAttr(parts, 'enabled', 'false');
+        }
+        out.push(`${childIndent}<Script ${parts.join(' ')} />`);
+      }
+      return out;
+    };
+
     // Cameras: serialize all authored cameras; mark primary via Active="true" when multiple exist.
     const cams2 = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.filter(Boolean) : [];
     const primary2 = /** @type {any} */ (this._sceneCamera2D || cams2.find(c => c && c.active === true) || cams2[cams2.length - 1] || null);
@@ -3140,7 +3438,15 @@ const game = {
         addNumAttr(parts, 'width', cam2.width ?? 1920);
         addNumAttr(parts, 'height', cam2.height ?? 1080);
         if (cams2.length > 1) addAttr(parts, 'Active', (cam2 === primary2) ? 'true' : 'false');
-        lines.push(`    <Camera ${parts.join(' ')} />`);
+
+        const childLines = serializeScriptsAsChildren(cam2, 1);
+        if (childLines.length === 0) {
+          lines.push(`    <Camera ${parts.join(' ')} />`);
+        } else {
+          lines.push(`    <Camera ${parts.join(' ')}>`);
+          lines.push(...childLines);
+          lines.push(`    </Camera>`);
+        }
       }
       lines.push('');
     }
@@ -3163,7 +3469,15 @@ const game = {
         if (Number.isFinite(Number(cam3.near))) addNumAttr(parts, 'near', cam3.near);
         if (Number.isFinite(Number(cam3.far))) addNumAttr(parts, 'far', cam3.far);
         if (cams3.length > 1) addAttr(parts, 'Active', (cam3 === primary3) ? 'true' : 'false');
-        lines.push(`    <Camera3D ${parts.join(' ')} />`);
+
+        const childLines = serializeScriptsAsChildren(cam3, 1);
+        if (childLines.length === 0) {
+          lines.push(`    <Camera3D ${parts.join(' ')} />`);
+        } else {
+          lines.push(`    <Camera3D ${parts.join(' ')}>`);
+          lines.push(...childLines);
+          lines.push(`    </Camera3D>`);
+        }
       }
       lines.push('');
     }
@@ -3408,7 +3722,19 @@ const game = {
       if (Number.isFinite(Number(obj.y)) && Number(obj.y) !== 0) addNumAttr(parts, 'y', obj.y);
       if (obj.width !== null && obj.width !== undefined) addNumAttr(parts, 'width', obj.width);
       if (obj.height !== null && obj.height !== undefined) addNumAttr(parts, 'height', obj.height);
-      return `${indent}<ClickableArea ${parts.join(' ')} />`;
+
+      const childLines = [];
+      childLines.push(...serializeScripts(obj));
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childLines.push(b);
+      }
+      if (childLines.length === 0) {
+        return `${indent}<ClickableArea ${parts.join(' ')} />`;
+      }
+      return `${indent}<ClickableArea ${parts.join(' ')}>`
+        + `\n${childLines.join('\n')}\n${indent}</ClickableArea>`;
     }
 
     // Audio
@@ -3423,7 +3749,19 @@ const game = {
       if (Object.prototype.hasOwnProperty.call(obj, 'stopOnSceneChange') && obj.stopOnSceneChange === false) {
         addBoolAttr(parts, 'stopOnSceneChange', false);
       }
-      return `${indent}<Audio ${parts.join(' ')} />`;
+
+      const childLines = [];
+      childLines.push(...serializeScripts(obj));
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childLines.push(b);
+      }
+      if (childLines.length === 0) {
+        return `${indent}<Audio ${parts.join(' ')} />`;
+      }
+      return `${indent}<Audio ${parts.join(' ')}>`
+        + `\n${childLines.join('\n')}\n${indent}</Audio>`;
     }
 
     // Lights
@@ -3448,7 +3786,12 @@ const game = {
         if (Array.isArray(obj.direction) && obj.direction.length >= 3) {
           addAttr(parts, 'direction', `${obj.direction[0]},${obj.direction[1]},${obj.direction[2]}`);
         }
-        return `${indent}<DirectionalLight ${parts.join(' ')} />`;
+
+        const childLines = [];
+        childLines.push(...serializeScripts(obj));
+        if (childLines.length === 0) return `${indent}<DirectionalLight ${parts.join(' ')} />`;
+        return `${indent}<DirectionalLight ${parts.join(' ')}>`
+          + `\n${childLines.join('\n')}\n${indent}</DirectionalLight>`;
       }
       if (ctor === 'PointLight') {
         if (Array.isArray(obj.position) && obj.position.length >= 3) {
@@ -3457,7 +3800,12 @@ const game = {
           addNumAttr(parts, 'z', obj.position[2]);
         }
         if (Number.isFinite(Number(obj.range)) && Number(obj.range) !== 0) addNumAttr(parts, 'range', obj.range);
-        return `${indent}<PointLight ${parts.join(' ')} />`;
+
+        const childLines = [];
+        childLines.push(...serializeScripts(obj));
+        if (childLines.length === 0) return `${indent}<PointLight ${parts.join(' ')} />`;
+        return `${indent}<PointLight ${parts.join(' ')}>`
+          + `\n${childLines.join('\n')}\n${indent}</PointLight>`;
       }
       if (ctor === 'SpotLight') {
         if (Array.isArray(obj.position) && obj.position.length >= 3) {
@@ -3471,7 +3819,12 @@ const game = {
         if (Number.isFinite(Number(obj.range)) && Number(obj.range) !== 0) addNumAttr(parts, 'range', obj.range);
         if (Number.isFinite(Number(obj.innerAngleDeg))) addNumAttr(parts, 'innerAngleDeg', obj.innerAngleDeg);
         if (Number.isFinite(Number(obj.outerAngleDeg))) addNumAttr(parts, 'outerAngleDeg', obj.outerAngleDeg);
-        return `${indent}<SpotLight ${parts.join(' ')} />`;
+
+        const childLines = [];
+        childLines.push(...serializeScripts(obj));
+        if (childLines.length === 0) return `${indent}<SpotLight ${parts.join(' ')} />`;
+        return `${indent}<SpotLight ${parts.join(' ')}>`
+          + `\n${childLines.join('\n')}\n${indent}</SpotLight>`;
       }
     }
 
@@ -5192,6 +5545,18 @@ const game = {
       for (const ch of kids) addNodeRecursive(ch, depth + 1);
     };
 
+    /** @param {any} obj */
+    const hasAnyScripts = (obj) => {
+      const arr = obj && Array.isArray(obj.scripts) ? /** @type {any[]} */ (obj.scripts) : null;
+      if (!arr || arr.length === 0) return false;
+      for (const s of arr) {
+        if (!s) continue;
+        const src = String((/** @type {any} */ (s)).src || '').trim();
+        if (src) return true;
+      }
+      return false;
+    };
+
     const sceneAny = /** @type {any} */ (scene);
 
     // XML resources / scene-level declarations
@@ -5257,6 +5622,16 @@ const game = {
       const div = document.createElement('div');
       div.className = 'treeItem' + (e.obj === this.selected ? ' selected' : '');
       div.textContent = e.label;
+
+      // Tag DOM with a reference to the backing object for drag-drop behaviors.
+      // (Not serialized; editor-only.)
+      try { /** @type {any} */ (div).__fluxionObj = e.obj; } catch {}
+
+      if (hasAnyScripts(e.obj)) {
+        div.setAttribute('data-has-script', '1');
+        div.title = (div.title ? `${div.title}\n` : '') + 'Has script(s) attached';
+      }
+
       div.style.paddingLeft = `${10 + Math.max(0, e.depth) * 14}px`;
       div.addEventListener('click', () => {
         this.setSelectedEntity(e.obj, { tree: 'sync' });

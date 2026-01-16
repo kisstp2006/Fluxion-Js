@@ -7,7 +7,7 @@
  * loaded in both browser and Electron contexts.
  */
 export default class Project {
-  /** @param {{ name?: string, creator?: string, resolution?: {width?: number, height?: number} | [number, number], engineVersion?: string, mainScene?: string }} [opts] */
+  /** @param {{ name?: string, creator?: string, resolution?: {width?: number, height?: number} | [number, number], engineVersion?: string, startupScene?: string, mainScene?: string }} [opts] */
   constructor(opts = {}) {
     /** @type {string} */
     this.name = String(opts.name ?? 'Fluxion Project');
@@ -35,7 +35,12 @@ export default class Project {
     this.engineVersion = String(opts.engineVersion ?? '');
 
     /** @type {string} */
-    this.mainScene = String(opts.mainScene ?? './scene.xml');
+    this.startupScene = String(opts.startupScene ?? opts.mainScene ?? './scene.xml');
+
+    // Back-compat alias: older code used mainScene.
+    // Keep it in-memory, but prefer startupScene for serialization.
+    /** @type {string} */
+    this.mainScene = this.startupScene;
   }
 
   /** @param {any} obj */
@@ -46,7 +51,7 @@ export default class Project {
       creator: o.creator,
       resolution: o.resolution,
       engineVersion: o.engineVersion,
-      mainScene: o.mainScene,
+      startupScene: o.startupScene ?? o.mainScene,
     });
   }
 
@@ -64,7 +69,7 @@ export default class Project {
       creator: this.creator,
       resolution: this.resolution,
       engineVersion: this.engineVersion,
-      mainScene: this.mainScene,
+      startupScene: this.startupScene,
     };
   }
 }

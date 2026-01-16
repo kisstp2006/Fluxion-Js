@@ -60,4 +60,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       try { cb(payload); } catch {}
     });
   },
+
+  // Play preview window (editor workflow)
+  openPlayPreview: (payload) => ipcRenderer.invoke('open-play-preview', payload),
+  onPlayPreviewData: (cb) => {
+    if (typeof cb !== 'function') return;
+    ipcRenderer.removeAllListeners('play-preview-data');
+    ipcRenderer.on('play-preview-data', (_event, payload) => {
+      try { cb(payload); } catch {}
+    });
+  },
 }); 

@@ -1,5 +1,7 @@
 // @ts-check
 
+import Input from './Input.js';
+
 /**
  * Minimal Unity-like scripting support.
  *
@@ -119,6 +121,8 @@ export function updateNodeScripts(node, dt) {
   if (!arr || arr.length === 0) return;
 
   const scene = node && node.scene ? node.scene : null;
+  // Ensure the singleton exists so scripts can safely use ctx.input.
+  const input = Input.instance || new Input();
   const time = (typeof performance !== 'undefined' && performance.now)
     ? performance.now() / 1000
     : (Date.now() / 1000);
@@ -128,6 +132,7 @@ export function updateNodeScripts(node, dt) {
     node,
     gameObject: node,
     scene,
+    input,
     dt,
     time,
   };
@@ -177,6 +182,7 @@ export function updateNodeScripts(node, dt) {
       try { instanceTarget.node = node; } catch {}
       try { instanceTarget.gameObject = node; } catch {}
       try { instanceTarget.scene = scene; } catch {}
+      try { instanceTarget.input = input; } catch {}
     }
 
     if (!entry.__started) {

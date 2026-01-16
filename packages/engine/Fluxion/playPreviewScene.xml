@@ -1,0 +1,6 @@
+<!-- @fluxion-internal play-preview -->
+<Scene name="Main">
+    <Camera name="MainCamera" x="0" y="0" zoom="1" width="1280" height="720" />
+
+    <Sprite name="Sprite" layer="0" x="405.0613586097946" y="279.9586516853933" width="96" height="96" rotation="0.7624334580210257" imageSrc="file:///C:/Users/tibig/Documents/Fluxion-Js/packages/engine/Fluxion/Icon/Fluxion_icon.png" />
+</Scene>

@@ -246,6 +246,7 @@ function safeProjectFilenameFromName(name) {
 
 let mainWindow;
 let animSpritePreviewWindow;
+let playPreviewWindow;
 const iconPath = "./packages/engine/Fluxion/Icon/Fluxion_icon.ico";
 
 // Filesystem root used by the editor for browsing/loading assets.
@@ -303,6 +304,51 @@ async function openAnimSpritePreviewWindow(payload) {
   // Send the payload once the renderer is ready.
   try {
     animSpritePreviewWindow.webContents.send('anim-sprite-preview-data', payload);
+  } catch {}
+}
+
+/**
+ * @param {{ title?: string, sceneUrl?: string, resolution?: { width?: number, height?: number } } | any} payload
+ */
+async function openPlayPreviewWindow(payload) {
+  // Close existing play window (one at a time).
+  try {
+    if (playPreviewWindow && !playPreviewWindow.isDestroyed()) {
+      playPreviewWindow.close();
+    }
+  } catch {}
+
+  playPreviewWindow = new BrowserWindow({
+    width: 1100,
+    height: 700,
+    useContentSize: true,
+    resizable: true,
+    minimizable: true,
+    maximizable: true,
+    title: String(payload?.title || 'Play'),
+    backgroundColor: '#0b0f14',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      enableRemoteModule: false,
+      devTools: true,
+      spellcheck: false,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+
+  playPreviewWindow.setMenuBarVisibility(false);
+
+  playPreviewWindow.on('closed', () => {
+    playPreviewWindow = null;
+  });
+
+  const htmlPath = path.join(__dirname, 'packages', 'editor', 'BasicEditor', 'playPreview.html');
+  await playPreviewWindow.loadFile(htmlPath);
+
+  // Send the payload once the renderer is ready.
+  try {
+    playPreviewWindow.webContents.send('play-preview-data', payload);
   } catch {}
 }
 
@@ -533,6 +579,17 @@ if (!gotTheLock) {
     void event;
     try {
       await openAnimSpritePreviewWindow(payload);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
+  // Play preview window
+  ipcMain.handle('open-play-preview', async (event, payload) => {
+    void event;
+    try {
+      await openPlayPreviewWindow(payload);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
@@ -1111,7 +1168,7 @@ if (!gotTheLock) {
         creator: '',
         resolution: { width: 1280, height: 720 },
         engineVersion: String(engine && engine.version ? engine.version : ''),
-        mainScene: './scene.xml'
+        startupScene: './scene.xml'
       }, null, 2) + '\n');
 
       // New project descriptor format (JSON content, .flux extension)
@@ -1121,7 +1178,7 @@ if (!gotTheLock) {
         creator: '',
         resolution: { width: 1280, height: 720 },
         engineVersion: String(engine && engine.version ? engine.version : ''),
-        mainScene: './scene.xml'
+        startupScene: './scene.xml'
       }, null, 2) + '\n');
 
       writeFile(path.join(targetDir, 'scene.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<Scene name="Main">\n  <Camera x="0" y="0" zoom="1" rotation="0" width="1280" height="720" />\n</Scene>\n`);
@@ -1130,7 +1187,7 @@ if (!gotTheLock) {
 
 
 
-  writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine } from 'fluxion';\n\n// New-project bootstrap:\n// - Reads ./fluxion.project.json\n// - Loads its mainScene automatically\n// - Starts the engine loop\nnew Engine('gameCanvas');\n`);
+  writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n// @fluxion-internal bootstrap\n\nimport { Engine } from 'fluxion';\n\n// New-project bootstrap:\n// - Reads ./fluxion.project.json\n// - Loads its startupScene automatically\n// - Starts the engine loop\nnew Engine('gameCanvas');\n`);
 
       writeFile(path.join(targetDir, '.gitignore'), `node_modules\n.DS_Store\ndist\n`);
 

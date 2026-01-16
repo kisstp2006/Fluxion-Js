@@ -6,5 +6,5 @@
     "height": 720
   },
   "engineVersion": "0.0.5",
-  "mainScene": "./scene.xml"
+  "startupScene": "./scene.xml"
 }

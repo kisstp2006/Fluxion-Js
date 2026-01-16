@@ -819,10 +819,12 @@ function _rebuildInspectorCore(host, ui) {
     const scripts = /** @type {any[]} */ (obj.scripts);
 
     const gScripts = InspectorWidgets.createGroup(ui.common, 'Scripts', true);
+    try { gScripts?.classList?.add('scriptsCompact'); } catch {}
     if (gScripts) {
       const onListChanged = () => {
         try { host._markInspectorDirty?.(); } catch {}
         try { host.rebuildInspector?.(); } catch {}
+        try { host.rebuildTree?.(); } catch {}
       };
 
       if (scripts.length === 0) {
@@ -838,13 +840,15 @@ function _rebuildInspectorCore(host, ui) {
         if (s.enabled === undefined) s.enabled = true;
         if (s.src === undefined) s.src = '';
 
-        InspectorFields.addToggleWith(gScripts, `enabled ${i + 1}`, s, 'enabled', () => {
+        InspectorFields.addToggleWith(gScripts, `on ${i + 1}`, s, 'enabled', () => {
           try { host._blockInspectorAutoRefresh?.(0.2); } catch {}
+          try { host.rebuildTree?.(); } catch {}
         });
 
-        InspectorFields.addStringWithDrop(gScripts, `script ${i + 1}`, s, 'src', () => {
+        InspectorFields.addStringWithDrop(gScripts, `src ${i + 1}`, s, 'src', () => {
           // ScriptRuntime will notice src changes and reload.
           try { host._blockInspectorAutoRefresh?.(0.25); } catch {}
+          try { host.rebuildTree?.(); } catch {}
         }, { acceptExtensions: ['.js', '.mjs'], importToWorkspaceUrl: true, debounceMs: 200 });
 
         const btnRemove = document.createElement('button');
@@ -860,28 +864,18 @@ function _rebuildInspectorCore(host, ui) {
         InspectorFields.addField(gScripts, `remove ${i + 1}`, btnRemove);
       }
 
-      const btnAdd = document.createElement('button');
-      btnAdd.type = 'button';
-      btnAdd.className = 'btn';
-      btnAdd.textContent = 'Add Script';
-      btnAdd.addEventListener('click', () => {
-        try { scripts.push({ src: '', enabled: true }); } catch {}
-        onListChanged();
-      });
-      InspectorFields.addField(gScripts, 'add', btnAdd);
-
-      const btnCreate = document.createElement('button');
-      btnCreate.type = 'button';
-      btnCreate.className = 'btn';
-      btnCreate.textContent = 'Create Script...';
-      btnCreate.addEventListener('click', () => {
+      const btnAddCreate = document.createElement('button');
+      btnAddCreate.type = 'button';
+      btnAddCreate.className = 'btn';
+      btnAddCreate.textContent = 'Add / Create Script...';
+      btnAddCreate.addEventListener('click', () => {
         try {
           if (host && typeof host._createScriptFromEditor === 'function') {
             Promise.resolve(host._createScriptFromEditor()).catch(console.error);
           }
         } catch {}
       });
-      InspectorFields.addField(gScripts, 'create', btnCreate);
+      InspectorFields.addField(gScripts, 'add', btnAddCreate);
     }
   }
 

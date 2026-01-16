@@ -64,6 +64,17 @@ export function createAssetBrowser(opts) {
     return res;
   }
 
+  /** @param {string} pathRel */
+  function isHiddenPath(pathRel) {
+    const rel = _cleanRel(String(pathRel || ''));
+    if (!rel) return false;
+    try {
+      const hidden = /** @type {any} */ (window).__fluxionHiddenProjectPaths;
+      if (hidden && typeof hidden.has === 'function') return !!hidden.has(rel);
+    } catch {}
+    return false;
+  }
+
   async function render() {
     const root = state.root;
     const cwd = state.cwd;
@@ -97,7 +108,14 @@ export function createAssetBrowser(opts) {
 
     // Right: current folder contents
     const cwdRes = await list(cwd);
-    const entries = cwdRes.entries || [];
+    const entries = (cwdRes.entries || []).filter((ent) => {
+      if (!ent) return false;
+      if (ent.isDir) return true;
+      return !isHiddenPath(ent.path);
+    });
+
+    // If the currently selected file became hidden, clear selection.
+    if (state.selected && isHiddenPath(state.selected)) state.selected = null;
     if (ui.assetGrid) {
       ui.assetGrid.innerHTML = '';
       for (const ent of entries) {
@@ -114,8 +132,17 @@ export function createAssetBrowser(opts) {
             try {
               if (!e.dataTransfer) return;
               e.dataTransfer.effectAllowed = 'copy';
-              e.dataTransfer.setData('text/plain', String(ent.path || ''));
+              const p = String(ent.path || '');
+              // Some Chromium/Electron combinations can return empty getData()
+              // during dragover; provide multiple channels.
+              e.dataTransfer.setData('text/plain', p);
+              e.dataTransfer.setData('application/x-fluxion-asset-path', p);
+              try { /** @type {any} */ (window).__fluxionDragAssetPath = p; } catch {}
             } catch {}
+          });
+
+          item.addEventListener('dragend', () => {
+            try { /** @type {any} */ (window).__fluxionDragAssetPath = ''; } catch {}
           });
         }
 
@@ -142,7 +169,9 @@ export function createAssetBrowser(opts) {
   function ensureContextMenu() {
     if (ctx.menu) return;
     const menu = document.createElement('div');
-    menu.className = 'menu contextMenu';
+    // Important: do NOT include the generic 'menu' class.
+    // That class is used for topbar dropdown menus and defaults to hidden (opacity:0/visibility:hidden).
+    menu.className = 'contextMenu';
     menu.setAttribute('role', 'menu');
     document.body.appendChild(menu);
     ctx.menu = menu;

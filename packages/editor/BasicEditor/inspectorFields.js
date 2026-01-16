@@ -1320,6 +1320,17 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 		/** @param {string} labelText @param {() => void} onClick @param {boolean=} enabled */
 		const addItem = (labelText, onClick, enabled = true) => addItemTo(list, labelText, onClick, enabled);
 
+		/** @param {string} rel */
+		const isHiddenPath = (rel) => {
+			const p = String(rel || '').replace(/\\/g, '/').replace(/^\.\/+/, '').trim();
+			if (!p) return false;
+			try {
+				const hidden = /** @type {any} */ (window).__fluxionHiddenProjectPaths;
+				if (hidden && typeof hidden.has === 'function') return !!hidden.has(p);
+			} catch {}
+			return false;
+		};
+
 		addItem('Loading…', () => {}, false);
 
 		/** @returns {Promise<string[]>} */
@@ -1368,6 +1379,7 @@ export function addStringWithDrop(container, label, obj, key, onChanged, opts = 
 					if (!ent) continue;
 					const p = String(ent.path || '').trim();
 					if (!p) continue;
+					if (isHiddenPath(p)) continue;
 					if (ent.isDir) {
 						stack.push(p);
 						continue;

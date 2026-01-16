@@ -915,6 +915,12 @@ body {
   font-weight: 700;
 }
 
+
+.treeItem.dropScript {
+  outline: 2px dashed rgba(108,210,255,0.55);
+  outline-offset: -2px;
+  background: rgba(108,210,255,0.10);
+}
 .aboutMeta {
   margin-top: 6px;
   font-size: 12px;
@@ -948,6 +954,31 @@ body {
   border-bottom: 1px solid rgba(255,255,255,0.05);
   user-select: none;
   box-shadow: var(--shadow-sm);
+}
+
+.mainTabsSpacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.mainPlayBtn {
+  appearance: none;
+  border: 1px solid rgba(36, 232, 150, 0.28);
+  background: rgba(36, 232, 150, 0.12);
+  color: rgba(235, 255, 247, 0.95);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.mainPlayBtn:hover {
+  background: rgba(36, 232, 150, 0.18);
+  border-color: rgba(36, 232, 150, 0.36);
+  transform: translateY(-1px);
 }
 
 .mainTabsDynamic {
@@ -1580,6 +1611,26 @@ body {
   user-select: none;
 }
 
+.treeItem[data-has-script="1"] {
+  padding-right: 74px;
+  position: relative;
+}
+
+.treeItem[data-has-script="1"]::after {
+  content: 'SCRIPT';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(108, 210, 255, 0.16);
+  border: 1px solid rgba(108, 210, 255, 0.32);
+  color: rgba(235, 250, 255, 0.92);
+}
+
 .treeItem:hover { background: rgba(255,255,255,0.03); }
 .treeItem.selected {
   background: rgba(108, 210, 255, 0.18);
@@ -1657,6 +1708,19 @@ body {
   cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 }
+
+.viewportToolbar .vpBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.viewportToolbar .vpBtn .vpBtnLabel {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  opacity: 0.92;
+}
 .viewportToolbar .vpSegBtn.active,
 .viewportToolbar .vpBtn.active {
   background: rgba(108,210,255,0.18);
@@ -1668,6 +1732,7 @@ body {
   border-color: rgba(108,210,255,0.28);
   transform: translateY(-1px);
 }
+
 
 /* Icon line style + subtle visibility behavior */
 .viewportToolbar .icon {
@@ -1701,6 +1766,30 @@ body {
   grid-template-columns: 90px 1fr;
   align-items: center;
   gap: 10px;
+}
+
+/* Scripts section: compact layout (less vertical space) */
+.scriptsCompact.form {
+  gap: 6px;
+}
+
+.scriptsCompact .field {
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.scriptsCompact .label {
+  font-size: 11px;
+}
+
+.scriptsCompact .input {
+  padding: 7px 10px;
+  border-radius: 10px;
+}
+
+.scriptsCompact .btn {
+  padding: 7px 10px;
+  border-radius: 10px;
 }
 
 .label {

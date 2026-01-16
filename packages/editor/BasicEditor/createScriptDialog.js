@@ -2,7 +2,7 @@
 
 /**
  * Create Script dialog extracted from `game.js`.
- * Prompts for script name, folder (project-relative), template, and optional actions.
+ * Prompts for script name, folder (project-relative), template, and options.
  */
 
 /**
@@ -16,6 +16,8 @@
  *  createScriptTemplateSelect: HTMLSelectElement|null,
  *  createScriptAttachToggle: HTMLInputElement|null,
  *  createScriptOpenToggle: HTMLInputElement|null,
+ *  createScriptAttachedWrap: HTMLDivElement|null,
+ *  createScriptAttachedList: HTMLDivElement|null,
  *  createScriptOkBtn: HTMLButtonElement|null,
  *  createScriptCancelBtn: HTMLButtonElement|null,
  *  createScriptError: HTMLDivElement|null,
@@ -85,6 +87,24 @@ export function createScriptDialog(opts) {
     if (r) r(v);
   }
 
+  /** @param {string[]} scripts */
+  function _renderAttachedScripts(scripts) {
+    const wrap = ui.createScriptAttachedWrap;
+    const list = ui.createScriptAttachedList;
+    const arr = Array.isArray(scripts) ? scripts.map((s) => String(s || '').trim()).filter(Boolean) : [];
+    if (!wrap || !list) return;
+    if (arr.length === 0) {
+      wrap.style.display = 'none';
+      list.textContent = '';
+      return;
+    }
+    wrap.style.display = '';
+    // Keep it compact: one path per line.
+    list.textContent = arr.join('\n');
+    // Preserve newlines.
+    list.style.whiteSpace = 'pre-wrap';
+  }
+
   function cancel() {
     close(null);
   }
@@ -140,7 +160,7 @@ export function createScriptDialog(opts) {
   }
 
   /**
-   * @param {{ initialName?: string, initialFolderRel?: string, canAttach?: boolean, selectionLabel?: string }} args
+   * @param {{ initialName?: string, initialFolderRel?: string, canAttach?: boolean, selectionLabel?: string, attachedScripts?: string[] }} args
    */
   function promptOptions(args = {}) {
     if (!ui.createScriptModal || !ui.createScriptNameInput || !ui.createScriptFolderInput || !ui.createScriptTemplateSelect) {
@@ -157,6 +177,8 @@ export function createScriptDialog(opts) {
     const initialName = String(args.initialName || '').trim();
     const initialFolderRel = _cleanRel(String(args.initialFolderRel || ''));
     const canAttach = args.canAttach !== false;
+
+    _renderAttachedScripts(Array.isArray(args.attachedScripts) ? args.attachedScripts : []);
 
     if (ui.createScriptTitle) ui.createScriptTitle.textContent = 'Create Script';
     if (ui.createScriptSubtitle) ui.createScriptSubtitle.textContent = String(args.selectionLabel || '');

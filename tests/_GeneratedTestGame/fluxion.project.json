@@ -1,4 +1,4 @@
 {
   "name": "Generated Test Game",
-  "mainScene": "./scene.xml"
+  "startupScene": "./scene.xml"
 }

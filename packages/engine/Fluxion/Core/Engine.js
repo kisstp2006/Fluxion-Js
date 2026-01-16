@@ -35,7 +35,7 @@ export default class Engine {
     }
 
     /**
-     * Create a minimal game wrapper that loads the project's mainScene automatically.
+     * Create a minimal game wrapper that loads the project's startupScene automatically.
      * This is used for "new" projects that provide fluxion.project.json.
      * @param {any} options
      */
@@ -73,20 +73,20 @@ export default class Engine {
                     // ignore
                 }
 
-                const mainScene = String(project?.mainScene || fallbackScene);
+                const startupScene = String(project?.startupScene || project?.mainScene || fallbackScene);
 
-                // Resolve mainScene relative to the project descriptor (not the page).
-                let sceneUrl = mainScene;
+                // Resolve startupScene relative to the project descriptor (not the page).
+                let sceneUrl = startupScene;
                 try {
-                    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(mainScene)) {
-                        sceneUrl = mainScene;
+                    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(startupScene)) {
+                        sceneUrl = startupScene;
                     } else {
                         const projAbs = new URL(projectUrl, window.location.href).toString();
                         const projBase = new URL('.', projAbs).toString();
-                        sceneUrl = new URL(mainScene, projBase).toString();
+                        sceneUrl = new URL(startupScene, projBase).toString();
                     }
                 } catch {
-                    sceneUrl = mainScene;
+                    sceneUrl = startupScene;
                 }
 
                 const scene = await SceneLoader.load(sceneUrl, renderer);

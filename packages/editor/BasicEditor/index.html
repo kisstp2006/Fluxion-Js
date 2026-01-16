@@ -62,6 +62,8 @@
         <div class="mainTabs" role="tablist" aria-label="Main Tabs">
           <button id="mainTabViewportBtn" class="mainTabBtn active" type="button" role="tab" aria-selected="true">Viewport</button>
           <div id="mainTabsDynamic" class="mainTabsDynamic" aria-hidden="false"></div>
+          <div class="mainTabsSpacer" aria-hidden="true"></div>
+          <button id="mainPlayBtn" class="mainPlayBtn" type="button" title="Play (opens a new window)">Play</button>
         </div>
 
         <div id="viewportView" class="viewportView" aria-label="Viewport View">
@@ -380,12 +382,18 @@
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createScriptTitle">
       <div class="modalHeader">
         <div>
-          <div id="createScriptTitle" class="modalTitle">Create Script</div>
+          <div id="createScriptTitle" class="modalTitle">Add / Create Script</div>
           <div id="createScriptSubtitle" class="aboutMeta"></div>
         </div>
         <button id="createScriptCancelBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
       </div>
       <div class="modalBody">
+        <div id="createScriptAttachedWrap" class="readonlyBox" style="display:none; margin-bottom: 12px;">
+          <div class="sectionTitle" style="margin-top: 0;">Already attached to selection</div>
+          <div id="createScriptAttachedList" class="aboutMeta" style="margin-top: 6px;"></div>
+        </div>
+
+        <div class="sectionTitle">Create New Script</div>
         <div class="sectionTitle">Script Name</div>
         <input id="createScriptNameInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="MyScript.js" />
 
@@ -409,7 +417,9 @@
         <div id="createScriptError" class="animError" aria-live="polite" style="margin-top: 10px; display:none;"></div>
       </div>
       <div class="modalFooter">
-        <button id="createScriptOkBtn" class="btn" type="button">Create</button>
+        <div class="row" style="justify-content: flex-end; gap: 8px;">
+          <button id="createScriptOkBtn" class="btn" type="button">Create New</button>
+        </div>
       </div>
     </div>
   </div>
