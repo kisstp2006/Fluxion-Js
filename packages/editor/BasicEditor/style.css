@@ -1064,11 +1064,19 @@ body {
   font-family: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
   font-size: 13px;
   line-height: 18px; /* integer px to reduce subpixel blur */
+  font-weight: 400;
+  letter-spacing: 0;
   tab-size: 2;
   -moz-tab-size: 2;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
   text-rendering: geometricPrecision;
+}
+
+/* Never change font metrics in the highlight layer; it must match textarea caret exactly. */
+.scriptHighlight span {
+  font-weight: inherit;
+  letter-spacing: inherit;
 }
 
 .scriptHighlight {
@@ -1096,7 +1104,7 @@ body {
 .scriptHighlight .tok-func { color: #ffd479; }
 .scriptHighlight .tok-property { color: rgba(233,237,245,0.88); }
 .scriptHighlight .tok-regex { color: #7ee7ff; }
-.scriptHighlight .tok-doctag { color: #6cd2ff; font-weight: 600; }
+.scriptHighlight .tok-doctag { color: #6cd2ff; }
 
 .scriptEditorText {
   position: absolute;
