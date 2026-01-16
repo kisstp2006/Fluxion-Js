@@ -345,7 +345,7 @@ const game = {
   _recentProjects: [],
   _recentProjectsMax: 10,
 
-  /** @type {{ name: string, creator: string, resolution: { width: number, height: number }, engineVersion: string, enable2D?: boolean, enable3D?: boolean } | null} */
+  /** @type {{ name: string, creator: string, resolution: { width: number, height: number }, engineVersion: string, mainScene?: string, enable2D?: boolean, enable3D?: boolean } | null} */
   _projectMeta: null,
   /** @type {string[]} */
   _projectMetaFiles: [],
@@ -626,7 +626,7 @@ const game = {
     ui.scriptSaveBtn?.addEventListener('click', () => this._saveActiveScript().catch(console.error));
     ui.scriptEditorText?.addEventListener('input', () => {
       this._markActiveScriptDirty();
-      this._updateScriptHighlight();
+      this._queueScriptHighlightUpdate();
     });
     ui.scriptEditorText?.addEventListener('scroll', () => this._syncScriptHighlightScroll());
     this._setMainTab('viewport');
@@ -1828,6 +1828,7 @@ const game = {
       const name = String(data && data.name ? data.name : '').trim() || 'My Game';
       const creator = String(data && data.creator ? data.creator : '');
       const engineVersion = String(data && data.engineVersion ? data.engineVersion : '');
+      const startupScene = String(data && data.mainScene ? data.mainScene : '').trim() || './scene.xml';
       const r = /** @type {any} */ (data && data.resolution ? data.resolution : null);
       let w = 1280;
       let h = 720;
@@ -1842,7 +1843,7 @@ const game = {
       const enable2D = (data && typeof data.enable2D === 'boolean') ? data.enable2D : true;
       const enable3D = (data && typeof data.enable3D === 'boolean') ? data.enable3D : true;
 
-      this._projectMeta = { name, creator, resolution: { width: w | 0, height: h | 0 }, engineVersion, enable2D, enable3D };
+      this._projectMeta = { name, creator, resolution: { width: w | 0, height: h | 0 }, engineVersion, mainScene: startupScene, enable2D, enable3D };
       this._projectMetaFiles = metaFiles;
       this._applyRenderLayers();
       this._applyModeAvailability();
@@ -1882,6 +1883,7 @@ const game = {
       creator: String(meta.creator || ''),
       resolution: { width: Number(meta.resolution?.width) || 1280, height: Number(meta.resolution?.height) || 720 },
       engineVersion: String(meta.engineVersion || ''),
+      mainScene: String(meta.mainScene || '').trim() || './scene.xml',
       enable2D: typeof meta.enable2D === 'boolean' ? meta.enable2D : true,
       enable3D: typeof meta.enable3D === 'boolean' ? meta.enable3D : true,
       // Preserve mainScene if it exists in the file by writing only known fields? For now,
@@ -1958,6 +1960,19 @@ const game = {
     };
     addResNumber('resolution.width', 'width');
     addResNumber('resolution.height', 'height');
+
+    // Startup scene
+    const sceneObj = /** @type {any} */ ({ mainScene: String(meta.mainScene || './scene.xml') });
+    InspectorFields.addStringWithDrop(container, 'mainScene', sceneObj, 'mainScene', () => {
+      const v = String(sceneObj.mainScene || '').trim();
+      meta.mainScene = v || './scene.xml';
+      this._scheduleSaveProjectMeta();
+    }, /** @type {any} */ ({
+      acceptExtensions: ['.xml', '.xaml'],
+      importToWorkspaceUrl: false,
+      debounceMs: 0,
+      hintText: 'Startup scene (relative path), e.g. ./Scenes/scene.xml',
+    }));
 
     // Renderer enable/disable
     const enable2DObj = /** @type {any} */ ({ enable2D: typeof meta.enable2D === 'boolean' ? meta.enable2D : true });
@@ -2408,7 +2423,7 @@ const game = {
     const s = this._openScripts.find(x => x.pathRel === p) || null;
     if (ui.scriptPath) ui.scriptPath.textContent = s ? s.pathRel : 'No script opened';
     if (ui.scriptEditorText) ui.scriptEditorText.value = s ? s.text : '';
-    this._updateScriptHighlight();
+    this._queueScriptHighlightUpdate();
     this._renderMainScriptTabs();
   },
 
@@ -2416,6 +2431,17 @@ const game = {
     if (!ui.scriptEditorText || !ui.scriptHighlight) return;
     ui.scriptHighlight.scrollTop = ui.scriptEditorText.scrollTop;
     ui.scriptHighlight.scrollLeft = ui.scriptEditorText.scrollLeft;
+  },
+
+  _queueScriptHighlightUpdate() {
+    // Throttle to next animation frame so fast edits don't cause multiple
+    // full-file tokenizations in the same frame.
+    if (/** @type {any} */ (this)._scriptHighlightQueued) return;
+    /** @type {any} */ (this)._scriptHighlightQueued = true;
+    requestAnimationFrame(() => {
+      /** @type {any} */ (this)._scriptHighlightQueued = false;
+      this._updateScriptHighlight();
+    });
   },
 
   _updateScriptHighlight() {
@@ -2449,13 +2475,51 @@ const game = {
     const esc = (s) => this._escapeHtml(s);
     const out = [];
 
+    /** @param {string} cls @param {string} t */
+    const span = (cls, t) => {
+      if (!t) return;
+      out.push('<span class="' + cls + '">' + esc(t) + '</span>');
+    };
+
+    /**
+     * Comment emitter that also highlights simple JSDoc tags (e.g. "@param").
+     * @param {string} t
+     */
+    const comment = (t) => {
+      if (!t) return;
+      const re = /@[a-zA-Z_][a-zA-Z0-9_]*/g;
+      let last = 0;
+      out.push('<span class="tok-comment">');
+      for (;;) {
+        const m = re.exec(t);
+        if (!m) break;
+        const a = m.index;
+        const b = a + m[0].length;
+        if (a > last) out.push(esc(t.slice(last, a)));
+        out.push('<span class="tok-doctag">' + esc(t.slice(a, b)) + '</span>');
+        last = b;
+      }
+      if (last < t.length) out.push(esc(t.slice(last)));
+      out.push('</span>');
+    };
+
     /** @type {Set<string>} */
     const keywords = new Set([
       'break','case','catch','class','const','continue','debugger','default','delete','do','else','export','extends','finally',
       'for','function','if','import','in','instanceof','let','new','return','super','switch','this','throw','try','typeof',
-      'var','void','while','with','yield','await','async','from','as'
+      'var','void','while','with','yield','await','async','from','as','get','set','static','of'
     ]);
 
+    /** @type {Set<string>} */
+    const builtins = new Set([
+      'console','Math','Number','String','Boolean','BigInt','Symbol','Object','Array','Map','Set','WeakMap','WeakSet',
+      'Date','RegExp','Error','TypeError','RangeError','ReferenceError','SyntaxError','Promise','JSON','Reflect','Proxy',
+      'Intl','URL','URLSearchParams','TextEncoder','TextDecoder','AbortController','fetch','performance',
+      'window','document','globalThis','navigator','localStorage','sessionStorage','requestAnimationFrame','setTimeout','setInterval'
+    ]);
+
+    /** @type {(c: string) => boolean} */
+    const isWs = (c) => c === ' ' || c === '\t' || c === '\n' || c === '\r';
     /** @type {(c: string) => boolean} */
     const isIdStart = (c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_' || c === '$';
     /** @type {(c: string) => boolean} */
@@ -2465,18 +2529,94 @@ const game = {
 
     const s = String(text ?? '');
     const n = s.length;
-    let i = 0;
 
+    /** @type {'code'|'template'} */
+    let mode = 'code';
+    let templateDepth = 0;
+
+    /** @type {'start'|'keyword'|'ident'|'number'|'string'|'comment'|'op'|'punct'|'regex'} */
+    let lastKind = 'start';
+    /** @type {string} */
+    let lastText = '';
+    /** @type {'func'|'class'|null} */
+    let expectName = null;
+    let afterDot = false;
+
+    /** @param {string} kind @param {string} t */
+    const setLast = (kind, t) => {
+      lastKind = /** @type {any} */ (kind);
+      lastText = t;
+      afterDot = (t === '.');
+    };
+
+    /** @returns {boolean} */
+    const canStartRegex = () => {
+      if (lastKind === 'start') return true;
+      if (lastKind === 'op') return true;
+      if (lastKind === 'punct') {
+        return ['(', '{', '[', ',', ';', ':'].includes(lastText);
+      }
+      if (lastKind === 'keyword') {
+        return ['return','case','throw','else','do','in','of','typeof','delete','void','new','await'].includes(lastText);
+      }
+      return false;
+    };
+
+    let i = 0;
     while (i < n) {
       const c = s[i];
-      const c2 = i + 1 < n ? s[i + 1] : '';
+      const c2 = (i + 1 < n) ? s[i + 1] : '';
+
+      // Whitespace (emit raw; do not update last token)
+      if (isWs(c)) {
+        out.push(esc(c));
+        i++;
+        continue;
+      }
+
+      // Template-literal raw text mode
+      if (mode === 'template') {
+        // back to code inside ${ ... }
+        if (c === '$' && c2 === '{') {
+          span('tok-punct', '${');
+          i += 2;
+          mode = 'code';
+          templateDepth = 1;
+          setLast('punct', '{');
+          continue;
+        }
+        // end template literal
+        if (c === '`') {
+          span('tok-string', '`');
+          i++;
+          mode = 'code';
+          setLast('string', '`');
+          continue;
+        }
+        // consume chunk until next special
+        let j = i;
+        let escaped = false;
+        while (j < n) {
+          const ch = s[j];
+          const nx = (j + 1 < n) ? s[j + 1] : '';
+          if (!escaped && ch === '\\') { escaped = true; j++; continue; }
+          if (escaped) { escaped = false; j++; continue; }
+          if (ch === '`') break;
+          if (ch === '$' && nx === '{') break;
+          j++;
+        }
+        span('tok-string', s.slice(i, j));
+        i = j;
+        continue;
+      }
 
       // Line comment
       if (c === '/' && c2 === '/') {
         let j = i + 2;
         while (j < n && s[j] !== '\n') j++;
-        out.push('<span class="tok-comment">' + esc(s.slice(i, j)) + '</span>');
+        comment(s.slice(i, j));
         i = j;
+        setLast('comment', '//');
         continue;
       }
 
@@ -2484,17 +2624,25 @@ const game = {
       if (c === '/' && c2 === '*') {
         let j = i + 2;
         while (j < n) {
-          if (s[j] === '*' && j + 1 < n && s[j + 1] === '/') { j += 2; break; }
+          if (s[j] === '*' && (j + 1 < n) && s[j + 1] === '/') { j += 2; break; }
           j++;
         }
-        out.push('<span class="tok-comment">' + esc(s.slice(i, j)) + '</span>');
+        comment(s.slice(i, j));
         i = j;
+        setLast('comment', '/*');
         continue;
       }
 
       // String / template literal
       if (c === '"' || c === "'" || c === '`') {
         const quote = c;
+        if (quote === '`') {
+          span('tok-string', '`');
+          i++;
+          mode = 'template';
+          setLast('string', '`');
+          continue;
+        }
         let j = i + 1;
         let escaped = false;
         while (j < n) {
@@ -2504,13 +2652,36 @@ const game = {
           if (ch === quote) { j++; break; }
           j++;
         }
-        out.push('<span class="tok-string">' + esc(s.slice(i, j)) + '</span>');
+        span('tok-string', s.slice(i, j));
         i = j;
+        setLast('string', quote);
         continue;
       }
 
-      // Number (very small heuristic)
-      if (isDigit(c)) {
+      // Regex literal (heuristic)
+      if (c === '/' && c2 !== '/' && c2 !== '*' && canStartRegex()) {
+        let j = i + 1;
+        let escaped = false;
+        let inClass = false;
+        while (j < n) {
+          const ch = s[j];
+          if (escaped) { escaped = false; j++; continue; }
+          if (ch === '\\') { escaped = true; j++; continue; }
+          if (ch === '[') { inClass = true; j++; continue; }
+          if (ch === ']' && inClass) { inClass = false; j++; continue; }
+          if (ch === '/' && !inClass) { j++; break; }
+          if (ch === '\n') break;
+          j++;
+        }
+        while (j < n && isId(s[j])) j++; // flags
+        span('tok-regex', s.slice(i, j));
+        i = j;
+        setLast('regex', '/');
+        continue;
+      }
+
+      // Number
+      if (isDigit(c) || (c === '.' && isDigit(c2))) {
         let j = i + 1;
         while (j < n) {
           const ch = s[j];
@@ -2520,22 +2691,100 @@ const game = {
           }
           break;
         }
-        out.push('<span class="tok-number">' + esc(s.slice(i, j)) + '</span>');
+        span('tok-number', s.slice(i, j));
         i = j;
+        setLast('number', '0');
         continue;
       }
 
-      // Identifier / keyword
+      // Identifier / keyword / builtin
       if (isIdStart(c)) {
         let j = i + 1;
         while (j < n && isId(s[j])) j++;
         const word = s.slice(i, j);
-        if (keywords.has(word)) out.push('<span class="tok-keyword">' + esc(word) + '</span>');
-        else out.push('<span class="tok-ident">' + esc(word) + '</span>');
+        if (expectName === 'func') {
+          span('tok-func', word);
+          expectName = null;
+          setLast('ident', word);
+        } else if (expectName === 'class') {
+          span('tok-type', word);
+          expectName = null;
+          setLast('ident', word);
+        } else if (keywords.has(word)) {
+          span('tok-keyword', word);
+          setLast('keyword', word);
+          if (word === 'function') expectName = 'func';
+          else if (word === 'class') expectName = 'class';
+        } else if (word === 'true' || word === 'false') {
+          span('tok-boolean', word);
+          setLast('ident', word);
+        } else if (word === 'null' || word === 'undefined') {
+          span('tok-null', word);
+          setLast('ident', word);
+        } else if (afterDot) {
+          span('tok-property', word);
+          setLast('ident', word);
+        } else if (builtins.has(word)) {
+          span('tok-builtin', word);
+          setLast('ident', word);
+        } else {
+          span('tok-ident', word);
+          setLast('ident', word);
+        }
         i = j;
         continue;
       }
 
+      // Operators / punctuation
+      const punctSet = new Set(['(', ')', '{', '}', '[', ']', ';', ',', '.']);
+      const op2 = c + c2;
+      const op3 = (i + 2 < n) ? (c + c2 + s[i + 2]) : '';
+      const ops3 = new Set(['===','!==','>>>']);
+      const ops2 = new Set(['==','!=','<=','>=','&&','||','++','--','=>','+=','-=','*=','/=','%=','<<','>>','**','??','?.']);
+
+      if (templateDepth > 0) {
+        // Track brace depth for template ${ ... } expressions.
+        if (c === '{') templateDepth++;
+        if (c === '}') {
+          templateDepth--;
+          if (templateDepth === 0) {
+            span('tok-punct', '}');
+            i++;
+            mode = 'template';
+            setLast('punct', '}');
+            continue;
+          }
+        }
+      }
+
+      if (ops3.has(op3)) {
+        span('tok-operator', op3);
+        i += 3;
+        setLast('op', op3);
+        continue;
+      }
+      if (ops2.has(op2)) {
+        span('tok-operator', op2);
+        i += 2;
+        setLast('op', op2);
+        continue;
+      }
+      if (punctSet.has(c)) {
+        span('tok-punct', c);
+        i++;
+        setLast('punct', c);
+        continue;
+      }
+
+      // Single-char operator fallback
+      if ('=+-*%<>&|^!~?:/'.includes(c)) {
+        span('tok-operator', c);
+        i++;
+        setLast('op', c);
+        continue;
+      }
+
+      // Fallback
       out.push(esc(c));
       i++;
     }

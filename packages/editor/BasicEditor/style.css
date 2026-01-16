@@ -1043,9 +1043,19 @@ body {
 
 .scriptHighlight .tok-comment { color: var(--muted); }
 .scriptHighlight .tok-keyword { color: var(--accent); }
-.scriptHighlight .tok-string { color: var(--text); }
-.scriptHighlight .tok-number { color: var(--text); }
+.scriptHighlight .tok-string { color: #9fe6a0; }
+.scriptHighlight .tok-number { color: #f7a531; }
 .scriptHighlight .tok-ident { color: var(--text); }
+.scriptHighlight .tok-builtin { color: #c8a8ff; }
+.scriptHighlight .tok-boolean { color: #ff87c2; }
+.scriptHighlight .tok-null { color: #ff87c2; opacity: 0.95; }
+.scriptHighlight .tok-operator { color: rgba(233,237,245,0.75); }
+.scriptHighlight .tok-punct { color: rgba(233,237,245,0.55); }
+.scriptHighlight .tok-type { color: #6cd2ff; }
+.scriptHighlight .tok-func { color: #ffd479; }
+.scriptHighlight .tok-property { color: rgba(233,237,245,0.88); }
+.scriptHighlight .tok-regex { color: #7ee7ff; }
+.scriptHighlight .tok-doctag { color: #6cd2ff; font-weight: 600; }
 
 .scriptEditorText {
   position: absolute;

@@ -1130,7 +1130,7 @@ if (!gotTheLock) {
 
 
 
-      writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine, SceneLoader } from 'fluxion';\n\nconst canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));\nconst engine = new Engine(canvas);\nconst renderer = engine.renderer;\n\nasync function main() {\n  const scene = await SceneLoader.load('./scene.xml', renderer);\n  engine.setScene(scene);\n  engine.start();\n}\n\nmain().catch(console.error);\n`);
+  writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine } from 'fluxion';\n\n// New-project bootstrap:\n// - Reads ./fluxion.project.json\n// - Loads its mainScene automatically\n// - Starts the engine loop\nnew Engine('gameCanvas');\n`);
 
       writeFile(path.join(targetDir, '.gitignore'), `node_modules\n.DS_Store\ndist\n`);
 

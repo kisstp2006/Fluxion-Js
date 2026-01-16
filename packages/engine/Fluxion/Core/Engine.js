@@ -3,14 +3,113 @@ import Camera from "./Camera.js";
 import Window from "./Window.js";
 import SplashScreen from "./SplashScreen.js";
 import Input from "./Input.js";
+import SceneLoader from "./SceneLoader.js";
+import Project from "./Project.js";
 
 /**
  * The main Engine class that manages the game loop, renderer, camera, and window.
  */
 export default class Engine {
     /**
+     * Normalize an engine canvas argument into a DOM canvas id.
+     * Supports legacy usage (id string) and newer templates passing the element.
+     * @param {any} canvasIdOrEl
+     * @returns {string}
+     */
+    static _normalizeCanvasId(canvasIdOrEl) {
+        if (typeof canvasIdOrEl === 'string' && canvasIdOrEl.trim()) return canvasIdOrEl;
+
+        // If given a <canvas> element, use or assign an id.
+        const el = canvasIdOrEl;
+        if (el && typeof el === 'object' && String(el.tagName || '').toUpperCase() === 'CANVAS') {
+            const existing = String(el.id || '').trim();
+            if (existing) return existing;
+            const id = `fluxionCanvas_${Math.random().toString(36).slice(2)}`;
+            try { el.id = id; } catch {}
+            return id;
+        }
+
+        // Fallback: try to coerce to string, otherwise default.
+        const s = String(canvasIdOrEl || '').trim();
+        return s || 'gameCanvas';
+    }
+
+    /**
+     * Create a minimal game wrapper that loads the project's mainScene automatically.
+     * This is used for "new" projects that provide fluxion.project.json.
+     * @param {any} options
+     */
+    static _createAutoProjectGame(options) {
+        const cfg = (options && typeof options === 'object') ? (options.project || {}) : {};
+        const projectUrl = String(cfg.url || './fluxion.project.json');
+        const fallbackScene = String(cfg.fallbackScene || './scene.xml');
+
+        return {
+            currentScene: null,
+            project: null,
+
+            /** @param {any} renderer */
+            async init(renderer) {
+                let project = null;
+                try {
+                    project = await Project.load(projectUrl);
+                } catch (e) {
+                    // Legacy-ish fallback: if there's no project descriptor, load a default scene.
+                    project = null;
+                }
+
+                this.project = project;
+
+                // Apply project resolution if present.
+                try {
+                    const w = Number(project?.resolution?.width);
+                    const h = Number(project?.resolution?.height);
+                    if (renderer && Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0) {
+                        renderer.targetWidth = w;
+                        renderer.targetHeight = h;
+                        if (typeof renderer.resizeCanvas === 'function') renderer.resizeCanvas();
+                    }
+                } catch {
+                    // ignore
+                }
+
+                const mainScene = String(project?.mainScene || fallbackScene);
+
+                // Resolve mainScene relative to the project descriptor (not the page).
+                let sceneUrl = mainScene;
+                try {
+                    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(mainScene)) {
+                        sceneUrl = mainScene;
+                    } else {
+                        const projAbs = new URL(projectUrl, window.location.href).toString();
+                        const projBase = new URL('.', projAbs).toString();
+                        sceneUrl = new URL(mainScene, projBase).toString();
+                    }
+                } catch {
+                    sceneUrl = mainScene;
+                }
+
+                const scene = await SceneLoader.load(sceneUrl, renderer);
+                this.currentScene = scene;
+            },
+
+            /** @param {number} dt */
+            update(dt) {
+                const s = this.currentScene;
+                if (s && typeof s.update === 'function') s.update(dt);
+            },
+
+            /** @param {any} renderer */
+            draw(renderer) {
+                const s = this.currentScene;
+                if (s && typeof s.draw === 'function') s.draw(renderer);
+            },
+        };
+    }
+
+    /**
      * Creates an instance of the Engine.
-     * @param {string} canvasId - The ID of the HTML canvas element.
+     * @param {string | HTMLCanvasElement} canvasId - The ID of the HTML canvas element (or the canvas element).
      * @param {Object} game - The game instance containing init, update, and draw methods.
      * @param {number} [targetWidth=1920] - The target width of the game resolution.
      * @param {number} [targetHeight=1080] - The target height of the game resolution.
@@ -32,14 +131,24 @@ export default class Engine {
      * }=} options
      */
     constructor(canvasId, game, targetWidth = 1920, targetHeight = 1080, maintainAspectRatio = true, enablePostProcessing = false, options = {}) {
+        const normalizedCanvasId = Engine._normalizeCanvasId(canvasId);
+
+        // If no explicit game object is provided, auto-load the startup scene from fluxion.project.json.
+        const hasUserGame = !!(game && typeof game === 'object');
+        if (!hasUserGame) {
+            game = Engine._createAutoProjectGame(options);
+        }
+
         // Initialize Renderer with aspect ratio settings, post-processing, and WebGL version selection.
         const rendererOptions = (options && typeof options === 'object') ? (options.renderer || {}) : {};
-        this.renderer = new Renderer(canvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing, rendererOptions);
+        this.renderer = new Renderer(normalizedCanvasId, targetWidth, targetHeight, maintainAspectRatio, enablePostProcessing, rendererOptions);
         this.camera = new Camera();
         this.window = new Window();
         
         this.game = game;
+        // @ts-ignore
         this.game.camera = this.camera;
+        // @ts-ignore
         this.game.window = this.window;
         
         this.lastTime = 0;

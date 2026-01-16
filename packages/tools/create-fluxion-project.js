@@ -154,7 +154,7 @@ function main() {
 
   writeFile(path.join(targetDir, 'index.html'), `<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8" />\n  <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n  <title>${projectName.replace(/</g, '&lt;')}</title>\n  <style>\n    html, body { height: 100%; margin: 0; background: #111; overflow: hidden; }\n    canvas { width: 100%; height: 100%; display: block; }\n  </style>\n  <script type="importmap">\n  {\n    "imports": {\n      "gl-matrix": "./node_modules/gl-matrix/esm/index.js",\n      "fluxion": "./node_modules/fluxionwebengine/packages/engine/Fluxion/index.js"\n    }\n  }\n  </script>\n</head>\n<body>\n  <canvas id="gameCanvas"></canvas>\n  <script type="module" src="src/game.js"></script>\n</body>\n</html>\n`);
 
-  writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine, SceneLoader } from 'fluxion';\n\nconst canvas = /** @type {HTMLCanvasElement} */ (document.getElementById('gameCanvas'));\n\n// Minimal game bootstrap\nconst engine = new Engine(canvas);\nconst renderer = engine.renderer;\n\nasync function main() {\n  // Load the project main scene\n  const scene = await SceneLoader.load('./scene.xml', renderer);\n  engine.setScene(scene);\n  engine.start();\n}\n\nmain().catch(console.error);\n`);
+  writeFile(path.join(targetDir, 'src', 'game.js'), `// @ts-check\n\nimport { Engine } from 'fluxion';\n\n// New-project bootstrap:\n// - Reads ./fluxion.project.json\n// - Loads its mainScene automatically\n// - Starts the engine loop\nnew Engine('gameCanvas');\n`);
 
   writeFile(path.join(targetDir, '.gitignore'), `node_modules\n.DS_Store\ndist\n`);
 
