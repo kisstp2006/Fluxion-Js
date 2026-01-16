@@ -813,69 +813,78 @@ function _rebuildInspectorCore(host, ui) {
 
   // Scripts (Unity-like): attach script modules with start()/update(dt)
   {
-    // @ts-ignore - dynamic component
-    if (!Array.isArray(obj.scripts)) obj.scripts = [];
-    // @ts-ignore
-    const scripts = /** @type {any[]} */ (obj.scripts);
-
+    const isDeclaration = !!(obj && typeof obj === 'object' && typeof obj.__xmlTag === 'string');
     const gScripts = InspectorWidgets.createGroup(ui.common, 'Scripts', true);
     try { gScripts?.classList?.add('scriptsCompact'); } catch {}
-    if (gScripts) {
-      const onListChanged = () => {
-        try { host._markInspectorDirty?.(); } catch {}
-        try { host.rebuildInspector?.(); } catch {}
-        try { host.rebuildTree?.(); } catch {}
-      };
 
-      if (scripts.length === 0) {
+    if (gScripts) {
+      if (isDeclaration) {
         const hint = document.createElement('div');
         hint.className = 'hint';
-        hint.textContent = 'No scripts attached.';
+        hint.textContent = 'Scripts can only be attached to scene nodes (not declarations like Mesh/Material/Font/Skybox).';
         gScripts.appendChild(hint);
-      }
+      } else {
+        // @ts-ignore - dynamic component
+        if (!Array.isArray(obj.scripts)) obj.scripts = [];
+        // @ts-ignore
+        const scripts = /** @type {any[]} */ (obj.scripts);
 
-      for (let i = 0; i < scripts.length; i++) {
-        const s = scripts[i];
-        if (!s || typeof s !== 'object') continue;
-        if (s.enabled === undefined) s.enabled = true;
-        if (s.src === undefined) s.src = '';
-
-        InspectorFields.addToggleWith(gScripts, `on ${i + 1}`, s, 'enabled', () => {
-          try { host._blockInspectorAutoRefresh?.(0.2); } catch {}
+        const onListChanged = () => {
+          try { host._markInspectorDirty?.(); } catch {}
+          try { host.rebuildInspector?.(); } catch {}
           try { host.rebuildTree?.(); } catch {}
-        });
+        };
 
-        InspectorFields.addStringWithDrop(gScripts, `src ${i + 1}`, s, 'src', () => {
-          // ScriptRuntime will notice src changes and reload.
-          try { host._blockInspectorAutoRefresh?.(0.25); } catch {}
-          try { host.rebuildTree?.(); } catch {}
-        }, { acceptExtensions: ['.js', '.mjs'], importToWorkspaceUrl: true, debounceMs: 200 });
+        if (scripts.length === 0) {
+          const hint = document.createElement('div');
+          hint.className = 'hint';
+          hint.textContent = 'No scripts attached.';
+          gScripts.appendChild(hint);
+        }
 
-        const btnRemove = document.createElement('button');
-        btnRemove.type = 'button';
-        btnRemove.className = 'btn';
-        btnRemove.textContent = 'Remove';
-        btnRemove.addEventListener('click', () => {
+        for (let i = 0; i < scripts.length; i++) {
+          const s = scripts[i];
+          if (!s || typeof s !== 'object') continue;
+          if (s.enabled === undefined) s.enabled = true;
+          if (s.src === undefined) s.src = '';
+
+          InspectorFields.addToggleWith(gScripts, `on ${i + 1}`, s, 'enabled', () => {
+            try { host._blockInspectorAutoRefresh?.(0.2); } catch {}
+            try { host.rebuildTree?.(); } catch {}
+          });
+
+          InspectorFields.addStringWithDrop(gScripts, `src ${i + 1}`, s, 'src', () => {
+            // ScriptRuntime will notice src changes and reload.
+            try { host._blockInspectorAutoRefresh?.(0.25); } catch {}
+            try { host.rebuildTree?.(); } catch {}
+          }, { acceptExtensions: ['.js', '.mjs'], importToWorkspaceUrl: true, debounceMs: 200 });
+
+          const btnRemove = document.createElement('button');
+          btnRemove.type = 'button';
+          btnRemove.className = 'btn';
+          btnRemove.textContent = 'Remove';
+          btnRemove.addEventListener('click', () => {
+            try {
+              scripts.splice(i, 1);
+            } catch {}
+            onListChanged();
+          });
+          InspectorFields.addField(gScripts, `remove ${i + 1}`, btnRemove);
+        }
+
+        const btnAddCreate = document.createElement('button');
+        btnAddCreate.type = 'button';
+        btnAddCreate.className = 'btn';
+        btnAddCreate.textContent = 'Add / Create Script...';
+        btnAddCreate.addEventListener('click', () => {
           try {
-            scripts.splice(i, 1);
+            if (host && typeof host._createScriptFromEditor === 'function') {
+              Promise.resolve(host._createScriptFromEditor()).catch(console.error);
+            }
           } catch {}
-          onListChanged();
         });
-        InspectorFields.addField(gScripts, `remove ${i + 1}`, btnRemove);
+        InspectorFields.addField(gScripts, 'add', btnAddCreate);
       }
-
-      const btnAddCreate = document.createElement('button');
-      btnAddCreate.type = 'button';
-      btnAddCreate.className = 'btn';
-      btnAddCreate.textContent = 'Add / Create Script...';
-      btnAddCreate.addEventListener('click', () => {
-        try {
-          if (host && typeof host._createScriptFromEditor === 'function') {
-            Promise.resolve(host._createScriptFromEditor()).catch(console.error);
-          }
-        } catch {}
-      });
-      InspectorFields.addField(gScripts, 'add', btnAddCreate);
     }
   }
 

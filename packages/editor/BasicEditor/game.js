@@ -1822,7 +1822,8 @@ const game = {
       }
     })();
 
-    const canAttach = !!this.selected;
+    const isSelectionDeclaration = !!(this.selected && typeof this.selected === 'object' && typeof (/** @type {any} */ (this.selected)).__xmlTag === 'string');
+    const canAttach = !!this.selected && !isSelectionDeclaration;
     /** @type {string[]} */
     const attachedScripts = (() => {
       try {
@@ -1891,7 +1892,8 @@ const game = {
     try { this._assetBrowserCtl?.render?.(); } catch {}
 
     // Attach to selection.
-    if (cfg.attachToSelection && this.selected && typeof this.selected === 'object') {
+    // Note: scene declaration entries (Mesh/Material/Font/Skybox) are not runtime nodes and are not serialized with scripts.
+    if (cfg.attachToSelection && this.selected && typeof this.selected === 'object' && !isSelectionDeclaration) {
       try {
         // @ts-ignore
         if (!Array.isArray(this.selected.scripts)) this.selected.scripts = [];
@@ -3434,8 +3436,11 @@ const game = {
     };
 
     // Cameras: serialize all authored cameras; mark primary via Active="true" when multiple exist.
-    const cams2 = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.filter(Boolean) : [];
+    // Some workflows set scene.camera directly without populating scene.cameras.
+    // In that case, ensure we still serialize the primary camera so edits (including scripts) persist.
+    let cams2 = Array.isArray(this._sceneCameras2D) ? this._sceneCameras2D.filter(Boolean) : [];
     const primary2 = /** @type {any} */ (this._sceneCamera2D || cams2.find(c => c && c.active === true) || cams2[cams2.length - 1] || null);
+    if (cams2.length === 0 && primary2) cams2 = [primary2];
     if (cams2.length > 0) {
       for (const cam2 of cams2) {
         if (!cam2) continue;
@@ -3463,8 +3468,9 @@ const game = {
       lines.push('');
     }
 
-    const cams3 = Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D.filter(Boolean) : [];
+    let cams3 = Array.isArray(this._sceneCameras3D) ? this._sceneCameras3D.filter(Boolean) : [];
     const primary3 = /** @type {any} */ (this._sceneCamera3D || cams3.find(c => c && c.active === true) || cams3[cams3.length - 1] || null);
+    if (cams3.length === 0 && primary3) cams3 = [primary3];
     if (cams3.length > 0) {
       for (const cam3 of cams3) {
         if (!cam3) continue;
