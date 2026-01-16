@@ -17,6 +17,24 @@ import { loadGLTF } from './GLTFLoader.js';
  */
 export default class SceneLoader {
 
+    /**
+     * Assign a back-reference to the owning scene on an object and its children.
+     * Used by ScriptRuntime so scripts can access node.scene.
+     * @param {any} obj
+     * @param {any} scene
+     */
+    static _assignSceneRecursive(obj, scene) {
+        if (!obj || typeof obj !== 'object') return;
+        try { obj.scene = scene; } catch {}
+        const kids = Array.isArray(obj.children) ? obj.children : null;
+        if (kids) {
+            for (const ch of kids) {
+                if (!ch || typeof ch !== 'object') continue;
+                SceneLoader._assignSceneRecursive(ch, scene);
+            }
+        }
+    }
+
         /**
          * Apply XML Material override attributes onto an already-created Material.
          * This is used for both inline <Material> and <Material source="...">.
@@ -498,6 +516,9 @@ export default class SceneLoader {
 
                 const obj = await this.parseObject(child, renderer, baseUrl);
                 if (!obj) continue;
+
+                // Give all nodes a scene back-reference for scripting.
+                SceneLoader._assignSceneRecursive(obj, scene);
 
                 // Preserve source order for editor round-tripping.
                 // @ts-ignore
@@ -1227,10 +1248,30 @@ export default class SceneLoader {
             }
         }
 
+        // Scripts: <Script src="..." enabled="true" />
+        // Stored on any node as: obj.scripts = [{ src, enabled }]
+        if (obj && node && node.children && node.children.length > 0) {
+            for (const childNode of node.children) {
+                if (!childNode || childNode.tagName !== 'Script') continue;
+                const srcRaw = (childNode.getAttribute('src') || childNode.getAttribute('source') || '').trim();
+                if (!srcRaw) continue;
+                const src = SceneLoader._resolveSceneResourceUrl(srcRaw, baseUrl);
+
+                const enabledAttr = childNode.getAttribute('enabled');
+                const enabled = (enabledAttr === null) ? true : (String(enabledAttr).trim().toLowerCase() !== 'false');
+
+                // @ts-ignore - dynamic component
+                if (!Array.isArray(obj.scripts)) obj.scripts = [];
+                // @ts-ignore
+                obj.scripts.push({ src, enabled });
+            }
+        }
+
         // Handle children
         if (obj && obj.addChild) {
              for (const childNode of node.children) {
                  if (childNode.tagName === "Animation") continue;
+                 if (childNode.tagName === "Script") continue;
                  const childObj = await this.parseObject(childNode, renderer, baseUrl);
                  if (childObj) {
                      obj.addChild(childObj);

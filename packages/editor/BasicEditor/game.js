@@ -4,6 +4,7 @@ import { Engine, SceneLoader, Vector3, Mat4, Input, Camera, Camera3D, AnimatedSp
 import Scene from "../../engine/Fluxion/Core/Scene.js";
 import { createAssetBrowser } from "./assetBrowser.js";
 import { createProjectDialog } from "./createProjectDialog.js";
+import { createScriptDialog } from "./createScriptDialog.js";
 import { preserveUiStateDuring } from "./uiStatePreservation.js";
 import MenuBar from "./menuBar.js";
 import { registerMenuActions } from "./menuActions.js";
@@ -100,6 +101,18 @@ const ui = {
   createProjectBrowseBtn: /** @type {HTMLButtonElement|null} */ (null),
   createProjectOkBtn: /** @type {HTMLButtonElement|null} */ (null),
   createProjectCancelBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createScriptModal: /** @type {HTMLDivElement|null} */ (null),
+  createScriptTitle: /** @type {HTMLDivElement|null} */ (null),
+  createScriptSubtitle: /** @type {HTMLDivElement|null} */ (null),
+  createScriptNameInput: /** @type {HTMLInputElement|null} */ (null),
+  createScriptFolderInput: /** @type {HTMLInputElement|null} */ (null),
+  createScriptUseAssetCwdBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createScriptTemplateSelect: /** @type {HTMLSelectElement|null} */ (null),
+  createScriptAttachToggle: /** @type {HTMLInputElement|null} */ (null),
+  createScriptOpenToggle: /** @type {HTMLInputElement|null} */ (null),
+  createScriptOkBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createScriptCancelBtn: /** @type {HTMLButtonElement|null} */ (null),
+  createScriptError: /** @type {HTMLDivElement|null} */ (null),
   projectSelectModal: /** @type {HTMLDivElement|null} */ (null),
   projectSelectCreateBtn: /** @type {HTMLButtonElement|null} */ (null),
   projectSelectOpenBtn: /** @type {HTMLButtonElement|null} */ (null),
@@ -171,6 +184,10 @@ const game = {
   _inspectorLastSelected: null,
   _inspectorLastSceneObjectCount: 0,
   _inspectorNeedsRebuild: false,
+
+  // UI rebuild coalescing (performance)
+  _rebuildTreeQueued: false,
+  _rebuildInspectorQueued: false,
 
   /** @type {'2d' | '3d'} */
   mode: '2d',
@@ -393,6 +410,8 @@ const game = {
   _inspectorRefreshBlockT: 0,
 
   _createProjectDialog: /** @type {ReturnType<typeof createProjectDialog> | null} */ (null),
+  _createScriptDialog: /** @type {ReturnType<typeof createScriptDialog> | null} */ (null),
+  _createScriptLastFolderRel: 'src/scripts',
 
   _assetBrowser: {
     root: '.',
@@ -499,6 +518,19 @@ const game = {
     ui.createProjectOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectOkBtn"));
     ui.createProjectCancelBtn = /** @type {HTMLButtonElement} */ (document.getElementById("createProjectCancelBtn"));
 
+    ui.createScriptModal = /** @type {HTMLDivElement} */ (document.getElementById('createScriptModal'));
+    ui.createScriptTitle = /** @type {HTMLDivElement} */ (document.getElementById('createScriptTitle'));
+    ui.createScriptSubtitle = /** @type {HTMLDivElement} */ (document.getElementById('createScriptSubtitle'));
+    ui.createScriptNameInput = /** @type {HTMLInputElement} */ (document.getElementById('createScriptNameInput'));
+    ui.createScriptFolderInput = /** @type {HTMLInputElement} */ (document.getElementById('createScriptFolderInput'));
+    ui.createScriptUseAssetCwdBtn = /** @type {HTMLButtonElement} */ (document.getElementById('createScriptUseAssetCwdBtn'));
+    ui.createScriptTemplateSelect = /** @type {HTMLSelectElement} */ (document.getElementById('createScriptTemplateSelect'));
+    ui.createScriptAttachToggle = /** @type {HTMLInputElement} */ (document.getElementById('createScriptAttachToggle'));
+    ui.createScriptOpenToggle = /** @type {HTMLInputElement} */ (document.getElementById('createScriptOpenToggle'));
+    ui.createScriptOkBtn = /** @type {HTMLButtonElement} */ (document.getElementById('createScriptOkBtn'));
+    ui.createScriptCancelBtn = /** @type {HTMLButtonElement} */ (document.getElementById('createScriptCancelBtn'));
+    ui.createScriptError = /** @type {HTMLDivElement} */ (document.getElementById('createScriptError'));
+
     ui.projectSelectModal = /** @type {HTMLDivElement} */ (document.getElementById('projectSelectModal'));
     ui.projectSelectCreateBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectCreateBtn'));
     ui.projectSelectOpenBtn = /** @type {HTMLButtonElement} */ (document.getElementById('projectSelectOpenBtn'));
@@ -541,6 +573,8 @@ const game = {
     if (ui.animSpriteModal) ui.animSpriteModal.hidden = true;
     // Ensure Create Project starts closed.
     if (ui.createProjectModal) ui.createProjectModal.hidden = true;
+    // Ensure Create Script starts closed.
+    if (ui.createScriptModal) ui.createScriptModal.hidden = true;
     // Ensure Project Select starts closed (we open it after initial boot).
     if (ui.projectSelectModal) ui.projectSelectModal.hidden = true;
     // Ensure Add Node starts closed.
@@ -706,6 +740,13 @@ const game = {
     });
     this._createProjectDialog.init();
 
+    // Create Script dialog
+    this._createScriptDialog = createScriptDialog({
+      ui: /** @type {any} */ (ui),
+      closeMenus: () => { if (this.menuBar) this.menuBar.closeMenus(); },
+    });
+    this._createScriptDialog.init();
+
     // Initialize docking system
     const leftPanel = /** @type {HTMLElement|null} */ (document.getElementById('leftPanel'));
     const rightPanel = /** @type {HTMLElement|null} */ (document.getElementById('rightPanel'));
@@ -828,6 +869,7 @@ const game = {
           return;
         }
         if (this._createProjectDialog?.isOpen()) this._createProjectDialog.cancel();
+        else if (this._createScriptDialog?.isOpen()) this._createScriptDialog.cancel();
         else if (this._animSpriteOpen) this._closeAnimSpriteEditor();
         else if (this._addNodeOpen) this._closeAddNode();
         else if (this._editorSettingsOpen) this._closeEditorSettings();
@@ -838,7 +880,7 @@ const game = {
       // Delete selected node (viewport/tree selection) with confirmation.
       if (e.key === 'Delete' || e.key === 'Backspace') {
         // Avoid deleting while any modal/dialog is open.
-        if (this._projectSelectOpen || this._addNodeOpen || this._editorSettingsOpen || this._aboutOpen || this._animSpriteOpen || this._createProjectDialog?.isOpen()) {
+        if (this._projectSelectOpen || this._addNodeOpen || this._editorSettingsOpen || this._aboutOpen || this._animSpriteOpen || this._createProjectDialog?.isOpen() || this._createScriptDialog?.isOpen()) {
           return;
         }
         const did = this._confirmAndDeleteSelectedNode();
@@ -1561,6 +1603,152 @@ const game = {
 
   async _openLegacyProjectFolder() {
     return openLegacyProjectFolder(this, /** @type {any} */ (ui));
+  },
+
+  async _createScriptFromEditor() {
+    const electronAPI = /** @type {any} */ (window).electronAPI;
+    const can = !!(electronAPI
+      && typeof electronAPI.writeProjectTextFile === 'function'
+      && typeof electronAPI.readProjectTextFile === 'function'
+      && typeof electronAPI.createProjectDir === 'function');
+
+    if (!can) {
+      alert('Create Script is only available in the Electron editor.');
+      return;
+    }
+
+    const dlg = this._createScriptDialog;
+    if (!dlg) {
+      alert('Create Script dialog is not initialized.');
+      return;
+    }
+
+    /** @param {string} s */
+    const cleanRel = (s) => String(s || '')
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/^\.(?:\/)?/, '')
+      .replace(/^\/+/, '')
+      .replace(/\/+$/, '')
+      .replace(/\/\/+?/g, '/')
+      .trim();
+
+    /** @param {string} s */
+    const ensureExt = (s) => {
+      const v = String(s || '').trim();
+      if (!v) return '';
+      const low = v.toLowerCase();
+      if (low.endsWith('.js') || low.endsWith('.mjs')) return v;
+      return v + '.js';
+    };
+
+    /** @param {string} pathRel */
+    const toWorkspaceUrl = (pathRel) => {
+      const p = cleanRel(pathRel);
+      return p ? `fluxion://workspace/${p}` : '';
+    };
+
+    /** @param {string} base */
+    const toPascal = (base) => {
+      const raw = String(base || '').replace(/\.[^.]+$/, '');
+      const parts = raw.split(/[^a-zA-Z0-9]+/g).filter(Boolean);
+      const out = parts.map((p) => p ? (p[0].toUpperCase() + p.slice(1)) : '').join('');
+      return out || 'NewScript';
+    };
+
+    /** @param {'class'|'functions'|'empty'} template @param {string} fileName */
+    const makeContent = (template, fileName) => {
+      const className = toPascal(fileName);
+      if (template === 'empty') {
+        return `// @ts-check\n\n// ${fileName}\n`;
+      }
+      if (template === 'functions') {
+        return `// @ts-check\n\n// ${fileName}\n// You can export start(ctx) and update(dt, ctx).\n\nexport function start(ctx) {\n  // ctx.node, ctx.scene, ctx.time\n}\n\nexport function update(dt, ctx) {\n  // dt is seconds\n}\n`;
+      }
+      // default: class
+      return `// @ts-check\n\n// ${fileName}\n// Default export can be a class or an object with start/update.\n\nexport default class ${className} {\n  start(ctx) {\n    // this.node, this.scene are injected by ScriptRuntime\n    // ctx.node, ctx.scene, ctx.time\n  }\n\n  update(dt, ctx) {\n    // dt is seconds\n  }\n}\n`;
+    };
+
+    const selLabel = (() => {
+      try {
+        const n = /** @type {any} */ (this.selected)?.name;
+        return n ? `Selected: ${String(n)}` : '';
+      } catch {
+        return '';
+      }
+    })();
+
+    const canAttach = !!this.selected;
+    const initialName = (() => {
+      try {
+        const n = /** @type {any} */ (this.selected)?.name;
+        if (n) return `${String(n).replace(/[^a-zA-Z0-9_\-]/g, '') || 'NewScript'}.js`;
+      } catch {}
+      return 'NewScript.js';
+    })();
+
+    const initialFolderRel = String(this._createScriptLastFolderRel || 'src/scripts');
+
+    const cfg = await dlg.promptOptions({
+      initialName,
+      initialFolderRel,
+      canAttach,
+      selectionLabel: selLabel,
+    });
+    if (!cfg) return;
+
+    const fileName = ensureExt(cfg.name);
+    if (!fileName) return;
+
+    const folderRel = cleanRel(cfg.folderRel || this._createScriptLastFolderRel || 'src/scripts');
+    this._createScriptLastFolderRel = folderRel || this._createScriptLastFolderRel;
+
+    const relPath = cleanRel(folderRel ? `${folderRel}/${fileName}` : fileName);
+    if (!relPath) return;
+
+    // Ensure folder exists (best-effort).
+    if (folderRel) {
+      const mk = await electronAPI.createProjectDir(folderRel);
+      if (!mk || !mk.ok) {
+        alert(`Failed to create folder: ${mk && mk.error ? mk.error : folderRel}`);
+        return;
+      }
+    }
+
+    // Overwrite check.
+    try {
+      const existing = await electronAPI.readProjectTextFile(relPath);
+      if (existing && existing.ok) {
+        const ok = confirm(`"${relPath}" already exists. Overwrite?`);
+        if (!ok) return;
+      }
+    } catch {}
+
+    const content = makeContent(cfg.template, fileName);
+    const wr = await electronAPI.writeProjectTextFile(relPath, content);
+    if (!wr || !wr.ok) {
+      alert(`Failed to write script: ${wr && wr.error ? wr.error : 'Unknown error'}`);
+      return;
+    }
+
+    // Refresh asset browser so the new file appears.
+    try { this._assetBrowserCtl?.render?.(); } catch {}
+
+    // Attach to selection.
+    if (cfg.attachToSelection && this.selected && typeof this.selected === 'object') {
+      try {
+        // @ts-ignore
+        if (!Array.isArray(this.selected.scripts)) this.selected.scripts = [];
+        // @ts-ignore
+        this.selected.scripts.push({ src: toWorkspaceUrl(relPath), enabled: true });
+        try { this._markInspectorDirty?.(); } catch {}
+        try { this.rebuildInspector?.(); } catch {}
+      } catch {}
+    }
+
+    if (cfg.openAfterCreate) {
+      await this._openScript(relPath);
+    }
   },
 
   _loadRecentProjectsFromStorage() {
@@ -2880,6 +3068,7 @@ const game = {
    */
   _serializeNodeXml(obj, indentLevel) {
     const indent = '    '.repeat(Math.max(0, indentLevel));
+    const childIndent = '    '.repeat(Math.max(0, indentLevel + 1));
     /** @param {any} v */
     const esc = (v) => this._xmlEscapeAttr(v);
     /**
@@ -2936,6 +3125,30 @@ const game = {
     };
 
     const ctor = String(obj?.constructor?.name || '');
+
+    /**
+     * Serialize Unity-like scripts as child nodes.
+     * @param {any} o
+     * @returns {string[]}
+     */
+    const serializeScripts = (o) => {
+      const scripts = (o && Array.isArray(o.scripts)) ? o.scripts : [];
+      /** @type {string[]} */
+      const lines = [];
+      for (const s of scripts) {
+        if (!s) continue;
+        const src = String(s.src || '').trim();
+        if (!src) continue;
+        /** @type {string[]} */
+        const parts = [];
+        addAttr(parts, 'src', src);
+        if (Object.prototype.hasOwnProperty.call(s, 'enabled') && s.enabled === false) {
+          addAttr(parts, 'enabled', 'false');
+        }
+        lines.push(`${childIndent}<Script ${parts.join(' ')} />`);
+      }
+      return lines;
+    };
 
     // ClickableArea
     if (ctor === 'ClickableArea' || (obj && obj.width === null && obj.height === null && typeof obj.onClick !== 'undefined')) {
@@ -3053,7 +3266,21 @@ const game = {
           addNumAttr(parts, k, p[k]);
         }
       }
-      return `${indent}<MeshNode ${parts.join(' ')} />`;
+
+      const childLines = [];
+      childLines.push(...serializeScripts(obj));
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
+      for (const ch of children) {
+        const b = this._serializeNodeXml(ch, indentLevel + 1);
+        if (b) childLines.push(b);
+      }
+
+      if (childLines.length === 0) {
+        return `${indent}<MeshNode ${parts.join(' ')} />`;
+      }
+      return `${indent}<MeshNode ${parts.join(' ')}>`
+        + `\n${childLines.join('\n')}\n${indent}</MeshNode>`;
     }
 
     // Text
@@ -3074,12 +3301,10 @@ const game = {
       addAttr(parts, 'fontFamily', obj._fontFamily || obj.fontFamily);
       addAttr(parts, 'color', obj.textColor || obj._textColor);
 
-      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
-      if (children.length === 0) {
-        return `${indent}<Text ${parts.join(' ')} />`;
-      }
-
       const childBlocks = [];
+      childBlocks.push(...serializeScripts(obj));
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
       for (const ch of children) {
         const b = this._serializeNodeXml(ch, indentLevel + 1);
         if (b) childBlocks.push(b);
@@ -3129,6 +3354,8 @@ const game = {
         }
       }
 
+      childLines.push(...serializeScripts(obj));
+
       const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
       for (const ch of children) {
         const b = this._serializeNodeXml(ch, indentLevel + 1);
@@ -3158,11 +3385,10 @@ const game = {
       if (typeof obj.rotation === 'number' && Number.isFinite(obj.rotation) && obj.rotation !== 0) addNumAttr(parts, 'rotation', obj.rotation);
       addAttr(parts, 'imageSrc', obj.imageSrc ?? obj.textureKey ?? '', { allowEmpty: true });
 
-      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
-      if (children.length === 0) {
-        return `${indent}<Sprite ${parts.join(' ')} />`;
-      }
       const childBlocks = [];
+      childBlocks.push(...serializeScripts(obj));
+
+      const children = Array.isArray(obj.children) ? obj.children.filter(Boolean) : [];
       for (const ch of children) {
         const b = this._serializeNodeXml(ch, indentLevel + 1);
         if (b) childBlocks.push(b);
@@ -4656,8 +4882,16 @@ const game = {
   rebuildTree() {
     if (!ui.tree) return;
 
-    preserveUiStateDuring(ui.tree, () => {
-      this._rebuildTreeCore();
+    // Performance: many editor actions can trigger multiple rebuildTree() calls in a row.
+    // Coalesce them into a single microtask so we only rebuild once per tick.
+    if (this._rebuildTreeQueued) return;
+    this._rebuildTreeQueued = true;
+    queueMicrotask(() => {
+      this._rebuildTreeQueued = false;
+      if (!ui.tree) return;
+      preserveUiStateDuring(ui.tree, () => {
+        this._rebuildTreeCore();
+      });
     });
   },
 
@@ -4769,6 +5003,7 @@ const game = {
       }
     }
 
+    const frag = document.createDocumentFragment();
     for (const e of entries) {
       const div = document.createElement('div');
       div.className = 'treeItem' + (e.obj === this.selected ? ' selected' : '');
@@ -4783,8 +5018,10 @@ const game = {
         if (e.obj === this.selected) this._treeSelectedEl = div;
       } catch {}
 
-      tree.appendChild(div);
+      frag.appendChild(div);
     }
+
+    tree.appendChild(frag);
   },
 
   /**
@@ -5010,10 +5247,17 @@ const game = {
   },
 
   rebuildInspector() {
-    rebuildInspectorPanel(this, /** @type {any} */ (ui));
+    // Performance: coalesce multiple rebuild requests into a single microtask.
+    // Clear the dirty flag immediately so the main update loop doesn't repeatedly call us.
     this._inspectorNeedsRebuild = false;
-    this._inspectorLastSelected = this.selected;
-    this._inspectorLastSceneObjectCount = this._getSceneObjectCount();
+    if (this._rebuildInspectorQueued) return;
+    this._rebuildInspectorQueued = true;
+    queueMicrotask(() => {
+      this._rebuildInspectorQueued = false;
+      rebuildInspectorPanel(this, /** @type {any} */ (ui));
+      this._inspectorLastSelected = this.selected;
+      this._inspectorLastSceneObjectCount = this._getSceneObjectCount();
+    });
   },
 
   syncInspector() {

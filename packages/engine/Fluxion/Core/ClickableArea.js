@@ -1,4 +1,5 @@
 import Input from './Input.js';
+import { updateNodeScripts } from './ScriptRuntime.js';
 
 /**
  * Represents a clickable area that can detect mouse interactions.
@@ -49,6 +50,9 @@ export default class ClickableArea {
      */
     update(dt, camera) {
         if (!this.active) return;
+
+        // Unity-like scripts: start() once, update(dt) every frame.
+        try { updateNodeScripts(this, dt); } catch {}
 
         // If we have no parent, we can only function if a world-space rectangle is defined.
         // (Most common usage is as a child of a Sprite, so parent is expected.)

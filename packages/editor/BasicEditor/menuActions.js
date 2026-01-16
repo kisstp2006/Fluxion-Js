@@ -36,7 +36,35 @@ export function registerMenuActions(host, ui, renderer) {
   });
 
   host.menuBar.registerAction('file.exportGame', () => {
-    alert('Export Game is not implemented yet.');
+    (async () => {
+      const electronAPI = /** @type {any} */ ((/** @type {any} */ (window)).electronAPI || null);
+      if (!electronAPI || typeof electronAPI.selectFolder !== 'function') {
+        alert('Export is only available in the Electron editor.');
+        return;
+      }
+      if (typeof electronAPI.exportGame !== 'function') {
+        alert('Export requires an updated Electron host (export-game IPC missing).');
+        return;
+      }
+
+      const pick = await electronAPI.selectFolder();
+      if (!pick || pick.canceled) return;
+
+      const destDirAbs = String(pick.path || '').trim();
+      if (!destDirAbs) return;
+
+      const res = await electronAPI.exportGame({ destDirAbs });
+      if (!res || !res.ok) {
+        alert(`Export failed: ${res && res.error ? res.error : 'Unknown error'}`);
+        return;
+      }
+
+      const out = String(res.outputDir || '').trim();
+      alert(out ? `Export stub created at:\n${out}` : 'Export stub completed.');
+    })().catch((err) => {
+      console.error(err);
+      alert(`Export failed: ${String(err && err.message ? err.message : err)}`);
+    });
   });
 
   host.menuBar.registerAction('app.reload', () => {
@@ -58,6 +86,10 @@ export function registerMenuActions(host, ui, renderer) {
 
   host.menuBar.registerAction('scene.addNode', () => {
     host._openAddNode();
+  });
+
+  host.menuBar.registerAction('scene.createScript', () => {
+    host._createScriptFromEditor?.().catch?.(console.error);
   });
 
   host.menuBar.registerAction('view.mode2d', () => {

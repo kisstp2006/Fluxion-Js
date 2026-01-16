@@ -811,6 +811,80 @@ function _rebuildInspectorCore(host, ui) {
     InspectorFields.addOpacity01(ui.common, 'opacity', obj);
   }
 
+  // Scripts (Unity-like): attach script modules with start()/update(dt)
+  {
+    // @ts-ignore - dynamic component
+    if (!Array.isArray(obj.scripts)) obj.scripts = [];
+    // @ts-ignore
+    const scripts = /** @type {any[]} */ (obj.scripts);
+
+    const gScripts = InspectorWidgets.createGroup(ui.common, 'Scripts', true);
+    if (gScripts) {
+      const onListChanged = () => {
+        try { host._markInspectorDirty?.(); } catch {}
+        try { host.rebuildInspector?.(); } catch {}
+      };
+
+      if (scripts.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'hint';
+        hint.textContent = 'No scripts attached.';
+        gScripts.appendChild(hint);
+      }
+
+      for (let i = 0; i < scripts.length; i++) {
+        const s = scripts[i];
+        if (!s || typeof s !== 'object') continue;
+        if (s.enabled === undefined) s.enabled = true;
+        if (s.src === undefined) s.src = '';
+
+        InspectorFields.addToggleWith(gScripts, `enabled ${i + 1}`, s, 'enabled', () => {
+          try { host._blockInspectorAutoRefresh?.(0.2); } catch {}
+        });
+
+        InspectorFields.addStringWithDrop(gScripts, `script ${i + 1}`, s, 'src', () => {
+          // ScriptRuntime will notice src changes and reload.
+          try { host._blockInspectorAutoRefresh?.(0.25); } catch {}
+        }, { acceptExtensions: ['.js', '.mjs'], importToWorkspaceUrl: true, debounceMs: 200 });
+
+        const btnRemove = document.createElement('button');
+        btnRemove.type = 'button';
+        btnRemove.className = 'btn';
+        btnRemove.textContent = 'Remove';
+        btnRemove.addEventListener('click', () => {
+          try {
+            scripts.splice(i, 1);
+          } catch {}
+          onListChanged();
+        });
+        InspectorFields.addField(gScripts, `remove ${i + 1}`, btnRemove);
+      }
+
+      const btnAdd = document.createElement('button');
+      btnAdd.type = 'button';
+      btnAdd.className = 'btn';
+      btnAdd.textContent = 'Add Script';
+      btnAdd.addEventListener('click', () => {
+        try { scripts.push({ src: '', enabled: true }); } catch {}
+        onListChanged();
+      });
+      InspectorFields.addField(gScripts, 'add', btnAdd);
+
+      const btnCreate = document.createElement('button');
+      btnCreate.type = 'button';
+      btnCreate.className = 'btn';
+      btnCreate.textContent = 'Create Script...';
+      btnCreate.addEventListener('click', () => {
+        try {
+          if (host && typeof host._createScriptFromEditor === 'function') {
+            Promise.resolve(host._createScriptFromEditor()).catch(console.error);
+          }
+        } catch {}
+      });
+      InspectorFields.addField(gScripts, 'create', btnCreate);
+    }
+  }
+
   // Text fill color (CSS string) is separate from Sprite tint.
   if (obj && (typeof obj.textColor === 'string' || typeof obj._textColor === 'string')) {
     InspectorFields.addCssColor(ui.common, 'color', obj, 'textColor');

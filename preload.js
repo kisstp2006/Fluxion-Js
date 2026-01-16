@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFile: (opts) => ipcRenderer.invoke('select-file', opts),
   createProject: (opts) => ipcRenderer.invoke('create-fluxion-project', opts),
 
+  // Export game (first-step stub)
+  exportGame: (payload) => ipcRenderer.invoke('export-game', payload),
+
   // Version helpers (About dialog)
   getVersions: () => ipcRenderer.invoke('get-versions'),
 

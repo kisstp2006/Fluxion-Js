@@ -539,6 +539,50 @@ if (!gotTheLock) {
     }
   });
 
+  // Export game (first-step stub): create an export folder and write a placeholder manifest.
+  // payload: { destDirAbs: string }
+  ipcMain.handle('export-game', async (_event, payload) => {
+    try {
+      if (app.isPackaged) {
+        return { ok: false, error: 'App is packaged; export stub is disabled for now.' };
+      }
+
+      const destDirAbs = path.resolve(String(payload?.destDirAbs || ''));
+      if (!destDirAbs) return { ok: false, error: 'Missing destDirAbs.' };
+
+      const st = await fs.promises.stat(destDirAbs);
+      if (!st.isDirectory()) return { ok: false, error: 'Destination is not a directory.' };
+
+      // Create a unique output folder under the destination.
+      const outDirAbs = pickUniqueDestPath(destDirAbs, 'ExportedGame');
+      await fs.promises.mkdir(outDirAbs, { recursive: true });
+
+      const manifest = {
+        kind: 'fluxion-export-stub',
+        exportedAt: new Date().toISOString(),
+        workspaceRootAbs: getWorkspaceRootAbs(),
+        note: 'This is the first step of Export Game. Next steps: copy assets, write project index.html, bundle engine, etc.'
+      };
+
+      await fs.promises.writeFile(
+        path.join(outDirAbs, 'export-manifest.json'),
+        JSON.stringify(manifest, null, 2) + '\n',
+        'utf8'
+      );
+
+      await fs.promises.writeFile(
+        path.join(outDirAbs, 'README_EXPORT.txt'),
+        'Export Game is not implemented yet. This folder proves the end-to-end export wiring works.\n',
+        'utf8'
+      );
+
+      return { ok: true, outputDir: outDirAbs };
+    } catch (err) {
+      console.error('export-game failed', err);
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+
   // List a directory inside the project root (dev workflow).
   // Returns {ok, path, entries, error?} where path is normalized with forward slashes.
   ipcMain.handle('list-project-dir', async (event, relativePath) => {
@@ -869,13 +913,24 @@ if (!gotTheLock) {
       const rel = String(payload?.relativePath ?? '').replace(/^\/+/, '');
       if (!rel) return { ok: false, error: 'No file path provided.' };
 
-      if (!rel.toLowerCase().endsWith('.js')) return { ok: false, error: 'Only .js files are supported.' };
+      const lower = rel.toLowerCase();
+      const okText = lower.endsWith('.js') || lower.endsWith('.mjs');
+      if (!okText) return { ok: false, error: 'Only .js/.mjs files are supported.' };
 
       const abs = resolveWorkspaceRelPath(rel);
       if (!abs) return { ok: false, error: 'Refusing to write outside workspace root.' };
 
-      const st = await fs.promises.stat(abs);
-      if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
+      // Allow creating new files. If it exists, ensure it's a file.
+      try {
+        const st = await fs.promises.stat(abs);
+        if (!st.isFile()) return { ok: false, error: 'Target is not a file.' };
+      } catch (err) {
+        const code = String(err && err.code ? err.code : '');
+        if (code && code !== 'ENOENT') throw err;
+      }
+
+      // Ensure parent directories exist.
+      try { await fs.promises.mkdir(path.dirname(abs), { recursive: true }); } catch {}
 
       await fs.promises.writeFile(abs, String(payload?.content ?? ''), 'utf8');
       return { ok: true };

@@ -376,6 +376,44 @@
     </div>
   </div>
 
+  <div id="createScriptModal" class="modalBackdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="createScriptTitle">
+      <div class="modalHeader">
+        <div>
+          <div id="createScriptTitle" class="modalTitle">Create Script</div>
+          <div id="createScriptSubtitle" class="aboutMeta"></div>
+        </div>
+        <button id="createScriptCancelBtn" class="menuBtn" type="button" aria-label="Close">Close</button>
+      </div>
+      <div class="modalBody">
+        <div class="sectionTitle">Script Name</div>
+        <input id="createScriptNameInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="MyScript.js" />
+
+        <div class="sectionTitle" style="margin-top: 12px;">Folder (project-relative)</div>
+        <div class="row">
+          <input id="createScriptFolderInput" class="input" type="text" autocomplete="off" spellcheck="false" placeholder="src/scripts" />
+          <button id="createScriptUseAssetCwdBtn" class="btn" type="button">Use Asset Folder</button>
+        </div>
+
+        <div class="sectionTitle" style="margin-top: 12px;">Template</div>
+        <select id="createScriptTemplateSelect" class="input" aria-label="Script Template">
+          <option value="class" selected>Behavior (default export class)</option>
+          <option value="functions">Module (export start/update)</option>
+          <option value="empty">Empty</option>
+        </select>
+
+        <div class="sectionTitle" style="margin-top: 12px;">Options</div>
+        <label class="checkRow"><input type="checkbox" id="createScriptAttachToggle" checked /> Attach to selected node</label>
+        <label class="checkRow"><input type="checkbox" id="createScriptOpenToggle" checked /> Open in Script Editor</label>
+
+        <div id="createScriptError" class="animError" aria-live="polite" style="margin-top: 10px; display:none;"></div>
+      </div>
+      <div class="modalFooter">
+        <button id="createScriptOkBtn" class="btn" type="button">Create</button>
+      </div>
+    </div>
+  </div>
+
   <div id="addNodeModal" class="modalBackdrop" hidden>
     <div class="modal modalNode" role="dialog" aria-modal="true" aria-labelledby="addNodeTitle">
       <div class="modalHeader">

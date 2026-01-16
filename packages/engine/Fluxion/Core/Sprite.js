@@ -1,6 +1,8 @@
 /**
  * Represents a 2D sprite object that can be rendered on the screen.
  */
+import { updateNodeScripts } from './ScriptRuntime.js';
+
 export default class Sprite {
     /**
      * Creates an instance of Sprite.
@@ -103,6 +105,9 @@ export default class Sprite {
      */
     update(dt, camera) {
         if (!this.active) return;
+
+        // Unity-like scripts: start() once, update(dt) every frame.
+        try { updateNodeScripts(this, dt); } catch {}
 
         // Handle camera following
         if (this.followCamera && camera) {

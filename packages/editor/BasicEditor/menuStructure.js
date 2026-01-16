@@ -42,6 +42,7 @@ export function registerMenuStructure(menuBar) {
     { type: 'item', label: 'Focus Selection (F)', action: 'scene.focusSelection' },
     { type: 'separator' },
     { type: 'item', label: 'Add Node...', action: 'scene.addNode' },
+    { type: 'item', label: 'Create Script...', action: 'scene.createScript' },
   ]);
 
   // Register Help menu items

@@ -6,6 +6,7 @@
 import Mesh from './Mesh.js';
 import { Mat4 } from './Math3D.js';
 import Material from './Material.js';
+import { updateNodeScripts } from './ScriptRuntime.js';
 
 export default class MeshNode {
   constructor() {
@@ -136,6 +137,10 @@ export default class MeshNode {
    */
   update(dt, _camera) {
     if (!this.active) return;
+
+    // Unity-like scripts: start() once, update(dt) every frame.
+    try { updateNodeScripts(this, dt); } catch {}
+
     for (const child of this.children) {
       if (child && typeof child.update === 'function') child.update(dt, _camera);
     }
