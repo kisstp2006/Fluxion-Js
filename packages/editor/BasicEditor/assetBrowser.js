@@ -108,7 +108,7 @@ export function createAssetBrowser(opts) {
 
     // Right: current folder contents
     const cwdRes = await list(cwd);
-    const entries = (cwdRes.entries || []).filter((ent) => {
+    const entries = (cwdRes.entries || []).filter((/** @type {any} */ ent) => {
       if (!ent) return false;
       if (ent.isDir) return true;
       return !isHiddenPath(ent.path);

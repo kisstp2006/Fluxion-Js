@@ -928,6 +928,18 @@ const game = {
           .replace(/\/+$/, '');
         if (!cleanRel) return;
 
+        // Guardrail: only attach scripts that actually exist on disk.
+        try {
+          const api = /** @type {any} */ (window).electronAPI;
+          if (api && typeof api.readProjectTextFile === 'function') {
+            api.readProjectTextFile(cleanRel).then((/** @type {any} */ res) => {
+              if (!res || !res.ok) {
+                alert(`Script file not found: ${cleanRel}`);
+              }
+            }).catch(() => {});
+          }
+        } catch {}
+
         const src = `fluxion://workspace/${cleanRel}`;
 
         try {
